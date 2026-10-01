@@ -26,6 +26,14 @@
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { AccessToken, EgressStatus } from "livekit-server-sdk";
+import {
+  jobIdForServer,
+  loadDirectory,
+  rankServers,
+  serverForJobId,
+  serverIdFromJobId,
+  type DirectoryDeps,
+} from "@/lib/recorder-directory";
 
 export const RECORDER_SIGNATURE_HEADER = "x-recorder-signature";
 export const RECORDER_TIMESTAMP_HEADER = "x-recorder-timestamp";
@@ -67,12 +75,22 @@ export function recorderConfig(env: Env = process.env): RecorderConfig | null {
 }
 
 /**
+ * Fleet mode (`RECORDER_FLEET=1`): the recorder servers are created and deleted on demand by the fleet manager,
+ * so there is no fixed `RECORDER_URL`; the LMS reads the current servers from the directory instead
+ * (see recorder-directory.ts). Off by default: with it unset everything behaves as before.
+ */
+export function recorderFleetMode(env: Env = process.env): boolean {
+  return String(env.RECORDER_FLEET ?? "").trim() === "1";
+}
+
+/**
  * True when a recording should be attempted through our recorder. Asking for
  * the recorder without configuring it quietly stays on LiveKit — a half-set env
  * must never mean "no recording at all".
  */
 export function recorderSelected(env: Env = process.env): boolean {
-  return recordingBackend(env) !== "livekit" && recorderConfig(env) !== null;
+  if (recordingBackend(env) === "livekit") return false;
+  return recorderConfig(env) !== null || (recorderFleetMode(env) && recorderSecret(env) !== null);
 }
 
 /** The public origin the recorder's browser and callbacks must reach. Never localhost. */
@@ -185,39 +203,79 @@ export type StartRecorderResult =
  * so the id it returns — not the one we proposed — is the one to store. That is
  * what makes the tutor's 45-second heartbeat (which calls start every time) safe.
  */
+/** In fleet mode: at most this many servers are tried, each with a short timeout, before the class falls back to LiveKit. */
+const FLEET_MAX_ATTEMPTS = 3;
+const FLEET_ATTEMPT_TIMEOUT_MS = 4_000;
+
 export async function startRecorderJob(
   input: { roomName: string; objectKey: string; jobId: string },
   env: Env = process.env,
+  deps: DirectoryDeps = {},
 ): Promise<StartRecorderResult> {
-  const config = recorderConfig(env);
+  const secret = recorderSecret(env);
   const base = recorderAppBase(env);
   const livekitUrl = env.LIVEKIT_URL;
-  if (!config || !base || !livekitUrl) return { ok: false, reason: "not_configured" };
+  if (!secret || !base || !livekitUrl) return { ok: false, reason: "not_configured" };
 
-  try {
-    const response = await callRecorder(config, "POST", "/v1/jobs", {
-      jobId: input.jobId,
-      roomName: input.roomName,
-      pageUrl: `${base}/live/egress-template`,
-      livekitUrl,
-      token: await mintRecorderToken({ roomName: input.roomName, jobId: input.jobId }, env),
-      objectKey: input.objectKey,
-      callbackUrl: `${base}/api/recorder/callback`,
-    });
-    if (response.status === 503) return { ok: false, reason: "at_capacity" };
-    if (!response.ok) return { ok: false, reason: "rejected", detail: `HTTP ${response.status}` };
-    const json = (await response.json()) as { created?: boolean; job?: { request?: { jobId?: string } } };
-    const jobId = json.job?.request?.jobId;
-    if (!jobId) return { ok: false, reason: "rejected", detail: "no job id in response" };
-    return { ok: true, jobId, created: Boolean(json.created) };
-  } catch (error) {
-    return { ok: false, reason: "unreachable", detail: String(error) };
+  // Where to try, in order. One fixed recorder (the original setup), or the fleet's servers that have room,
+  // each with a job id that names its server so a later stop/status call finds the same machine.
+  const fleet = recorderFleetMode(env);
+  const targets: { url: string; jobId: string }[] = [];
+  if (fleet) {
+    const directory = await loadDirectory(deps);
+    for (const server of directory ? rankServers(directory) : []) targets.push({ url: server.url, jobId: jobIdForServer(server) });
+    if (targets.length === 0) return { ok: false, reason: "at_capacity", detail: "no recorder server is open for work right now" };
+  } else {
+    const config = recorderConfig(env);
+    if (!config) return { ok: false, reason: "not_configured" };
+    targets.push({ url: config.url, jobId: input.jobId });
   }
+
+  let last: StartRecorderResult = { ok: false, reason: "unreachable" };
+  for (const target of targets.slice(0, fleet ? FLEET_MAX_ATTEMPTS : 1)) {
+    try {
+      const response = await callRecorder({ url: target.url, secret }, "POST", "/v1/jobs", {
+        jobId: target.jobId,
+        roomName: input.roomName,
+        pageUrl: `${base}/live/egress-template`,
+        livekitUrl,
+        token: await mintRecorderToken({ roomName: input.roomName, jobId: target.jobId }, env),
+        objectKey: input.objectKey,
+        callbackUrl: `${base}/api/recorder/callback`,
+      }, fleet ? FLEET_ATTEMPT_TIMEOUT_MS : undefined);
+      if (response.status === 503) { last = { ok: false, reason: "at_capacity" }; continue; }
+      if (!response.ok) { last = { ok: false, reason: "rejected", detail: `HTTP ${response.status}` }; continue; }
+      const json = (await response.json()) as { created?: boolean; job?: { request?: { jobId?: string } } };
+      const jobId = json.job?.request?.jobId;
+      if (!jobId) { last = { ok: false, reason: "rejected", detail: "no job id in response" }; continue; }
+      return { ok: true, jobId, created: Boolean(json.created) };
+    } catch (error) {
+      last = { ok: false, reason: "unreachable", detail: String(error) };
+    }
+  }
+  return last;
 }
 
-export async function stopRecorderJob(jobId: string, env: Env = process.env): Promise<boolean> {
+/**
+ * Which server holds this job. A fleet job id names its server; look that server up in the directory. Jobs
+ * from the original single-recorder setup (UUIDs) go to the fixed URL. `gone` means the job belongs to a server
+ * that no longer exists, which is a different answer from "could not reach it right now".
+ */
+async function serverFor(jobId: string, env: Env, deps: DirectoryDeps): Promise<{ config: RecorderConfig } | "gone" | null> {
+  const secret = recorderSecret(env);
+  if (!secret) return null;
+  if (serverIdFromJobId(jobId)) {
+    const server = serverForJobId(await loadDirectory(deps), jobId);
+    return server ? { config: { url: server.url, secret } } : "gone";
+  }
   const config = recorderConfig(env);
-  if (!config) return false;
+  return config ? { config } : null;
+}
+
+export async function stopRecorderJob(jobId: string, env: Env = process.env, deps: DirectoryDeps = {}): Promise<boolean> {
+  const target = await serverFor(jobId, env, deps);
+  if (!target || target === "gone") return false;
+  const config = target.config;
   try {
     const response = await callRecorder(config, "POST", `/v1/jobs/${encodeURIComponent(jobId)}/stop`, {});
     return response.ok;
@@ -235,9 +293,11 @@ export type RecorderJobView = {
 };
 
 /** null = the recorder does not know this job (never started, or its disk was wiped). */
-export async function getRecorderJob(jobId: string, env: Env = process.env): Promise<RecorderJobView | null | "unreachable"> {
-  const config = recorderConfig(env);
-  if (!config) return "unreachable";
+export async function getRecorderJob(jobId: string, env: Env = process.env, deps: DirectoryDeps = {}): Promise<RecorderJobView | null | "unreachable"> {
+  const target = await serverFor(jobId, env, deps);
+  if (target === "gone") return null; // its server has been switched off: the recorder has no record of it
+  if (!target) return "unreachable";
+  const config = target.config;
   try {
     const response = await callRecorder(config, "GET", `/v1/jobs/${encodeURIComponent(jobId)}`);
     if (response.status === 404) return null;
