@@ -12,9 +12,13 @@ interface Student {
   name: string;
   email: string;
   branch: string;
-  present: boolean;
-  status?: 'present' | 'late' | 'absent';
+  /** null = nobody has marked this student. Never defaulted. */
+  present: boolean | null;
+  status: 'present' | 'late' | 'absent' | null;
+  notStarted?: boolean;
 }
+
+type Mark = 'present' | 'late' | 'absent';
 
 interface AttendanceSession {
   id: string;
@@ -103,17 +107,32 @@ export default function LecturerAttendance() {
     }
   }
 
-  function toggleAttendance(studentId: string) {
-    setStudents(
-      students.map((s) =>
-        s.id === studentId
-          ? { ...s, present: s.status === 'absent', status: s.status === 'present' ? 'late' : s.status === 'late' ? 'absent' : 'present' }
-          : s
-      )
+  // Tapping the mark a student already has clears it back to "not marked".
+  function setMark(studentId: string, mark: Mark) {
+    setStudents((prev) =>
+      prev.map((s) =>
+        s.id === studentId && !s.notStarted
+          ? s.status === mark
+            ? { ...s, status: null, present: null }
+            : { ...s, status: mark, present: mark !== 'absent' }
+          : s,
+      ),
+    );
+  }
+
+  // An explicit tutor action, never a default.
+  function markEveryonePresent() {
+    setStudents((prev) =>
+      prev.map((s) => (s.notStarted || s.status ? s : { ...s, status: 'present', present: true })),
     );
   }
 
   async function handleSubmit() {
+    const marked = students.filter((s) => s.status && !s.notStarted);
+    if (marked.length === 0) {
+      setError('Mark at least one student before saving.');
+      return;
+    }
     setMarking(true);
     try {
       const res = await fetch('/api/lecturer/attendance', {
@@ -122,7 +141,7 @@ export default function LecturerAttendance() {
         body: JSON.stringify({
           courseId: selectedCourse,
           date: selectedDate,
-          attendance: students.map((s) => ({
+          attendance: marked.map((s) => ({
             studentId: s.id,
             present: s.present,
             status: s.status,
@@ -133,7 +152,7 @@ export default function LecturerAttendance() {
       if (!res.ok) throw new Error('Failed to save attendance');
 
       setError('');
-      setSaved(`Attendance saved for ${students.length} student${students.length === 1 ? '' : 's'}.`);
+      setSaved(`Attendance saved for ${marked.length} student${marked.length === 1 ? '' : 's'}.`);
       window.setTimeout(() => setSaved(''), 4000);
       fetchSessions();
     } catch (err) {
@@ -296,7 +315,7 @@ export default function LecturerAttendance() {
                 </label>
                 <div className="px-4 py-2 bg-[var(--surface-alt)] rounded-lg">
                   <p className="text-sm text-[var(--foreground)]">
-                    <strong>{students.filter((s) => s.status === 'present').length}</strong> present · {students.filter((s) => s.status === 'late').length} late · {students.filter((s) => s.status === 'absent').length} absent
+                    <strong>{students.filter((s) => s.status === 'present').length}</strong> present · {students.filter((s) => s.status === 'late').length} late · {students.filter((s) => s.status === 'absent').length} absent · {students.filter((s) => !s.status && !s.notStarted).length} not marked
                   </p>
                 </div>
               </div>
@@ -349,18 +368,33 @@ export default function LecturerAttendance() {
                         <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.email}</td>
                         <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.branch}</td>
                         <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => toggleAttendance(student.id)}
-                            className={`inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-sm font-semibold transition-colors ${
-                              student.status === 'present'
-                                ? 'bg-green-100 text-green-700'
-                                : student.status === 'late'
-                                  ? 'bg-amber-100 text-amber-700'
-                                  : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            {student.status === 'present' ? <><CheckIcon className="h-3.5 w-3.5" /> Present</> : student.status === 'late' ? 'Late' : <><CrossIcon className="h-3.5 w-3.5" /> Absent</>}
-                          </button>
+                          {student.notStarted ? (
+                            <span className="text-sm text-[var(--muted)]">Classes haven&apos;t started</span>
+                          ) : (
+                            <div className="inline-flex gap-1.5">
+                              {([
+                                ['present', 'Present', 'bg-green-100 text-green-700 ring-green-400'],
+                                ['late', 'Late', 'bg-amber-100 text-amber-700 ring-amber-400'],
+                                ['absent', 'Absent', 'bg-red-100 text-red-700 ring-red-400'],
+                              ] as const).map(([mark, label, tone]) => (
+                                <button
+                                  key={mark}
+                                  type="button"
+                                  onClick={() => setMark(student.id, mark)}
+                                  aria-pressed={student.status === mark}
+                                  className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold transition-colors ${
+                                    student.status === mark
+                                      ? `${tone} ring-2`
+                                      : 'bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]'
+                                  }`}
+                                >
+                                  {mark === 'present' && student.status === mark && <CheckIcon className="h-3.5 w-3.5" />}
+                                  {mark === 'absent' && student.status === mark && <CrossIcon className="h-3.5 w-3.5" />}
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -375,6 +409,12 @@ export default function LecturerAttendance() {
                   className="px-6 py-2 border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:bg-[var(--surface-alt)] transition-colors"
                 >
                   Reset
+                </button>
+                <button
+                  onClick={markEveryonePresent}
+                  className="px-6 py-2 border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:bg-[var(--surface-alt)] transition-colors"
+                >
+                  Mark everyone not yet marked as present
                 </button>
                 <button
                   onClick={handleSubmit}
