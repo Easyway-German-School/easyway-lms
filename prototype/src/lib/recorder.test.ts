@@ -74,6 +74,10 @@ describe("request signing (must match the recorder service exactly)", () => {
     expect(signRecorderBody(secret, "1700000000000", '{"a":1}')).toBe(signRecorderBody(secret, "1700000000000", '{"a":1}'));
   });
 
+  it("signs exactly as the recorder fleet manager does (fixed vector, asserted in the recorder repo too)", () => {
+    expect(signRecorderBody("s".repeat(40), "1790000000000", "hours=48")).toBe("sha256=f8ab0218f27e7c59fe58bc3b879f428abe421deb22eeb3b68a06f1b93ad5c784");
+  });
+
   it("accepts a fresh signed request and refuses tampering, wrong secret and replays", () => {
     const ts = String(Date.now());
     const body = '{"jobId":"job-12345678"}';
