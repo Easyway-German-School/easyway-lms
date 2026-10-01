@@ -36,7 +36,7 @@ describe("resolveJourneyAudience", () => {
     ).toBeNull();
   });
 
-  it("does not open mid-batch", () => {
+  it("opens the halfway route a month into a level that is still running", () => {
     expect(
       resolveJourneyAudience({
         level: "A1",
@@ -46,7 +46,19 @@ describe("resolveJourneyAudience", () => {
         hasAttended: true,
         now,
       }),
-    ).toBeNull();
+    ).toEqual({ state: "midway", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("keeps a brand-new October intake out until it has had its first month", () => {
+    const base = {
+      level: "A1",
+      admission: { batch: "October" },
+      createdAt: created,
+      classesStartedAt: new Date("2026-10-05T00:00:00Z"),
+      hasAttended: true,
+    };
+    expect(resolveJourneyAudience({ ...base, now: new Date("2026-10-20T09:00:00Z") })).toBeNull();
+    expect(resolveJourneyAudience({ ...base, now: new Date("2026-11-08T09:00:00Z") })?.state).toBe("midway");
   });
 
   it("stops welcoming people long after the batch ended", () => {

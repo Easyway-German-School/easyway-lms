@@ -330,7 +330,9 @@ export default function NextLevelJourney() {
                   className="pointer-events-none absolute left-1/2 top-24 h-40 w-40 -translate-x-1/2 rounded-full border border-white/25"
                 />
               ))}
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">Level complete</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">
+                {audience.state === "midway" ? `A month into ${audience.finishedLevel}` : "Level complete"}
+              </p>
 
               <div className="relative mx-auto mt-3 h-40 w-40">
                 <Mascot mood="celebrating" className="h-full w-full" />
@@ -353,7 +355,8 @@ export default function NextLevelJourney() {
 
               <h1 className="mt-5 text-2xl font-extrabold leading-tight sm:text-3xl">{recap.headline}</h1>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/85">
-                I put together what you achieved and a {target} plan built around how <em>you</em> learn. Two minutes, and your seat can be kept.
+                I put together what you achieved and a {target} plan built around how <em>you</em> learn.{" "}
+                {audience.state === "midway" ? "Two minutes, and the office can keep your place early." : "Two minutes, and your seat can be kept."}
               </p>
               <button
                 onClick={() => go(1)}
@@ -369,7 +372,7 @@ export default function NextLevelJourney() {
           <motion.section key="s1" {...slide} className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-xl">
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[var(--accent)]">Your {audience.finishedLevel} in numbers</p>
             <h2 className="mt-1 text-xl font-bold text-[var(--foreground)]">
-              {recap.thin ? "Every level starts with showing up." : "This is what you built."}
+              {recap.thin ? "Every level starts with showing up." : audience.state === "midway" ? "This is what you have built so far." : "This is what you built."}
             </h2>
 
             {recap.stats.length > 0 ? (
@@ -610,7 +613,9 @@ export default function NextLevelJourney() {
                         ) : (
                           <p className="mt-1 text-[var(--muted)]">
                             {offer.sellableOnline
-                              ? "Your results are being finalised. The moment payment opens, we will message you — your seat stays held."
+                              ? audience.state === "midway"
+                                ? `Nothing to pay yet. Payment for ${target} opens when you finish ${audience.finishedLevel} — we will message you, and your place stays held.`
+                                : "Your results are being finalised. The moment payment opens, we will message you — your seat stays held."
                               : `${target} is quoted by your branch office. They will reach you to confirm.`}
                           </p>
                         )}

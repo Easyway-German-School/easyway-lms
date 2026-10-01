@@ -6,6 +6,7 @@ import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { SESSION_MONTHS, sessionDurationMonths, weeksOfTeachingFor } from "@/lib/levels";
 import { DEPOSIT_RATE, isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { loadStudentLedger } from "@/lib/tuition-charges";
+import { getStudentAccess } from "@/lib/student-access";
 import { zonedTimeToInstant } from "@/lib/school-time";
 import { goalFor, isKnownGoal } from "@/lib/germany-goals";
 import { KIND, notify } from "@/lib/notify";
@@ -45,6 +46,13 @@ export type JourneyOffer = {
 
 export type JourneyPayload = {
   audience: JourneyAudience;
+  /**
+   * Their portal is open right now — they have paid at least the deposit and are
+   * not locked. The Becca pop, the bell and the email only go to these students;
+   * a locked student is not pestered about the next level. Asked of the one
+   * function that owns the paywall rule (getStudentAccess), never recomputed.
+   */
+  portalOpen: boolean;
   recap: Recap;
   offer: JourneyOffer;
   intent: NextLevelIntent | null;
@@ -202,6 +210,7 @@ export async function buildStudentRecap(student: JourneyStudent, audience: Journ
   const firstName = (student.user.name || "").trim().split(/\s+/)[0] || "";
 
   return buildRecap({
+    state: audience.state,
     firstName,
     finishedLevel: audience.finishedLevel,
     targetLevel: audience.targetLevel,
@@ -233,13 +242,15 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
   const branchName = student.branch?.name ?? null;
   const target = audience.targetLevel;
   const fee = tuitionFeeFor({ level: target, branch: branchName, pathway: student.pathway });
-  const money = await seatAndOwed(student.id, target);
+  const [money, access] = await Promise.all([seatAndOwed(student.id, target), getStudentAccess(student.id)]);
   const opens = opensFor(student, audience, overrides, now);
 
   // Where "pay" goes. A signed-off student uses the next-level checkout; one the
   // graduation desk already moved up pays the ordinary checkout (their level IS
   // the target now); one whose batch just ended and has not been signed off
   // cannot pay yet — the office has to finish them first, so they hold a seat.
+  // `ended` and `midway` cannot pay yet: the next-level checkout needs the
+  // office's sign-off, so they keep a seat now and pay once it opens.
   const payHref =
     audience.state === "signed_off" ? "/programs?forNextLevel=1" : audience.state === "promoted" ? "/programs" : null;
 
@@ -248,6 +259,7 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
 
   return {
     audience,
+    portalOpen: access?.hasAccess === true,
     recap: await buildStudentRecap(student, audience),
     offer: {
       tuitionFee: fee,

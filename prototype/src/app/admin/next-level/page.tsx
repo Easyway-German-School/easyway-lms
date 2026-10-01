@@ -10,18 +10,21 @@ import { LevelUpIcon } from "@/components/icons";
 /**
  * Next-level pipeline.
  *
- * Everyone who has just finished a level (or been moved up and is waiting on
- * the new intake), with where they stand in Becca's next-level journey:
+ * Everyone who has just finished a level, been moved up, or is a month into
+ * theirs — and where each stands in Becca's next-level journey:
  *
  *   hasn't opened it → opened → details in (holding a seat) → deposit → paid
  *
- * The students who have gone quiet sort to the top — those are today's phone
- * calls. One button has Becca send them a personal reminder. Details a student
- * gives (phone, parent phone, preferred sitting, note) show here and are
- * already written to their record.
+ * One button sends the message: the bell, the push and a designed email with
+ * each student's own numbers, while the Becca pop shows on their dashboard at
+ * the same moment. Nothing to write — read the preview, press send.
+ *
+ * Only students whose portal is OPEN (paid at least the deposit) are messaged.
+ * Locked students stay on the list, marked, and are never contacted from here.
  */
 
 type Stage = "not_opened" | "opened" | "held" | "deposit_paid" | "paid_in_full";
+type State = "signed_off" | "promoted" | "ended" | "midway";
 
 type Row = {
   studentId: string;
@@ -29,7 +32,7 @@ type Row = {
   email: string;
   studentCode: string | null;
   branch: string | null;
-  state: "signed_off" | "promoted" | "ended";
+  state: State;
   finishedLevel: string;
   targetLevel: string;
   stage: Stage;
@@ -42,9 +45,21 @@ type Row = {
   seenAt: string | null;
   heldAt: string | null;
   priorOwed: number;
+  portalOpen: boolean;
+  eligible: boolean;
+  skipReason: string | null;
 };
 
 type Payload = { rows: Row[]; counts: Record<Stage, number> };
+type Preview = { name: string; title: string; message: string; html: string } | null;
+
+const STAGE_TEXT: Record<Stage, string> = {
+  not_opened: "Hasn't opened it yet",
+  opened: "Opened the journey",
+  held: "Details in — holding a seat",
+  deposit_paid: "Deposit paid",
+  paid_in_full: "Paid in full",
+};
 
 const TONE: Record<Stage, string> = {
   not_opened: "bg-rose-500/15 text-rose-700",
@@ -54,21 +69,26 @@ const TONE: Record<Stage, string> = {
   paid_in_full: "bg-emerald-600/20 text-emerald-800",
 };
 
-const STATE_LABEL: Record<Row["state"], string> = {
+const STATE_LABEL: Record<State, string> = {
   signed_off: "Signed off",
   promoted: "Moved up — waiting for intake",
   ended: "Batch ended",
+  midway: "A month in",
 };
 
 const STAGES: Stage[] = ["not_opened", "opened", "held", "deposit_paid", "paid_in_full"];
+const STATES: State[] = ["ended", "signed_off", "midway", "promoted"];
 
 export default function NextLevelPipelinePage() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Stage | "all">("all");
+  const [stateFilter, setStateFilter] = useState<State | "all">("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [preview, setPreview] = useState<Preview>(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -87,25 +107,55 @@ export default function NextLevelPipelinePage() {
   }, [load]);
 
   const rows = useMemo(
-    () => (data?.rows ?? []).filter((r) => filter === "all" || r.stage === filter),
-    [data, filter],
+    () =>
+      (data?.rows ?? []).filter(
+        (r) => (filter === "all" || r.stage === filter) && (stateFilter === "all" || r.state === stateFilter),
+      ),
+    [data, filter, stateFilter],
   );
-  const nudgeable = rows.filter((r) => r.stage === "not_opened" || r.stage === "opened");
+  const sendable = rows.filter((r) => r.eligible);
+  const lockedCount = rows.filter((r) => !r.portalOpen).length;
 
-  async function nudge(ids: string[]) {
-    if (ids.length === 0) return;
+  async function post(body: Record<string, unknown>) {
+    const res = await fetch("/api/admin/next-level", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error || "Something went wrong");
+    return json;
+  }
+
+  async function openPreview() {
     setBusy(true);
     setMessage("");
     try {
-      const res = await fetch("/api/admin/next-level", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "nudge", studentIds: ids }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Could not send");
-      setMessage(`Becca reminded ${json.sent} student${json.sent === 1 ? "" : "s"}.`);
+      const target = sendable[0] ?? rows[0];
+      const json = await post({ action: "preview", studentId: target?.studentId });
+      setPreview(json.preview ?? null);
+      setShowPreview(true);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Could not load the preview");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send(ids: string[]) {
+    if (ids.length === 0) return;
+    if (!window.confirm(`Send Becca's message to ${ids.length} student${ids.length === 1 ? "" : "s"}? It goes out as a bell, a push and an email, once each.`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const json = await post({ action: "send", studentIds: ids });
+      setMessage(
+        `Sent to ${json.sent} student${json.sent === 1 ? "" : "s"}.` +
+          (json.skippedLocked ? ` ${json.skippedLocked} skipped — portal locked.` : "") +
+          (json.skipped ? ` ${json.skipped} skipped — already answered.` : ""),
+      );
       setSelected(new Set());
+      load();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not send");
     } finally {
@@ -121,6 +171,11 @@ export default function NextLevelPipelinePage() {
       return next;
     });
 
+  const chip = (active: boolean) =>
+    `rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+      active ? "border-transparent bg-[var(--accent)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
+    }`;
+
   return (
     <AdminShell>
       <div className="mx-auto max-w-6xl p-6">
@@ -129,8 +184,9 @@ export default function NextLevelPipelinePage() {
           Next level
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-          Everyone who has just finished a level, and where each one stands in Becca&apos;s next-level journey. The
-          quiet ones are at the top — they are today&apos;s calls. Moving people up still happens on{" "}
+          Becca&apos;s next-level message, already written from each student&apos;s own numbers. Read the preview, press
+          send — the bell, the push and the email go out together, and the pop shows on their dashboard. Only students
+          whose portal is open (paid at least the deposit) are messaged. Moving people up still happens on{" "}
           <Link href="/admin/graduation" className="font-semibold text-[var(--accent)] underline">
             Graduation
           </Link>
@@ -151,31 +207,83 @@ export default function NextLevelPipelinePage() {
                   }`}
                 >
                   <p className="text-3xl font-black text-[var(--foreground)]">{data.counts[st]}</p>
-                  <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
-                    {data.rows.find((r) => r.stage === st)?.stageLabel ??
-                      { not_opened: "Hasn't opened it yet", opened: "Opened the journey", held: "Details in — holding a seat", deposit_paid: "Deposit paid", paid_in_full: "Paid in full" }[st]}
-                  </p>
+                  <p className="mt-1 text-xs font-semibold text-[var(--muted)]">{STAGE_TEXT[st]}</p>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Who:</span>
+              <button onClick={() => setStateFilter("all")} className={chip(stateFilter === "all")}>
+                Everyone
+              </button>
+              {STATES.map((st) => (
+                <button key={st} onClick={() => setStateFilter(stateFilter === st ? "all" : st)} className={chip(stateFilter === st)}>
+                  {STATE_LABEL[st]}
                 </button>
               ))}
             </div>
 
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <button
-                disabled={busy || nudgeable.length === 0}
-                onClick={() => nudge(nudgeable.map((r) => r.studentId))}
+                disabled={busy || rows.length === 0}
+                onClick={openPreview}
+                className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
+              >
+                Preview the message
+              </button>
+              <button
+                disabled={busy || sendable.length === 0}
+                onClick={() => send(sendable.map((r) => r.studentId))}
                 className="rounded-full btn-glow px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
               >
-                Remind everyone who hasn&apos;t kept a seat ({nudgeable.length})
+                Send to {sendable.length} student{sendable.length === 1 ? "" : "s"} — bell, push &amp; email
               </button>
               <button
                 disabled={busy || selected.size === 0}
-                onClick={() => nudge([...selected])}
+                onClick={() => send([...selected])}
                 className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
               >
-                Remind selected ({selected.size})
+                Send to selected ({selected.size})
               </button>
               {message && <span className="text-sm font-semibold text-emerald-700">{message}</span>}
             </div>
+            {lockedCount > 0 && (
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                {lockedCount} on this list {lockedCount === 1 ? "has" : "have"} a locked portal and will not be messaged.
+              </p>
+            )}
+
+            {showPreview && (
+              <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      {preview ? `Preview — as ${preview.name} would get it` : "Preview"}
+                    </p>
+                    {preview && (
+                      <>
+                        <p className="mt-1 text-sm font-bold text-[var(--foreground)]">{preview.title}</p>
+                        <p className="text-sm text-[var(--muted)]">{preview.message}</p>
+                      </>
+                    )}
+                  </div>
+                  <button onClick={() => setShowPreview(false)} className="text-sm font-semibold text-[var(--muted)] underline">
+                    Close
+                  </button>
+                </div>
+                {preview ? (
+                  <iframe
+                    title="Email preview"
+                    srcDoc={preview.html}
+                    sandbox=""
+                    className="mt-3 h-[560px] w-full rounded-xl border border-[var(--border)] bg-white"
+                  />
+                ) : (
+                  <p className="mt-3 text-sm text-[var(--muted)]">Nobody on this list to preview yet.</p>
+                )}
+              </div>
+            )}
 
             <div className="mt-5 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
               <table className="w-full min-w-[820px] text-sm">
@@ -192,7 +300,7 @@ export default function NextLevelPipelinePage() {
                   {rows.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-4 py-10 text-center text-[var(--muted)]">
-                        Nobody here yet. Students appear the day after their batch ends.
+                        Nobody here yet. Students appear when their batch ends, or a month into their level.
                       </td>
                     </tr>
                   )}
@@ -203,6 +311,7 @@ export default function NextLevelPipelinePage() {
                           type="checkbox"
                           checked={selected.has(r.studentId)}
                           onChange={() => toggle(r.studentId)}
+                          disabled={!r.eligible}
                           aria-label={`Select ${r.name}`}
                         />
                       </td>
@@ -214,6 +323,7 @@ export default function NextLevelPipelinePage() {
                           {r.studentCode ? `${r.studentCode} · ` : ""}
                           {r.branch ?? "No branch"}
                         </p>
+                        {!r.portalOpen && <p className="text-xs font-semibold text-rose-700">Portal locked — not messaged</p>}
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-semibold text-[var(--foreground)]">
