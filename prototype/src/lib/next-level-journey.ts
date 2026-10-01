@@ -33,8 +33,13 @@ import { LEVELS, nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
  *              the new intake to open (portal locked on the countdown).
  *  ended       their batch's teaching months are over and the office has not
  *              signed them off yet — the August cohort the day after it ends.
+ *  midway      a month into the level and still teaching — the early invitation
+ *              (this is where an October intake lands after its first month).
  */
-export type JourneyState = "signed_off" | "promoted" | "ended";
+export type JourneyState = "signed_off" | "promoted" | "ended" | "midway";
+
+/** Days into a level before the early "keep your seat" invitation opens. */
+export const MIDWAY_DAYS = 30;
 
 export type JourneyAudience = {
   state: JourneyState;
@@ -120,6 +125,20 @@ export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | 
     if (window && window.hasEnded && now.getTime() - window.endsOn.getTime() <= JUST_FINISHED_DAYS * DAY_MS) {
       return { state: "ended", finishedLevel: level, targetLevel: target };
     }
+
+    // 4. A month in and still teaching: the October intake's turn comes here,
+    // not at the door. They get the same journey with "halfway" wording, so a
+    // seat can be kept early; nobody is congratulated on finishing something
+    // they have not finished.
+    const started = new Date(input.classesStartedAt);
+    if (
+      !Number.isNaN(started.getTime()) &&
+      now.getTime() - started.getTime() >= MIDWAY_DAYS * DAY_MS &&
+      window &&
+      !window.hasEnded
+    ) {
+      return { state: "midway", finishedLevel: level, targetLevel: target };
+    }
   }
 
   return null;
@@ -130,6 +149,8 @@ export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | 
 /* -------------------------------------------------------------------------- */
 
 export type RecapInput = {
+  /** Which angle the student is in; only changes the wording. */
+  state?: JourneyState;
   firstName: string;
   finishedLevel: string;
   targetLevel: string;
@@ -372,9 +393,15 @@ export function buildRecap(input: RecapInput): Recap {
   }
 
   const thin = stats.length < 2;
-  const headline = thin
-    ? `${name}, ${input.finishedLevel} is done. Here is what comes next.`
-    : `${name}, look what you did in ${input.finishedLevel}.`;
+  // Halfway wording never says "done" — that level is still running.
+  const midway = input.state === "midway";
+  const headline = midway
+    ? thin
+      ? `${name}, you are a month into ${input.finishedLevel}. Here is what comes after.`
+      : `${name}, look what you did in your first month of ${input.finishedLevel}.`
+    : thin
+      ? `${name}, ${input.finishedLevel} is done. Here is what comes next.`
+      : `${name}, look what you did in ${input.finishedLevel}.`;
 
   return { headline, rhythmLine, stats: stats.slice(0, 4), strength, focus, plan: plan.slice(0, 4), thin };
 }

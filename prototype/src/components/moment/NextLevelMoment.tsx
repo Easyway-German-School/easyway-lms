@@ -57,6 +57,9 @@ export default function NextLevelMoment() {
         if (cancelled) return;
         const j: JourneyPayload | null = data?.journey ?? null;
         if (!j) return;
+        // Only students whose portal is open (paid at least the deposit). A locked
+        // student is never popped at about the next level.
+        if (!j.portalOpen) return;
         // Already acted — keeping a seat or paying ends the nudging.
         if (j.intent?.heldAt || j.offer.seat !== "none") return;
         const pop = readPop(j.audience.targetLevel);
@@ -123,7 +126,7 @@ export default function NextLevelMoment() {
         <div className="p-6">
           <h2 className="text-xl font-extrabold leading-tight text-[var(--foreground)]">
             {first ? `${first}, ` : ""}
-            {audience.finishedLevel} is done!
+            {audience.state === "midway" ? `you're a month into ${audience.finishedLevel}!` : `${audience.finishedLevel} is done!`}
           </h2>
           <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
             {lead

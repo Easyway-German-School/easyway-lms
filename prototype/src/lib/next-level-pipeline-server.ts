@@ -9,7 +9,9 @@ import {
   type JourneyStage,
   type JourneyState,
 } from "@/lib/next-level-journey";
-import { seatAndOwed } from "@/lib/next-level-journey-server";
+import { loadJourney, loadJourneyStudent, seatAndOwed } from "@/lib/next-level-journey-server";
+import { buildInvite } from "@/lib/next-level-invite";
+import { getStudentAccess } from "@/lib/student-access";
 
 /**
  * The office's view of the next-level journey: everyone who has just finished
@@ -37,6 +39,12 @@ export type PipelineRow = {
   seenAt: string | null;
   heldAt: string | null;
   priorOwed: number;
+  /** Their portal is open (paid at least the deposit, not locked). */
+  portalOpen: boolean;
+  /** Will receive the pop, the bell and the email — open portal and not yet held/paid. */
+  eligible: boolean;
+  /** Why not, in the office's words. */
+  skipReason: string | null;
 };
 
 export type Pipeline = {
@@ -101,10 +109,13 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
   for (let i = 0; i < inAudience.length; i += 8) {
     const slice = inAudience.slice(i, i + 8);
     const money = await Promise.all(slice.map((x) => seatAndOwed(x.s.id, x.audience.targetLevel)));
+    const access = await Promise.all(slice.map((x) => getStudentAccess(x.s.id)));
     slice.forEach((x, idx) => {
       const admission = asRecord(x.s.admission);
       const intent = readIntent(admission, x.audience.targetLevel);
       const stage = stageFor(intent, money[idx].seat);
+      const portalOpen = access[idx]?.hasAccess === true;
+      const answered = stage === "held" || stage === "deposit_paid" || stage === "paid_in_full";
       rows.push({
         studentId: x.s.id,
         name: x.s.user.name || x.s.user.email,
@@ -125,6 +136,13 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
         seenAt: intent?.seenAt ?? null,
         heldAt: intent?.heldAt ?? null,
         priorOwed: money[idx].priorOwed,
+        portalOpen,
+        eligible: portalOpen && !answered,
+        skipReason: !portalOpen
+          ? "Portal is locked — not messaged until they have paid at least the deposit"
+          : answered
+            ? "Already answered"
+            : null,
       });
     });
   }
@@ -141,36 +159,66 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
 }
 
 /**
- * A personal reminder from Becca to students who have not kept a seat yet. One
- * per student per day (the dedupeKey), and never to anyone who has already
- * held, or paid.
+ * The one message, to everyone it should reach, all three ways at once: the
+ * bell + push, and a designed email with each student's own numbers in it. The
+ * Becca pop on their dashboard is driven by the same eligibility, so a student
+ * sees all of it at the same moment.
+ *
+ * Only rows that are `eligible` (portal open, not yet answered) are sent to,
+ * whatever ids the browser names. One per student per day (the dedupeKey).
  */
-export async function nudgeStudents(
+export async function sendInvites(
   rows: PipelineRow[],
   studentIds: string[],
-): Promise<{ sent: number; skipped: number }> {
+): Promise<{ sent: number; skipped: number; skippedLocked: number }> {
   const wanted = new Set(studentIds);
   const day = new Date().toISOString().slice(0, 10);
   let sent = 0;
   let skipped = 0;
+  let skippedLocked = 0;
 
   for (const row of rows) {
     if (!wanted.has(row.studentId)) continue;
-    if (row.stage === "held" || row.stage === "deposit_paid" || row.stage === "paid_in_full") {
+    if (!row.portalOpen) {
+      skippedLocked += 1;
+      continue;
+    }
+    if (!row.eligible) {
       skipped += 1;
       continue;
     }
-    const first = row.name.split(/\s+/)[0] || "there";
-    await notify({
-      to: { studentIds: [row.studentId] },
-      kind: KIND.levelAdvance,
-      severity: "info",
-      title: `${first}, your ${row.targetLevel} seat is waiting`,
-      message: `You finished ${row.finishedLevel}. I put together what you achieved and a ${row.targetLevel} plan built around how you learn — it takes two minutes, and you can keep your seat from there.`,
-      link: "/next-level",
-      dedupeKey: `next-level-nudge:${row.studentId}:${row.targetLevel}:${day}`,
-    }).catch((error) => console.error("next-level nudge failed", { studentId: row.studentId, error }));
-    sent += 1;
+    try {
+      const student = await loadJourneyStudent({ id: row.studentId });
+      const journey = student ? await loadJourney(student) : null;
+      if (!student || !journey || !journey.portalOpen) {
+        skipped += 1;
+        continue;
+      }
+      const invite = buildInvite(journey, student.user.name);
+      await notify({
+        to: { studentIds: [row.studentId] },
+        kind: KIND.levelAdvance,
+        severity: "info",
+        title: invite.title,
+        message: invite.message,
+        emailBody: invite.emailBody,
+        emailHtmlFor: () => invite.html,
+        link: "/next-level",
+        dedupeKey: `next-level-invite:${row.studentId}:${row.targetLevel}:${day}`,
+      });
+      sent += 1;
+    } catch (error) {
+      skipped += 1;
+      console.error("next-level invite failed", { studentId: row.studentId, error });
+    }
   }
-  return { sent, skipped };
+  return { sent, skipped, skippedLocked };
+}
+
+/** What a student would get, for the office to look at before pressing send. */
+export async function previewInvite(studentId: string) {
+  const student = await loadJourneyStudent({ id: studentId });
+  const journey = student ? await loadJourney(student) : null;
+  if (!student || !journey) return null;
+  return { name: student.user.name || student.user.email, ...buildInvite(journey, student.user.name) };
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { loadPipeline, nudgeStudents } from "@/lib/next-level-pipeline-server";
+import { loadPipeline, previewInvite, sendInvites } from "@/lib/next-level-pipeline-server";
 
 /**
  * The next-level pipeline.
@@ -9,8 +9,11 @@ import { loadPipeline, nudgeStudents } from "@/lib/next-level-pipeline-server";
  *   GET                                  everyone who has just finished or been
  *                                        moved up, with their stage and the
  *                                        details they gave
- *   POST {action:"nudge", studentIds}    Becca reminds those who have not kept
- *                                        a seat yet (one a day each)
+ *   POST {action:"preview", studentId}   the exact bell text and designed email a
+ *                                        student would get, to read before sending
+ *   POST {action:"send", studentIds}     send it — bell, push and email together —
+ *                                        to those among them whose portal is open
+ *                                        and who have not answered yet
  */
 
 export const dynamic = "force-dynamic";
@@ -45,19 +48,31 @@ export async function POST(request: Request) {
   if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
-  if (body?.action !== "nudge" || !Array.isArray(body?.studentIds)) {
+  const action = body?.action;
+  if (action !== "send" && action !== "preview") {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
-  const ids = (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string").slice(0, MAX_NUDGES);
 
   try {
-    // Re-derive who is eligible inside the admin's own fence — the browser
-    // only ever names ids.
+    // Re-derive who exists inside the admin's own fence — the browser only ever
+    // names ids, never who is eligible.
     const { where, tenantId } = fence(gate);
     const pipeline = await loadPipeline({ where, tenantId });
-    return NextResponse.json(await nudgeStudents(pipeline.rows, ids));
+
+    if (action === "preview") {
+      const id = typeof body.studentId === "string" ? body.studentId : null;
+      const row = (id ? pipeline.rows.find((r) => r.studentId === id) : null) ?? pipeline.rows.find((r) => r.eligible);
+      if (!row) return NextResponse.json({ preview: null });
+      return NextResponse.json({ preview: await previewInvite(row.studentId) });
+    }
+
+    if (!Array.isArray(body.studentIds)) {
+      return NextResponse.json({ error: "studentIds required" }, { status: 400 });
+    }
+    const ids = (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string").slice(0, MAX_NUDGES);
+    return NextResponse.json(await sendInvites(pipeline.rows, ids));
   } catch (error) {
-    console.error("Next-level nudge failed:", error);
-    return NextResponse.json({ error: "Could not send the reminders" }, { status: 500 });
+    console.error("Next-level admin action failed:", error);
+    return NextResponse.json({ error: "Could not complete that" }, { status: 500 });
   }
 }
