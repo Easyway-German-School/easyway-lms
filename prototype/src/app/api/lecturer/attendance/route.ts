@@ -9,6 +9,8 @@ import {
   studentWhereForLecturer,
 } from '@/lib/lecturer-assignment';
 import { KIND, notifyInBackground } from '@/lib/notify';
+import { classesHaveBegun, explicitStatus } from '@/lib/attendance-guard';
+import { readIntakeStartDayOverrides } from '@/lib/intake-server';
 import { attributeTutorAction, tutorPhrase } from '@/lib/tutor-attribution';
 
 export async function GET(req: NextRequest) {
@@ -163,6 +165,8 @@ export async function POST(req: NextRequest) {
         branchId: true,
         level: true,
         sessionSlot: true,
+        classesStartedAt: true,
+        createdAt: true,
       },
     });
     const studentInfoById = new Map(assignedStudents.map((student) => [student.id, student]));
@@ -183,9 +187,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    /**
+     * Attendance is only ever what a tutor explicitly said. An entry with no
+     * recognised status is "not marked" and is skipped — it is never read as
+     * absent. (This used to be `entry.present ? 'present' : 'absent'`, so any
+     * entry without a status silently became an absence plus a notification.)
+     * A student whose batch has not begun cannot have attended or missed
+     * anything either, so they are skipped too.
+     */
+    const startDayOverrides = await readIntakeStartDayOverrides(session.user.tenantId ?? null);
     let saved = 0;
+    let skippedUnmarked = 0;
+    let skippedNotStarted = 0;
     for (const entry of rows) {
-      const status = entry.status === 'late' ? 'late' : entry.present ? 'present' : 'absent';
+      const status = explicitStatus(entry.status);
+      if (!status) {
+        skippedUnmarked += 1;
+        continue;
+      }
+      const info = studentInfoById.get(entry.studentId);
+      if (info && !classesHaveBegun(info, day, startDayOverrides)) {
+        skippedNotStarted += 1;
+        continue;
+      }
       const present = status === 'present' || status === 'late';
 
       /**
@@ -272,7 +296,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ count: saved });
+    return NextResponse.json({ count: saved, skippedUnmarked, skippedNotStarted });
   } catch (error) {
     console.error('Attendance POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

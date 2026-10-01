@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { dayKey } from "@/lib/class-sessions";
+import { classesHaveBegun } from "@/lib/attendance-guard";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import {
   belongsToLecturer,
   readAssignment,
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "A date is required" }, { status: 400 });
     }
     const date = dayKey(dateParam);
+    const startDayOverrides = await readIntakeStartDayOverrides(session.user.tenantId ?? null);
 
     const assignment = readAssignment(lecturer);
     const where = studentWhereForLecturer(assignment, lecturer.id);
@@ -79,6 +82,8 @@ export async function GET(req: NextRequest) {
         admission: true,
         tutorId: true,
         coTutors: { select: { lecturerId: true } },
+        classesStartedAt: true,
+        createdAt: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
       },
@@ -106,11 +111,15 @@ export async function GET(req: NextRequest) {
           level: student.level,
           sessionSlot: student.sessionSlot,
           branch: student.branch?.name || "N/A",
-          // Default ABSENT, not present. A tutor who forgets to save should not
-          // silently produce a register saying everybody attended.
-          present: mark?.present ?? false,
-          status: mark?.status ?? "absent",
+          // UNMARKED unless a tutor or admin recorded something. No default of
+          // either kind: "present" by default wrote a mark nobody made, and
+          // "absent" by default notified students who were never taught. The
+          // register only saves rows the tutor explicitly set.
+          present: mark ? mark.present : null,
+          status: mark ? mark.status : null,
           alreadyMarked: Boolean(mark),
+          // Batch hasn't opened yet — nothing to mark.
+          notStarted: !classesHaveBegun(student, date, startDayOverrides),
         };
       }),
     );
