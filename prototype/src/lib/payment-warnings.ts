@@ -6,6 +6,7 @@ import { onTrackPlanStudentIds } from "@/lib/payment-plans";
 import { KIND, notify } from "@/lib/notify";
 import { studentIdsSilenced } from "@/lib/fee-reminder-settings";
 import { batchFromAdmission } from "@/lib/batch";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 
 /**
@@ -109,6 +110,7 @@ export type WarningRun = {
 
 export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolean }): Promise<WarningRun> {
   const now = options?.now ?? new Date();
+  const startDayOverrides = await readIntakeStartDayOverrides(null);
   const dryRun = options?.dryRun ?? false;
 
   const students = await prisma.student.findMany({
@@ -152,7 +154,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     // face. Becca's seat-reservation nudges (lib/seat-nudges.ts) speak to these
     // learners instead, and the normal tracks resume the day their batch begins.
     const batch = batchFromAdmission(student.admission);
-    if (resolveUpcomingBatch(batch, { registeredAt: student.createdAt, classesStartedAt: student.classesStartedAt, now })) {
+    if (resolveUpcomingBatch(batch, { registeredAt: student.createdAt, classesStartedAt: student.classesStartedAt, now, startDayOverrides, level: student.level })) {
       run.skipped++;
       continue;
     }
@@ -215,7 +217,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
           ? new Date(ledger.oldestOpenGoForwardChargeAt)
           : null) ?? student.classesStartedAt ?? student.createdAt;
       // The clock never starts before the batch does.
-      const floor = batchLockFloor(batch, { registeredAt: student.createdAt, classesStartedAt: student.classesStartedAt, now });
+      const floor = batchLockFloor(batch, { registeredAt: student.createdAt, classesStartedAt: student.classesStartedAt, now, startDayOverrides, level: student.level });
       const lockAt = new Date(withBatchFloor(anchor, floor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
       const daysUntilLock = Math.ceil((lockAt.getTime() - now.getTime()) / DAY_MS);
 

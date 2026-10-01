@@ -3,6 +3,7 @@ import { KIND, notify } from "@/lib/notify";
 import { renderNotificationEmail } from "@/lib/notification-email";
 import { batchFromAdmission } from "@/lib/batch";
 import { resolveBatchStart, schoolDaysUntil } from "@/lib/batch-reservation";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { loadUpcomingBatchRows, type SeatRow } from "@/lib/batch-reservation-server";
 import { getStudentAccess } from "@/lib/student-access";
 import { studentIdsSilenced } from "@/lib/fee-reminder-settings";
@@ -139,7 +140,8 @@ export async function runSeatNudges(
   const dryRun = options.dryRun ?? false;
   const run: SeatNudgeRun = { waiting: 0, reserve: 0, countdown: 0, opening: 0, skipped: 0 };
 
-  const rows = await loadUpcomingBatchRows({ now });
+  const startDayOverrides = await readIntakeStartDayOverrides(null);
+  const rows = await loadUpcomingBatchRows({ now, startDayOverrides });
   run.waiting = rows.length;
 
   const securedByIntake = new Map<string, number>();
@@ -201,12 +203,12 @@ export async function runSeatNudges(
   since.setMonth(since.getMonth() - 18);
   const light = await prisma.student.findMany({
     where: { status: "active", createdAt: { gte: since } },
-    select: { id: true, createdAt: true, classesStartedAt: true, admission: true, user: { select: { name: true } } },
+    select: { id: true, createdAt: true, classesStartedAt: true, admission: true, level: true, user: { select: { name: true } } },
   });
   const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
   for (const student of light) {
     if (student.classesStartedAt) continue;
-    const start = resolveBatchStart(batchFromAdmission(student.admission), { registeredAt: student.createdAt, now });
+    const start = resolveBatchStart(batchFromAdmission(student.admission), { registeredAt: student.createdAt, now, startDayOverrides, level: student.level });
     if (!start) continue;
     const age = now.getTime() - start.startsOn.getTime();
     if (age < 0 || age > TWO_DAYS) continue;
@@ -248,7 +250,8 @@ export async function sendManualSeatNudges(
   options: { now?: Date } = {},
 ): Promise<{ sent: number; skipped: number }> {
   const now = options.now ?? new Date();
-  const rows = await loadUpcomingBatchRows({ now });
+  const startDayOverrides = await readIntakeStartDayOverrides(null);
+  const rows = await loadUpcomingBatchRows({ now, startDayOverrides });
   const securedByIntake = new Map<string, number>();
   for (const row of rows) {
     if (row.seat !== "unpaid") securedByIntake.set(row.batchLabel, (securedByIntake.get(row.batchLabel) ?? 0) + 1);

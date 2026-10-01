@@ -231,6 +231,13 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("student-code-realign", async () => {
+      const { realignUpcomingIntakeCodes } = await import("@/lib/student-code-backfill");
+      return realignUpcomingIntakeCodes();
+    }),
+  );
+
+  results.push(
     await run("profile-photo-nudge", async () => {
       const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");
       return nudgeStudentsWithoutPhoto();

@@ -190,16 +190,65 @@ function VoiceNote({
     return () => window.removeEventListener("easyway:voice-play", stopOthers);
   }, [url]);
 
-  const toggle = useCallback(() => {
+  const [failed, setFailed] = useState(false);
+  const [src, setSrc] = useState(url);
+  const blobUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    setSrc(url);
+    setFailed(false);
+  }, [url]);
+  useEffect(
+    () => () => {
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+    },
+    [],
+  );
+
+  /**
+   * Last resort when the streamed file will not play: download the whole note
+   * and play it from memory. A voice note is a few tens of KB, and a blob URL
+   * sidesteps everything that can go wrong between the element and the server
+   * (Range handling, a wrong stored content-type, a recorder's duration-less
+   * WebM). The blob is re-typed from the file extension so a mislabelled
+   * object still decodes.
+   */
+  const playFromBlob = useCallback(async () => {
     const el = audioRef.current;
-    if (!el) return;
-    if (el.paused) {
-      window.dispatchEvent(new CustomEvent("easyway:voice-play", { detail: url }));
-      void el.play();
-    } else {
-      el.pause();
+    if (!el) return false;
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) return false;
+      const raw = await response.blob();
+      if (raw.size === 0) return false;
+      const type = /\.(m4a|mp4)(\?|$)/i.test(url) ? "audio/mp4" : "audio/webm";
+      const objectUrl = URL.createObjectURL(new Blob([raw], { type }));
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = objectUrl;
+      setSrc(objectUrl);
+      el.src = objectUrl;
+      el.load();
+      await el.play();
+      return true;
+    } catch {
+      return false;
     }
   }, [url]);
+
+  const toggle = useCallback(async () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (!el.paused) {
+      el.pause();
+      return;
+    }
+    setFailed(false);
+    window.dispatchEvent(new CustomEvent("easyway:voice-play", { detail: url }));
+    try {
+      await el.play();
+    } catch {
+      if (!(await playFromBlob())) setFailed(true);
+    }
+  }, [url, playFromBlob]);
 
   const scrub = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const el = audioRef.current;
@@ -233,13 +282,19 @@ function VoiceNote({
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tint }} />
         </div>
         <p className="mt-1 text-[10px] tabular-nums" style={{ color: mine ? "rgba(255,255,255,0.75)" : "var(--muted)" }}>
-          {playing || elapsed > 0 ? clock(elapsed) : total != null ? clock(total) : "•••"}
+          {failed
+            ? "Can't play — tap to retry"
+            : playing || elapsed > 0
+              ? clock(elapsed)
+              : total != null
+                ? clock(total)
+                : "•••"}
         </p>
       </div>
 
       <audio
         ref={audioRef}
-        src={url}
+        src={src}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -393,6 +448,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null);
   /** Newest confirmed message id — the cursor the poll asks from. */
   const cursorRef = useRef<string | null>(null);
+  const refreshTickRef = useRef(0);
 
   const push = usePushNotifications();
 
@@ -596,6 +652,43 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           bumpTyping((n) => n + 1);
         }
 
+        // Everything the cursor cannot see: an edit, a reaction, a pin, a game
+        // invite finishing, a moderator taking a message down. The cursor only
+        // ever asks for NEWER rows, so these stayed stale until the room was
+        // reopened. Every third visible tick (and every hidden one) re-reads the
+        // newest page and swaps in any row we already hold that has changed.
+        refreshTickRef.current += 1;
+        if (
+          !cancelled &&
+          res.ok &&
+          (document.visibilityState !== "visible" || refreshTickRef.current % 3 === 0)
+        ) {
+          try {
+            const freshRes = await fetch(`/api/community/messages?channelId=${activeId}`, { cache: "no-store" });
+            if (freshRes.ok) {
+              const freshData = await freshRes.json();
+              const page: ChatMessage[] = freshData.messages ?? [];
+              if (!cancelled && page.length) {
+                setMessages((current) => {
+                  const byId = new Map(page.map((m) => [m.id, m]));
+                  let changed = false;
+                  const next = current.map((m) => {
+                    const latest = byId.get(m.id);
+                    if (latest && JSON.stringify(latest) !== JSON.stringify(m)) {
+                      changed = true;
+                      return latest;
+                    }
+                    return m;
+                  });
+                  return changed ? next : current;
+                });
+              }
+            }
+          } catch {
+            // A missed refresh is caught by the next one.
+          }
+        }
+
         // The OFFICE has no portal-wide feed, so it asks about the room it has
         // open, on this same cadence. Everyone else reads the shared feed.
         // Skipped while hidden: nobody is watching dots on a background tab.
@@ -630,8 +723,15 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     }
 
     timer = window.setTimeout(tick, POLL_ACTIVE_MS);
+    // Messages that arrived while the tab was hidden are shown by the next poll
+    // but were never marked read, so the badge stayed on. Clear it on return.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void markRead(activeId);
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
       if (timer) window.clearTimeout(timer);
     };
   }, [activeId, markRead]);
@@ -781,10 +881,15 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Message not sent");
 
-      // Swap the placeholder for the real row, which carries the id the poll
-      // needs as its cursor.
-      setMessages((current) => current.map((m) => (m.id === tempId ? data.message : m)));
-      cursorRef.current = data.message.id;
+      // Swap the placeholder for the real row. Drop any copy the poll already delivered, so the bubble is never doubled.
+      // The poll cursor is deliberately NOT moved to this message: a classmate
+      // may have posted between the last poll and this send, and jumping past
+      // their message would skip it until the room is reopened.
+      setMessages((current) =>
+        current
+          .filter((m) => m.id !== data.message.id)
+          .map((m) => (m.id === tempId ? data.message : m)),
+      );
     } catch (sendError) {
       /**
        * A failed message stays on screen, marked, with the text recoverable.
@@ -836,7 +941,9 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+      // MP4/AAC first: every iPhone can play it, while WebM/Opus from an Android
+      // recorder is silent on older iOS. WebM only when MP4 recording is missing.
+      const preferred = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
       const mimeType = preferred.find((type) => {
         try {
           return MediaRecorder.isTypeSupported(type);

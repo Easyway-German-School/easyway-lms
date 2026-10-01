@@ -327,6 +327,7 @@ export function deriveStudentAccess({
     classesStartedAt,
     now,
     startDayOverrides,
+    level,
   });
   const batchLocked = upcomingBatch !== null;
   const batchFloor = batchLockFloor(batch, {
@@ -334,6 +335,7 @@ export function deriveStudentAccess({
     classesStartedAt,
     now,
     startDayOverrides,
+    level,
   });
 
   // The balance lock only exists for a student who is past the deposit gate

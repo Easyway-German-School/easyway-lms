@@ -103,6 +103,7 @@ export const CRON_PLAN: TickPlan = {
       jobBudgetMs: 40_000,
       jobs: [
         "student-code-backfill",
+        "student-code-realign",
         "backup-health",
         "sign-in-anomaly",
         "meter-storage",
