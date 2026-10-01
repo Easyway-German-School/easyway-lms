@@ -50,7 +50,13 @@ type Row = {
   skipReason: string | null;
 };
 
-type Payload = { rows: Row[]; counts: Record<Stage, number> };
+type Summary = {
+  activeTotal: number;
+  onList: number;
+  portalLocked: number;
+  excluded: Array<{ reason: string; label: string; count: number }>;
+};
+type Payload = { rows: Row[]; counts: Record<Stage, number>; summary?: Summary };
 type Preview = { name: string; title: string; message: string; html: string } | null;
 
 const STAGE_TEXT: Record<Stage, string> = {
@@ -211,6 +217,25 @@ export default function NextLevelPipelinePage() {
                 </button>
               ))}
             </div>
+
+            {data.summary && (
+              <details className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+                <summary className="cursor-pointer font-semibold text-[var(--foreground)]">
+                  Why only {data.summary.onList} of {data.summary.activeTotal} students are on this list
+                </summary>
+                <ul className="mt-3 space-y-1.5 text-[var(--muted)]">
+                  {data.summary.excluded.map((e) => (
+                    <li key={e.reason}>
+                      <strong className="text-[var(--foreground)]">{e.count}</strong> — {e.label}
+                    </li>
+                  ))}
+                  <li>
+                    <strong className="text-[var(--foreground)]">{data.summary.portalLocked}</strong> of the {data.summary.onList} on
+                    the list have a locked portal, so they are listed but never messaged.
+                  </li>
+                </ul>
+              </details>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Who:</span>

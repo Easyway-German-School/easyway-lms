@@ -147,10 +147,6 @@ export async function seatAndOwed(studentId: string, targetLevel: string) {
 }
 
 export async function audienceFor(student: JourneyStudent, overrides: IntakeStartDayOverrides, now = new Date()) {
-  const attended = await prisma.attendance.findFirst({
-    where: { studentId: student.id, present: true },
-    select: { id: true },
-  });
   return resolveJourneyAudience({
     level: student.level,
     levelCompletedFor: student.levelCompletedFor,
@@ -159,7 +155,6 @@ export async function audienceFor(student: JourneyStudent, overrides: IntakeStar
     classesStartedAt: student.classesStartedAt,
     createdAt: student.createdAt,
     sessionSlot: student.sessionSlot,
-    hasAttended: Boolean(attended),
     startDayOverrides: overrides,
     now,
   });

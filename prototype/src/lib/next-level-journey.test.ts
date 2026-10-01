@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  whyExcluded,
   buildRecap,
   cleanDetails,
   readIntent,
@@ -17,20 +18,18 @@ describe("resolveJourneyAudience", () => {
       admission: { batch: "August" },
       createdAt: created,
       classesStartedAt: new Date("2026-08-03T00:00:00Z"),
-      hasAttended: true,
       now,
     });
     expect(a).toEqual({ state: "ended", finishedLevel: "A1", targetLevel: "A2" });
   });
 
-  it("never opens for someone who has not been taught", () => {
+  it("never opens for someone with no confirmed start date", () => {
     expect(
       resolveJourneyAudience({
         level: "A1",
         admission: { batch: "August" },
         createdAt: created,
-        classesStartedAt: new Date("2026-08-03T00:00:00Z"),
-        hasAttended: false,
+        classesStartedAt: null,
         now,
       }),
     ).toBeNull();
@@ -43,7 +42,6 @@ describe("resolveJourneyAudience", () => {
         admission: { batch: "September" },
         createdAt: created,
         classesStartedAt: new Date("2026-09-01T00:00:00Z"),
-        hasAttended: true,
         now,
       }),
     ).toEqual({ state: "midway", finishedLevel: "A1", targetLevel: "A2" });
@@ -55,7 +53,6 @@ describe("resolveJourneyAudience", () => {
       admission: { batch: "October" },
       createdAt: created,
       classesStartedAt: new Date("2026-10-05T00:00:00Z"),
-      hasAttended: true,
     };
     expect(resolveJourneyAudience({ ...base, now: new Date("2026-10-20T09:00:00Z") })).toBeNull();
     expect(resolveJourneyAudience({ ...base, now: new Date("2026-11-08T09:00:00Z") })?.state).toBe("midway");
@@ -68,7 +65,6 @@ describe("resolveJourneyAudience", () => {
         admission: { batch: "August" },
         createdAt: created,
         classesStartedAt: new Date("2026-08-03T00:00:00Z"),
-        hasAttended: true,
         now: new Date("2026-12-20T09:00:00Z"),
       }),
     ).toBeNull();
@@ -79,7 +75,6 @@ describe("resolveJourneyAudience", () => {
       level: "A2",
       levelCompletedFor: "A2",
       levelCompletedAt: now,
-      hasAttended: true,
       now,
     });
     expect(a).toEqual({ state: "signed_off", finishedLevel: "A2", targetLevel: "B1" });
@@ -91,7 +86,6 @@ describe("resolveJourneyAudience", () => {
       admission: { batch: "October", classesStartedAtBeforePromotion: "2026-08-03T00:00:00.000Z" },
       createdAt: created,
       classesStartedAt: new Date("2026-10-12T00:00:00+01:00"),
-      hasAttended: true,
       now,
     });
     expect(a).toEqual({ state: "promoted", finishedLevel: "A1", targetLevel: "A2" });
@@ -99,7 +93,7 @@ describe("resolveJourneyAudience", () => {
 
   it("is null at the top of the ladder", () => {
     expect(
-      resolveJourneyAudience({ level: "C2", levelCompletedFor: "C2", levelCompletedAt: now, hasAttended: true, now }),
+      resolveJourneyAudience({ level: "C2", levelCompletedFor: "C2", levelCompletedAt: now, now }),
     ).toBeNull();
   });
 });
@@ -187,5 +181,21 @@ describe("intent helpers", () => {
     expect(d.sessionSlot).toBe("evening");
     expect(d.deliveryMode).toBeUndefined();
     expect(d.note).toHaveLength(500);
+  });
+});
+
+describe("whyExcluded", () => {
+  const base = { level: "A1", createdAt: created, now };
+  it("names the first rule that kept a student out", () => {
+    expect(whyExcluded({ ...base, admission: {}, classesStartedAt: new Date("2026-08-03") })).toBe("no_batch");
+    expect(whyExcluded({ ...base, admission: { batch: "August" }, classesStartedAt: null })).toBe("not_started");
+    expect(whyExcluded({ ...base, admission: { batch: "October" }, classesStartedAt: new Date("2026-09-25") })).toBe("first_month");
+    expect(
+      whyExcluded({ ...base, admission: { batch: "May" }, classesStartedAt: new Date("2026-05-04"), createdAt: new Date("2026-04-20") }),
+    ).toBe("long_finished");
+    expect(whyExcluded({ ...base, level: "C2", admission: { batch: "August" } })).toBe("top_of_ladder");
+  });
+  it("is null for anyone who IS in the journey", () => {
+    expect(whyExcluded({ ...base, admission: { batch: "August" }, classesStartedAt: new Date("2026-08-03") })).toBeNull();
   });
 });

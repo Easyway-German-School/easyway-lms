@@ -41,6 +41,16 @@ export type JourneyState = "signed_off" | "promoted" | "ended" | "midway";
 /** Days into a level before the early "keep your seat" invitation opens. */
 export const MIDWAY_DAYS = 30;
 
+export type ExclusionReason = "top_of_ladder" | "no_batch" | "not_started" | "first_month" | "long_finished";
+
+export const EXCLUSION_LABEL: Record<ExclusionReason, string> = {
+  top_of_ladder: "At the top of the ladder (nothing to move up to)",
+  no_batch: "No readable batch month on their record",
+  not_started: "No confirmed start date yet, or classes haven't started",
+  first_month: "Still in their first month of the level",
+  long_finished: "Finished more than 45 days ago",
+};
+
 export type JourneyAudience = {
   state: JourneyState;
   /** The level they finished. */
@@ -66,8 +76,13 @@ export type AudienceInput = {
   classesStartedAt?: Date | string | null;
   createdAt?: Date | string | null;
   sessionSlot?: string | null;
-  /** True when the student has at least one present/late attendance mark. */
-  hasAttended: boolean;
+  /**
+   * Whether the student has been taught is decided by `classesStartedAt` — a
+   * start date the office or the student confirmed — NOT by attendance marks.
+   * Requiring a present mark silently dropped most of a cohort whenever
+   * registers had not been taken (they were broken for a long while), which
+   * looked like "only 24 of 500+".
+   */
   startDayOverrides?: IntakeStartDayOverrides;
   now?: Date;
 };
@@ -77,8 +92,9 @@ export type AudienceInput = {
  *
  * Returns null for everybody else — including a new student who has not been
  * taught anything. That was the original level-advance bug (congratulating a
- * sign-up on "finishing A1" before their first class), so a student must have
- * attended at least once for the `ended` route to open.
+ * sign-up on "finishing A1" before their first class), so a student must have a
+ * confirmed start date that has already passed for the `ended` and `midway`
+ * routes to open.
  */
 export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | null {
   const now = input.now ?? new Date();
@@ -115,7 +131,7 @@ export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | 
   }
 
   // 3. The batch's months are up, and they were actually taught.
-  if (input.hasAttended && input.classesStartedAt) {
+  if (input.classesStartedAt) {
     const created = input.createdAt ? new Date(input.createdAt) : null;
     const window = resolveBatchWindow(batchFromAdmission(admission), {
       registeredAt: created && !Number.isNaN(created.getTime()) ? created : null,
@@ -483,4 +499,26 @@ export function cleanDetails(raw: unknown): NonNullable<NextLevelIntent["details
     deliveryMode: MODES.includes(mode) ? mode : undefined,
     note: text(body.note, 500),
   };
+}
+
+/**
+ * For a student the journey does NOT include: the first rule that kept them out.
+ * Lets the office see "why only 24 of 500?" instead of guessing.
+ */
+export function whyExcluded(input: AudienceInput): ExclusionReason | null {
+  if (resolveJourneyAudience(input)) return null;
+  const now = input.now ?? new Date();
+  const level = String(input.level || "A1").toUpperCase();
+  if (!nextLevelAfter(level)) return "top_of_ladder";
+  const batch = batchFromAdmission(input.admission);
+  if (!batch) return "no_batch";
+  if (!input.classesStartedAt || new Date(input.classesStartedAt).getTime() > now.getTime()) return "not_started";
+  const created = input.createdAt ? new Date(input.createdAt) : null;
+  const window = resolveBatchWindow(batch, {
+    registeredAt: created && !Number.isNaN(created.getTime()) ? created : null,
+    now,
+    months: sessionDurationMonths(input.sessionSlot),
+  });
+  if (!window) return "no_batch";
+  return window.hasEnded ? "long_finished" : "first_month";
 }
