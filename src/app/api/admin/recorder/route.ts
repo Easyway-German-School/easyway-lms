@@ -6,6 +6,7 @@ import { isRecorderEgressId, recorderFleetMode, recordingBackend } from "@/lib/r
 import { fallbackPolicy, liveKitMinutes, monthStartUtc } from "@/lib/recording-fallback";
 import { loadRecordingForecast } from "@/lib/recording-forecast-server";
 import { buildRecorderStatus } from "@/lib/recorder-status";
+import { readControl, readSchedulerBeats } from "@/lib/recorder-control";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,12 @@ export async function GET() {
   const own = rows.filter((r) => isRecorderEgressId(r.egressId));
   const liveKit = rows.filter((r) => !isRecorderEgressId(r.egressId));
 
-  const [directory, forecast] = await Promise.all([
-    recorderFleetMode() ? loadDirectory() : Promise.resolve(null),
+  const fleet = recorderFleetMode();
+  const [directory, forecast, beats, control] = await Promise.all([
+    fleet ? loadDirectory() : Promise.resolve(null),
     tenantId ? loadRecordingForecast({ tenantId, now, hours: 24 }).catch(() => null) : Promise.resolve(null),
+    fleet ? readSchedulerBeats() : Promise.resolve(undefined),
+    fleet ? readControl() : Promise.resolve(undefined),
   ]);
 
   return NextResponse.json(
@@ -38,6 +42,8 @@ export async function GET() {
       ownRecordings: own.length,
       liveKitRecordings: liveKit.length,
       forecast,
+      beats,
+      control,
     }),
   );
 }
