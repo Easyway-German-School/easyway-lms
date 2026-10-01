@@ -4,6 +4,19 @@ import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { AlertIcon, PulseIcon, RefreshIcon } from "@/components/icons";
 import type { RecorderStatus } from "@/lib/recorder-status";
+import type { RecordingLine, SpendReport } from "@/lib/recorder-report";
+
+type Report = RecorderStatus & { spend: SpendReport; recordingsToday: RecordingLine[] };
+
+const usd = (x: number) => `$${x.toFixed(2)}`;
+const notesStyle: Record<RecordingLine["notes"]["state"], string> = {
+  ready: "text-emerald-700",
+  working: "text-[var(--muted)]",
+  waiting: "text-[var(--muted)]",
+  none: "text-[var(--muted)]",
+  failed: "text-red-700",
+  "n/a": "text-[var(--muted)]",
+};
 
 const healthStyle: Record<RecorderStatus["health"], string> = {
   ok: "border-emerald-300 bg-emerald-50 text-emerald-900",
@@ -21,7 +34,7 @@ const schoolTime = (iso: string) => new Date(iso).toLocaleString("en-GB", { time
 const ago = (seconds: number | null) => (seconds === null ? "never" : seconds < 90 ? "just now" : seconds < 5400 ? `${Math.round(seconds / 60)} min ago` : `${Math.round(seconds / 3600)} h ago`);
 
 export default function RecorderPage() {
-  const [status, setStatus] = useState<RecorderStatus | null>(null);
+  const [status, setStatus] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,14 +49,14 @@ export default function RecorderPage() {
     try {
       const response = await fetch("/api/admin/recorder", { cache: "no-store" });
       const text = await response.text();
-      let data: { error?: string } & Partial<RecorderStatus> = {};
+      let data: { error?: string } & Partial<Report> = {};
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
         throw new Error(`The recording service returned an invalid response (${response.status}).`);
       }
       if (!response.ok) throw new Error(data.error || "Could not load recording status.");
-      setStatus(data as RecorderStatus);
+      setStatus(data as Report);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load recording status.");
@@ -99,6 +112,47 @@ export default function RecorderPage() {
               <div className={card}><p className="text-sm text-[var(--muted)]">Most classes at once, next 24 h</p><p className="mt-1 text-3xl font-bold">{status.forecast.peakNext24h}</p>{status.forecast.nextClassAt && <p className="mt-1 text-xs text-[var(--muted)]">Next: {schoolTime(status.forecast.nextClassAt)}</p>}</div>
               <div className={card}><p className="text-sm text-[var(--muted)]">Recorded this month</p><p className="mt-1 text-xl font-bold">{status.month.ownRecordings} by us · {status.month.liveKitRecordings} by LiveKit</p></div>
             </section>
+
+            <section className={card}>
+              <h2 className="text-lg font-semibold">Spend</h2>
+              <div className="mt-3 grid gap-4 sm:grid-cols-3">
+                <div><p className="text-sm text-[var(--muted)]">Today</p><p className="mt-1 text-2xl font-bold">{usd(status.spend.serversTodayUsd + status.spend.liveKitTodayUsd)}</p><p className="mt-1 text-xs text-[var(--muted)]">servers {usd(status.spend.serversTodayUsd)} · LiveKit {usd(status.spend.liveKitTodayUsd)}</p></div>
+                <div><p className="text-sm text-[var(--muted)]">This month</p><p className="mt-1 text-2xl font-bold">{usd(status.spend.totalMonthUsd)}</p><p className="mt-1 text-xs text-[var(--muted)]">servers {usd(status.spend.serversMonthUsd)} ({status.spend.serverHoursMonth} server-hours) · LiveKit {usd(status.spend.liveKitMonthUsd)}</p></div>
+                <div>
+                  <p className="text-sm text-[var(--muted)]">Budget</p>
+                  {status.spend.budgetUsd && status.spend.budgetUsedPercent !== null ? (
+                    <>
+                      <p className="mt-1 text-2xl font-bold">{status.spend.budgetUsedPercent}% of {usd(status.spend.budgetUsd)}</p>
+                      <div className="mt-2 h-2 rounded-full bg-[var(--border)]"><div className={`h-2 rounded-full ${status.spend.budgetUsedPercent >= 100 ? "bg-red-600" : status.spend.budgetUsedPercent >= 80 ? "bg-amber-500" : "bg-[var(--primary)]"}`} style={{ width: `${Math.min(100, status.spend.budgetUsedPercent)}%` }} /></div>
+                    </>
+                  ) : <p className="mt-1 text-sm text-[var(--muted)]">No monthly budget set. Add RECORDING_MONTHLY_BUDGET_USD to show how much is used.</p>}
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-[var(--muted)]">Estimates. Servers are counted by the scheduler from the time they run{status.spend.serverFigureAgeSeconds === null ? " (it has not reported a figure yet)" : ""}; Linode&apos;s invoice is the final word. For comparison, LiveKit recorded the same classes at about $1.20 per class-hour.</p>
+            </section>
+
+            {status.recordingsToday.length > 0 && (
+              <section className={card}>
+                <h2 className="text-lg font-semibold">Today&apos;s recordings</h2>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-left text-sm">
+                    <thead className="text-xs text-[var(--muted)]"><tr><th className="py-2 pr-4">Class</th><th className="py-2 pr-4">Started</th><th className="py-2 pr-4">Length</th><th className="py-2 pr-4">Size</th><th className="py-2 pr-4">Made by</th><th className="py-2">Class notes</th></tr></thead>
+                    <tbody>
+                      {status.recordingsToday.map((r) => (
+                        <tr key={r.id} className="border-t border-[var(--border)]">
+                          <td className="py-2 pr-4 font-medium">{r.title}</td>
+                          <td className="py-2 pr-4 text-[var(--muted)]">{schoolTime(r.startedAt)}</td>
+                          <td className="py-2 pr-4">{r.minutes === null ? "-" : `${r.minutes} min`}</td>
+                          <td className="py-2 pr-4">{r.sizeMb === null ? "-" : `${r.sizeMb} MB`}{r.mbPerMinute ? <span className="text-xs text-[var(--muted)]"> ({r.mbPerMinute} MB/min)</span> : null}</td>
+                          <td className="py-2 pr-4">{r.by === "ours" ? "Our recorder" : "LiveKit"}</td>
+                          <td className={`py-2 font-semibold ${notesStyle[r.notes.state]}`}>{r.notes.label}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
 
             {status.fleet && (
               <section className="grid gap-6 lg:grid-cols-2">

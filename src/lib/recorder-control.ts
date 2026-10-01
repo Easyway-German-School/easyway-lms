@@ -184,6 +184,12 @@ export async function writeControl(control: Control): Promise<void> {
   await putFile({ key: CONTROL_KEY, body: Buffer.from(JSON.stringify(control)), contentType: "application/json" });
 }
 
+export const SPEND_KEY = "recordings/_recorder-release/spend.json";
+
+export async function readSpendFile(): Promise<unknown | null> {
+  return readJson(SPEND_KEY);
+}
+
 export async function readSchedulerBeats(): Promise<{ primary: SchedulerBeat | null; standby: SchedulerBeat | null }> {
   const [primary, standby] = await Promise.all([readJson(PRIMARY_BEAT_KEY), readJson(STANDBY_BEAT_KEY)]);
   return { primary: parseSchedulerBeat(primary), standby: parseSchedulerBeat(standby) };
