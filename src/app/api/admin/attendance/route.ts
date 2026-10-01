@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
+import { classesHaveBegun, explicitStatus } from "@/lib/attendance-guard";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 
 export async function GET(req: NextRequest) {
   try {
@@ -55,10 +57,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Never a default: a mark exists only because someone chose it.
+    const chosen = explicitStatus(status);
+    if (!chosen) {
+      return NextResponse.json(
+        { error: "Choose present, late or absent" },
+        { status: 400 }
+      );
+    }
+
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       select: {
         id: true,
+        level: true,
+        admission: true,
+        classesStartedAt: true,
+        createdAt: true,
         branch: { select: { tenantId: true } },
       },
     });
@@ -74,11 +89,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
+    const startDayOverrides = await readIntakeStartDayOverrides(gate.session.user.tenantId ?? null);
+    if (!classesHaveBegun(student, new Date(date), startDayOverrides)) {
+      return NextResponse.json(
+        { error: "This student's classes haven't started yet, so there is nothing to mark." },
+        { status: 409 }
+      );
+    }
+
     const attendance = await prisma.attendance.create({
       data: {
         studentId,
         date: new Date(date),
-        status: status || "present",
+        status: chosen,
+        present: chosen !== "absent",
         notes,
       },
       include: {
@@ -132,7 +156,14 @@ export async function PATCH(req: NextRequest) {
 
     const updateData: any = {};
     if (date) updateData.date = new Date(date);
-    if (status) updateData.status = status;
+    if (status) {
+      const chosen = explicitStatus(status);
+      if (!chosen) {
+        return NextResponse.json({ error: "Choose present, late or absent" }, { status: 400 });
+      }
+      updateData.status = chosen;
+      updateData.present = chosen !== "absent";
+    }
     if (notes !== undefined) updateData.notes = notes;
 
     const attendance = await prisma.attendance.update({

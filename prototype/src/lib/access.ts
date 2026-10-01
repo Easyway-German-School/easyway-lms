@@ -33,6 +33,9 @@ export const TUITION_FREE_ROUTES = [
   // message points them straight at these.
   "/certificates",
   "/results",
+  // Becca's next-level journey. Its whole audience is people whose portal is
+  // locked on the countdown to the next intake — locking it would be a dead end.
+  "/next-level",
 ] as const;
 
 export function isTuitionFreeRoute(pathname: string): boolean {

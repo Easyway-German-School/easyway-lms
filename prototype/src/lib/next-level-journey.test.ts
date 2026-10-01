@@ -1,0 +1,179 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildRecap,
+  cleanDetails,
+  readIntent,
+  resolveJourneyAudience,
+  stageFor,
+} from "./next-level-journey";
+
+const now = new Date("2026-10-01T09:00:00Z");
+const created = new Date("2026-07-20T10:00:00Z");
+
+describe("resolveJourneyAudience", () => {
+  it("opens the 'ended' route for an August batch the day after it ends", () => {
+    const a = resolveJourneyAudience({
+      level: "A1",
+      admission: { batch: "August" },
+      createdAt: created,
+      classesStartedAt: new Date("2026-08-03T00:00:00Z"),
+      hasAttended: true,
+      now,
+    });
+    expect(a).toEqual({ state: "ended", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("never opens for someone who has not been taught", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "August" },
+        createdAt: created,
+        classesStartedAt: new Date("2026-08-03T00:00:00Z"),
+        hasAttended: false,
+        now,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not open mid-batch", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "September" },
+        createdAt: created,
+        classesStartedAt: new Date("2026-09-01T00:00:00Z"),
+        hasAttended: true,
+        now,
+      }),
+    ).toBeNull();
+  });
+
+  it("stops welcoming people long after the batch ended", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "August" },
+        createdAt: created,
+        classesStartedAt: new Date("2026-08-03T00:00:00Z"),
+        hasAttended: true,
+        now: new Date("2026-12-20T09:00:00Z"),
+      }),
+    ).toBeNull();
+  });
+
+  it("honours a human sign-off", () => {
+    const a = resolveJourneyAudience({
+      level: "A2",
+      levelCompletedFor: "A2",
+      levelCompletedAt: now,
+      hasAttended: true,
+      now,
+    });
+    expect(a).toEqual({ state: "signed_off", finishedLevel: "A2", targetLevel: "B1" });
+  });
+
+  it("recognises a graduate the desk already moved up and who is waiting", () => {
+    const a = resolveJourneyAudience({
+      level: "A2",
+      admission: { batch: "October", classesStartedAtBeforePromotion: "2026-08-03T00:00:00.000Z" },
+      createdAt: created,
+      classesStartedAt: new Date("2026-10-12T00:00:00+01:00"),
+      hasAttended: true,
+      now,
+    });
+    expect(a).toEqual({ state: "promoted", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("is null at the top of the ladder", () => {
+    expect(
+      resolveJourneyAudience({ level: "C2", levelCompletedFor: "C2", levelCompletedAt: now, hasAttended: true, now }),
+    ).toBeNull();
+  });
+});
+
+describe("buildRecap", () => {
+  const base = {
+    firstName: "Ada",
+    finishedLevel: "A1",
+    targetLevel: "A2",
+    classesAttended: 27,
+    classesMarked: 30,
+    lateCount: 2,
+    gradeAverages: { speaking: 88, essay: 61, quiz: 74 },
+    gradesCount: 6,
+    videosCompleted: 12,
+    assignmentsSubmitted: 5,
+    gamesPlayed: 3,
+    bestGameStreak: 5,
+    archetype: "night_owl",
+    peakHour: 21,
+    peakWeekday: 2,
+    longestStreak: 9,
+    totalMinutes: 600,
+    activeDays: 30,
+    goalLabel: "Study at a German university",
+    goalDestination: "your first lecture",
+  };
+
+  it("uses only real numbers and names the data behind each plan card", () => {
+    const r = buildRecap(base);
+    expect(r.stats.find((s) => s.key === "classes")).toMatchObject({ value: 27, suffix: "of 30" });
+    expect(r.strength).toEqual({ skill: "speaking", score: 88 });
+    expect(r.focus).toEqual({ skill: "writing", score: 61 });
+    expect(r.rhythmLine).toBe("You do your best work around 9pm on Tuesdays.");
+    expect(r.plan.every((p) => p.because.length > 0)).toBe(true);
+    expect(r.plan.length).toBeLessThanOrEqual(4);
+  });
+
+  it("stays honest with almost no data", () => {
+    const r = buildRecap({
+      firstName: "Tunde",
+      finishedLevel: "A1",
+      targetLevel: "A2",
+      classesAttended: 0,
+      classesMarked: 0,
+      lateCount: 0,
+      gradeAverages: {},
+      gradesCount: 0,
+      videosCompleted: 0,
+      assignmentsSubmitted: 0,
+      gamesPlayed: 0,
+      bestGameStreak: 0,
+    });
+    expect(r.thin).toBe(true);
+    expect(r.stats).toHaveLength(0);
+    expect(r.strength).toBeNull();
+    expect(r.headline).not.toMatch(/look what you did/);
+  });
+});
+
+describe("intent helpers", () => {
+  it("stages follow the money first, then the intent", () => {
+    expect(stageFor(null, "none")).toBe("not_opened");
+    expect(stageFor({ targetLevel: "A2", seenAt: "x" }, "none")).toBe("opened");
+    expect(stageFor({ targetLevel: "A2", seenAt: "x", heldAt: "y" }, "none")).toBe("held");
+    expect(stageFor({ targetLevel: "A2", heldAt: "y" }, "deposit")).toBe("deposit_paid");
+    expect(stageFor(null, "full")).toBe("paid_in_full");
+  });
+
+  it("does not carry an A2 intent over to B1", () => {
+    expect(readIntent({ nextLevel: { targetLevel: "A2", seenAt: "x" } }, "B1")).toBeNull();
+    expect(readIntent({ nextLevel: { targetLevel: "A2", seenAt: "x" } }, "a2")).not.toBeNull();
+  });
+
+  it("whitelists and bounds what the browser sends", () => {
+    const d = cleanDetails({
+      phone: "+234 801 234 5678",
+      parentPhone: "<script>",
+      sessionSlot: "EVENING",
+      deliveryMode: "teleport",
+      note: "x".repeat(900),
+    });
+    expect(d.phone).toBe("+234 801 234 5678");
+    expect(d.parentPhone).toBeUndefined();
+    expect(d.sessionSlot).toBe("evening");
+    expect(d.deliveryMode).toBeUndefined();
+    expect(d.note).toHaveLength(500);
+  });
+});

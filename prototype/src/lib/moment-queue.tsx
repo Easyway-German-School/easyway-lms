@@ -108,6 +108,7 @@ export type MomentId =
   | "hybrid-combo"
   | "cohort-check"
   | "level-advance"
+  | "next-level"
   | "office-reply"
   | "class-schedule-changed"
   | "lesson-complete"
@@ -195,6 +196,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Quick check",
     dockBlurb: "Tell us if you're new or already in class, so your dashboard matches.",
+  },
+  /**
+   * Becca, personally: "your A1 is done, here is what you did and your A2
+   * plan." The same earned-news slot as level-advance, ranked just above it —
+   * it replaces that modal for anyone in the next-level audience, and it is the
+   * reason a graduate on a locked portal still gets spoken to. Never above
+   * orientation or the goal question (see the order note at the top).
+   */
+  "next-level": {
+    priority: 74,
+    kind: "modal",
+    dockLabel: "Your next level",
+    dockBlurb: "What you achieved, and your plan for what comes next.",
   },
   "level-advance": {
     priority: 70,

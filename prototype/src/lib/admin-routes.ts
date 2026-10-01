@@ -30,6 +30,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/journey", capability: "students" },
   // Finish a batch in one place: sign-off, certificates, move up, tell them.
   { prefix: "/admin/graduation", capability: "students" },
+  { prefix: "/admin/next-level", capability: "students" },
   { prefix: "/admin/promotions", capability: "students" },
   // The cohort console — grouping the roster by branch / level / batch month
   // and fixing the students who landed outside every cohort. Same desk as the
