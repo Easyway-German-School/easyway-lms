@@ -8,6 +8,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { CheckIcon } from "@/components/icons";
 import GermanyJourney from "@/components/journey/GermanyJourney";
 import Mascot, { type MascotMood } from "@/components/Mascot";
+import NextLevelWaitingCard from "@/components/next-level/NextLevelWaitingCard";
 import type { StudentAccess } from "@/lib/access";
 import type { SeatStatus } from "@/lib/batch-reservation";
 import { studentAccessQueryKey } from "@/lib/useStudentAccess";
@@ -315,6 +316,8 @@ export default function BatchLockScreen({ access }: { access: (StudentAccess & {
               </div>
             </motion.div>
           </div>
+
+          <NextLevelWaitingCard />
 
           {/* While they wait */}
           <div className="mt-8 grid w-full gap-3 text-left sm:grid-cols-2">

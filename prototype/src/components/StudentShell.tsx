@@ -12,6 +12,7 @@ import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
 import ScheduleChangeMoment from "@/components/moment/ScheduleChangeMoment";
 import CohortCheckMoment from "@/components/moment/CohortCheckMoment";
+import NextLevelMoment from "@/components/moment/NextLevelMoment";
 import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
@@ -681,6 +682,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         See CohortCheckMoment.
       */}
       <CohortCheckMoment />
+
+      {/*
+        Becca to a student whose level just ended: what they did, and their
+        next-level plan. Ungated by `hasAccess` — a graduate on the locked
+        countdown screen is exactly who this is for. See NextLevelMoment.
+      */}
+      <NextLevelMoment />
 
       {/*
         Only fires for a student signed in with a temporary login the office
