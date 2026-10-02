@@ -74,7 +74,7 @@ function instant(dayKey: string, clock: string): string {
 }
 
 function groupDotId(g: GroupSession): string {
-  return `g:${g.branchId ?? "?"}:${g.level}:${g.timeSlot}:${ymd(new Date(g.date))}`;
+  return `g:${g.branchId ?? "?"}:${g.level}:${g.timeSlot}:${g.batch ?? ""}:${ymd(new Date(g.date))}`;
 }
 
 const TRACKS = [
@@ -119,6 +119,7 @@ export default function AdminScheduleCalendar({
   const [mode, setMode] = useState("");
   const [track, setTrack] = useState("");
   const [level, setLevel] = useState("");
+  const [batch, setBatch] = useState("");
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [groupDraft, setGroupDraft] = useState<GroupDraft | null>(null);
@@ -161,6 +162,15 @@ export default function AdminScheduleCalendar({
     return [...set].sort();
   }, [groups, privates]);
 
+  const batchNames = useMemo(() => {
+    const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const set = new Set<string>();
+    groups.forEach((g) => g.batch && set.add(g.batch));
+    return [...set].sort((a, b) => MONTHS.indexOf(a) - MONTHS.indexOf(b));
+  }, [groups]);
+
+  const clashCount = useMemo(() => groups.filter((g) => g.clash).length, [groups]);
+
   const levelNames = useMemo(() => {
     const set = new Set<string>();
     groups.forEach((g) => g.level && set.add(g.level));
@@ -174,11 +184,13 @@ export default function AdminScheduleCalendar({
     (!tutor || g.tutorName === tutor) &&
     (!mode || g.deliveryMode === mode) &&
     (!level || g.level === level) &&
+    (!batch || g.batch === batch) &&
     track !== "private";
 
   // Private bookings carry no level, so any level filter hides them entirely.
   const privateMatches = (p: PrivateClass) =>
     !level &&
+    !batch &&
     (!branch || p.branchName === branch) &&
     (!tutor || p.tutorName === tutor) &&
     (!mode || p.deliveryMode === mode) &&
@@ -193,7 +205,7 @@ export default function AdminScheduleCalendar({
     }
     for (const list of map.values()) list.sort((a, b) => a.startTime.localeCompare(b.startTime));
     return map;
-  }, [groups, branch, tutor, mode, track, level]);
+  }, [groups, batch, branch, tutor, mode, track, level]);
 
   const privatesByDay = useMemo(() => {
     const map = new Map<string, PrivateClass[]>();
@@ -205,14 +217,14 @@ export default function AdminScheduleCalendar({
     for (const list of map.values())
       list.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
     return map;
-  }, [privates, branch, tutor, mode, track, level]);
+  }, [privates, batch, branch, tutor, mode, track, level]);
 
   const dotIndex = useMemo(() => {
     const map = new Map<string, { kind: "group"; g: GroupSession } | { kind: "private"; p: PrivateClass }>();
     for (const g of groups) if (groupMatches(g)) map.set(groupDotId(g), { kind: "group", g });
     for (const p of privates) if (privateMatches(p)) map.set(`p:${p.id}`, { kind: "private", p });
     return map;
-  }, [groups, privates, branch, tutor, mode, track, level]);
+  }, [groups, privates, batch, branch, tutor, mode, track, level]);
 
   const days = useMemo(() => {
     const map = new Map<string, DayCell>();
@@ -225,14 +237,14 @@ export default function AdminScheduleCalendar({
       cellAt(ymd(new Date(holiday.date))).closed = { label: holiday.label };
     }
     return map;
-  }, [groupsByDay, privatesByDay, closedDays, branch, tutor, mode, track, level]);
+  }, [groupsByDay, privatesByDay, closedDays, batch, branch, tutor, mode, track, level]);
 
   const legend = useMemo(
     () =>
       privates.some((p) => privateMatches(p) && toneForStatus("private", p.status) === "pink")
         ? [...BASE_LEGEND, NEEDS_TIME_LEGEND]
         : BASE_LEGEND,
-    [privates, branch, tutor, mode, track, level],
+    [privates, batch, branch, tutor, mode, track, level],
   );
 
   const dayGroups = selectedDay ? groupsByDay.get(selectedDay) ?? [] : [];
@@ -545,6 +557,11 @@ export default function AdminScheduleCalendar({
                               {g.status}
                             </span>
                           )}
+                          {g.clash ? (
+                            <span className="ml-1 mt-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-500/20 dark:text-amber-200">
+                              Shares a day
+                            </span>
+                          ) : null}
                         </div>
                         <span className="shrink-0 text-xs font-semibold text-[var(--accent)]">
                           {isEditing ? "Close" : "Edit"}
@@ -813,7 +830,7 @@ export default function AdminScheduleCalendar({
     </div>
   );
 
-  const activeFilters = [track, level, branch, tutor, mode].filter(Boolean).length;
+  const activeFilters = [track, level, batch, branch, tutor, mode].filter(Boolean).length;
 
   const toolbar = (
     <div className="space-y-3">
@@ -825,6 +842,12 @@ export default function AdminScheduleCalendar({
           <Pill label="Private next 7d" value={privateAnalytics.upcoming7Days} />
         </div>
       )}
+      {clashCount > 0 && (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          {clashCount} class{clashCount === 1 ? "" : "es"} share a day with another batch of the same level and sitting
+          (marked &ldquo;Shares a day&rdquo;). Editing or postponing one changes the other — check the weekday pattern in Settings.
+        </p>
+      )}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
         <div className="filter-grid">
           <LabeledSelect label="Show" value={track} onChange={setTrack} options={TRACKS} />
@@ -833,6 +856,12 @@ export default function AdminScheduleCalendar({
             value={level}
             onChange={setLevel}
             options={[{ value: "", label: "All levels" }, ...levelNames.map((l) => ({ value: l, label: l }))]}
+          />
+          <LabeledSelect
+            label="Batch"
+            value={batch}
+            onChange={setBatch}
+            options={[{ value: "", label: "All batches" }, ...batchNames.map((b) => ({ value: b, label: `${b} batch` }))]}
           />
           <LabeledSelect
             label="Branch"
@@ -855,6 +884,7 @@ export default function AdminScheduleCalendar({
               onClick={() => {
                 setTrack("");
                 setLevel("");
+                setBatch("");
                 setBranch("");
                 setTutor("");
                 setMode("");
