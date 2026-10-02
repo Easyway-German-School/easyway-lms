@@ -51,7 +51,9 @@ import {
   callbackToEgress,
   newRecorderJobId,
   recorderEgressId,
+  recorderFleetMode,
   recorderSelected,
+  recordingBackend,
   startRecorderJob,
   stopRecorderJob,
 } from "@/lib/recorder";
@@ -139,6 +141,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
      * hiccuped. `recorder-only` (deliberate, no LiveKit egress spend) does not.
      * With the flag unset this whole block is skipped: today's behaviour.
      */
+    console.info("[recording] starting", { room: input.roomName, backend: recordingBackend(), fleet: recorderFleetMode(), usesOurRecorder: recorderSelected() });
     if (recorderSelected()) {
       const viaRecorder = await startViaRecorder(input, objectKey);
       if (viaRecorder) return viaRecorder;
