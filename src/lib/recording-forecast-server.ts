@@ -27,25 +27,37 @@ export async function loadRecordingForecast(opts: { tenantId: string; now?: Date
   const to = new Date(now.getTime() + hours * 3_600_000);
   const branchFilter = { tenantId: opts.tenantId };
 
+  // A "physical" student has no video lesson at all (see the Student.deliveryMode comment in the
+  // schema) — only online/hybrid ever opens a LiveKit room, so only they can need a recorder.
+  const needsVideo = { deliveryMode: { in: ["online", "hybrid"] } };
+
   const [students, privateClasses, liveNow] = await Promise.all([
     prisma.student.findMany({
       where: { status: "active", branch: branchFilter },
-      select: { level: true, classType: true, sessionSlot: true, createdAt: true, admission: true, branch: { select: { id: true } } },
+      select: { level: true, classType: true, deliveryMode: true, sessionSlot: true, createdAt: true, admission: true, branch: { select: { id: true } } },
     }),
     prisma.privateClass.findMany({
-      where: { student: { status: "active", branch: branchFilter }, status: "scheduled", scheduledAt: { gte: new Date(from.getTime() - DAY), lte: to } },
+      where: { student: { status: "active", branch: branchFilter, ...needsVideo }, status: "scheduled", scheduledAt: { gte: new Date(from.getTime() - DAY), lte: to } },
       select: { scheduledAt: true, durationMinutes: true, status: true },
     }),
     prisma.liveClassSession.count({ where: { endedAt: null, lastSeenAt: { gte: new Date(now.getTime() - LIVE_HEARTBEAT_MS) } } }),
   ]);
 
-  // One cohort per branch + level + sitting, exactly as the admin schedule page groups them.
+  // One cohort per branch + level + sitting, exactly as the admin schedule page groups them. A cohort is
+  // only forecast if AT LEAST ONE of its students actually attends over video — a cohort made up entirely
+  // of physical students never opens a room, so a server held for it would record nothing.
   const cohorts = new Map<string, (typeof students)[number]>();
+  const cohortsNeedingVideo = new Set<string>();
   for (const student of students) {
     if (student.classType !== "private" && student.branch) {
       const key = `${student.branch.id}:${student.level}:${student.sessionSlot ?? "evening"}`;
       if (!cohorts.has(key)) cohorts.set(key, student);
+      const mode = String(student.deliveryMode ?? "physical").toLowerCase();
+      if (mode === "online" || mode === "hybrid") cohortsNeedingVideo.add(key);
     }
+  }
+  for (const key of cohorts.keys()) {
+    if (!cohortsNeedingVideo.has(key)) cohorts.delete(key);
   }
 
   const windowStart = from.getTime() - 2 * DAY;
