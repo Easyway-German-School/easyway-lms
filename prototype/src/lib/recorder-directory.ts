@@ -101,10 +101,35 @@ export async function loadDirectory(deps: DirectoryDeps = {}): Promise<RecorderD
     if (url) {
       const response = await (deps.fetch ?? fetch)(url, { signal: AbortSignal.timeout(5_000), cache: "no-store" });
       if (response.ok) directory = parseDirectory(await response.json(), now);
+      else console.error("Recorder server list could not be read: the bucket answered HTTP", response.status);
+    } else {
+      console.error("Recorder server list could not be read: no storage configured for recordings");
     }
-  } catch {
+  } catch (error) {
+    console.error("Recorder server list could not be read:", error instanceof Error ? error.message : String(error));
     directory = null;
   }
   cache = { at: now.getTime(), directory };
   return directory;
+}
+
+/**
+ * A fresh, uncached read of the directory that SAYS what went wrong, for the admin diagnostics. `loadDirectory`
+ * swallows errors on purpose (a class must never fail because of this); this one reports them.
+ */
+export async function probeDirectory(deps: DirectoryDeps = {}): Promise<{ ok: boolean; servers: number; open: number; ageSeconds: number | null; error: string | null }> {
+  const now = (deps.now ?? (() => new Date()))();
+  try {
+    const signedUrl = deps.signedUrl ?? (async () => (await import("@/lib/storage")).signedGetUrl(DIRECTORY_KEY, 120));
+    const url = await signedUrl();
+    if (!url) return { ok: false, servers: 0, open: 0, ageSeconds: null, error: "no storage is configured for recordings" };
+    const response = await (deps.fetch ?? fetch)(url, { signal: AbortSignal.timeout(5_000), cache: "no-store" });
+    if (!response.ok) return { ok: false, servers: 0, open: 0, ageSeconds: null, error: `the bucket answered HTTP ${response.status} for the server list` };
+    const raw = (await response.json()) as { updatedAt?: string };
+    const age = raw?.updatedAt ? Math.round((now.getTime() - Date.parse(raw.updatedAt)) / 1000) : null;
+    const directory = parseDirectory(raw, now);
+    return { ok: true, servers: directory.servers.length, open: rankServers(directory).length, ageSeconds: age, error: null };
+  } catch (error) {
+    return { ok: false, servers: 0, open: 0, ageSeconds: null, error: error instanceof Error ? error.message : String(error) };
+  }
 }

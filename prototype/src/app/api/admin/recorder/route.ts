@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
-import { loadDirectory } from "@/lib/recorder-directory";
-import { isRecorderEgressId, recorderFleetMode, recordingBackend } from "@/lib/recorder";
+import { loadDirectory, probeDirectory } from "@/lib/recorder-directory";
+import { recordingObjectStorage } from "@/lib/storage";
+import { isRecorderEgressId, recorderAppBase, recorderFleetMode, recorderSecret, recorderSelected, recordingBackend } from "@/lib/recorder";
 import { fallbackPolicy, liveKitMinutes, monthStartUtc } from "@/lib/recording-fallback";
 import { loadRecordingForecast } from "@/lib/recording-forecast-server";
 import { buildRecorderStatus } from "@/lib/recorder-status";
@@ -59,5 +60,19 @@ export async function GET() {
     liveKitMinutesMonth: liveKitMinutes(liveKit, now),
     budgetUsd: monthlyBudgetUsd(),
   });
-  return NextResponse.json({ ...status, spend, recordingsToday: shapeRecordings(today, isRecorderEgressId) });
+  // What THIS deployment actually sees. Everything here is non-secret (names and counts, never keys).
+  const storage = recordingObjectStorage();
+  let storageHost: string | null = null;
+  try { storageHost = storage?.endpoint ? new URL(storage.endpoint.startsWith("http") ? storage.endpoint : `https://${storage.endpoint}`).host : storage ? "(AWS S3)" : null; } catch { storageHost = "(unreadable)"; }
+  const diagnostics = {
+    backend: recordingBackend(),
+    fleet: recorderFleetMode(),
+    secretOk: !!recorderSecret(),
+    appBase: recorderAppBase(),
+    usesOurRecorder: recorderSelected(),
+    storage: { bucket: storage?.bucket ?? null, host: storageHost },
+    directory: fleet ? await probeDirectory() : null,
+    spendFileRead: serverSpendFile !== null,
+  };
+  return NextResponse.json({ ...status, spend, recordingsToday: shapeRecordings(today, isRecorderEgressId), diagnostics });
 }
