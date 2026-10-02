@@ -140,7 +140,15 @@ export async function GET() {
   const cohorts = new Map<string, typeof students[number]>();
   for (const student of students) {
     if (student.classType !== "private" && student.branch) {
-      const key = `${student.branch.id}:${student.level}:${student.sessionSlot ?? "evening"}`;
+      // The intake is part of the key: two batches at the same branch, level and
+      // sitting are two timetables. Keyed without it, only whichever student
+      // came first was shown and the other batch silently vanished.
+      const admissionRecord =
+        student.admission && typeof student.admission === "object" && !Array.isArray(student.admission)
+          ? (student.admission as Record<string, unknown>)
+          : {};
+      const batchKey = typeof admissionRecord.batch === "string" ? admissionRecord.batch.toLowerCase() : "";
+      const key = `${student.branch.id}:${student.level}:${student.sessionSlot ?? "evening"}:${batchKey}`;
       if (!cohorts.has(key)) cohorts.set(key, student);
     }
   }
@@ -163,12 +171,29 @@ export async function GET() {
       deliveryMode: student.deliveryMode,
       tutorName: session.lecturerName,
       tutorId: session.lecturerId,
-      cohort: `${student.level} · ${student.branch!.name} · ${session.timeSlot}`,
+      batch: schedule.batchMonth,
+      cohort: `${student.level} · ${student.branch!.name} · ${session.timeSlot} · ${schedule.batchMonth} batch`,
     })));
   }));
 
+  // Two batches of the same branch / level / sitting that meet on the same day
+  // share one ClassSession record (and one live room): editing or postponing one
+  // would change the other. Flag those days so the office sees it before it bites.
+  const allSessions = groupSchedules.flat();
+  const clashKey = (s: { branchId: string; level: string; timeSlot: string; date: string | Date }) =>
+    `${s.branchId}|${s.level}|${s.timeSlot}|${new Date(s.date).toISOString().slice(0, 10)}`;
+  const batchesByDay = new Map<string, Set<string>>();
+  for (const s of allSessions) {
+    const key = clashKey(s);
+    (batchesByDay.get(key) ?? batchesByDay.set(key, new Set()).get(key)!).add(s.batch);
+  }
+  const groupSessions = allSessions.map((s) => ({
+    ...s,
+    clash: (batchesByDay.get(clashKey(s))?.size ?? 0) > 1,
+  }));
+
   return NextResponse.json({
-    groupSessions: groupSchedules.flat(),
+    groupSessions,
     privateClasses: privateClasses.map((item) => ({
       id: item.id,
       studentId: item.studentId,

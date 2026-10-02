@@ -27,6 +27,10 @@ export type GroupSession = {
   deliveryMode: string | null;
   tutorName: string | null;
   tutorId: string | null;
+  /** Intake month this cohort belongs to, e.g. "October". */
+  batch?: string | null;
+  /** Another batch of the same branch / level / sitting meets on this exact day, so they share one record. */
+  clash?: boolean;
 };
 
 export type PrivateClass = {
