@@ -49,7 +49,8 @@ export type Env = Record<string, string | undefined>;
 export type RecordingBackend = "livekit" | "recorder" | "recorder-only";
 
 export function recordingBackend(env: Env = process.env): RecordingBackend {
-  const value = String(env.RECORDING_BACKEND ?? "").trim().toLowerCase();
+  // Tolerate stray quotes/spaces from however the value was typed into the host's settings page.
+  const value = String(env.RECORDING_BACKEND ?? "").trim().replace(/^["']+|["']+$/g, "").trim().toLowerCase();
   return value === "recorder" || value === "recorder-only" ? value : "livekit";
 }
 
@@ -80,7 +81,7 @@ export function recorderConfig(env: Env = process.env): RecorderConfig | null {
  * (see recorder-directory.ts). Off by default: with it unset everything behaves as before.
  */
 export function recorderFleetMode(env: Env = process.env): boolean {
-  return String(env.RECORDER_FLEET ?? "").trim() === "1";
+  return String(env.RECORDER_FLEET ?? "").trim().replace(/^["']+|["']+$/g, "").trim() === "1";
 }
 
 /**

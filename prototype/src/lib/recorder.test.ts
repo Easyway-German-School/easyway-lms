@@ -1,6 +1,7 @@
 import { EgressStatus } from "livekit-server-sdk";
 import { describe, expect, it } from "vitest";
 import {
+  recorderFleetMode,
   openRecorderToken,
   sealRecorderToken,
   sealingEnabled,
@@ -177,5 +178,14 @@ describe("sealing the room token for plain-http recorder servers", () => {
   it("can be switched off for a server that predates it", () => {
     expect(sealingEnabled({})).toBe(true);
     expect(sealingEnabled({ RECORDER_SEAL_TOKENS: "0" })).toBe(false);
+  });
+});
+
+describe("settings typed with stray quotes or spaces", () => {
+  it("still select the recorder", () => {
+    expect(recordingBackend({ RECORDING_BACKEND: ' "recorder" ' })).toBe("recorder");
+    expect(recordingBackend({ RECORDING_BACKEND: "'recorder-only'" })).toBe("recorder-only");
+    expect(recorderFleetMode({ RECORDER_FLEET: ' "1" ' })).toBe(true);
+    expect(recorderFleetMode({ RECORDER_FLEET: "0" })).toBe(false);
   });
 });

@@ -140,9 +140,19 @@ export async function POST(request: Request) {
         // replacement. See the module comment on
         // `restartRecordingIfNearingLimit` in class-recorder.ts for why a
         // capture needs swapping out at all.
-        void restartRecordingIfNearingLimit(recordingInput).then(() =>
-          ensureRecordingStarted(recordingInput),
-        );
+        //
+        // In `after()`, NOT a loose promise: a promise left running after the response is sent can be frozen or
+        // killed by the serverless platform half-way. Starting on OUR recorder takes several network calls (the
+        // server list, the server, the database), so it is exactly the kind of work that got cut off, which is how
+        // a class could end up on LiveKit without a single log line. `after()` keeps the function alive until it is done.
+        after(async () => {
+          try {
+            await restartRecordingIfNearingLimit(recordingInput);
+            await ensureRecordingStarted(recordingInput);
+          } catch (error) {
+            console.error("Recording start from the heartbeat failed", error);
+          }
+        });
       }
 
       return NextResponse.json({ ok: true, live: true });
