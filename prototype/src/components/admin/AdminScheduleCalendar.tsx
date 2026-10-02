@@ -244,7 +244,7 @@ export default function AdminScheduleCalendar({
       privates.some((p) => privateMatches(p) && toneForStatus("private", p.status) === "pink")
         ? [...BASE_LEGEND, NEEDS_TIME_LEGEND]
         : BASE_LEGEND,
-    [privates, branch, tutor, mode, track, level],
+    [privates, batch, branch, tutor, mode, track, level],
   );
 
   const dayGroups = selectedDay ? groupsByDay.get(selectedDay) ?? [] : [];
