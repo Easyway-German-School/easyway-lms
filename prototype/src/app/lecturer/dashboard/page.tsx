@@ -90,6 +90,15 @@ interface ActivityEntry {
 interface DashboardStats {
   assigned: boolean;
   assignmentLabel: string;
+  batches?: {
+    key: string;
+    batch: string | null;
+    batchRange: string;
+    branchName: string;
+    label: string;
+    students: number;
+    attendance: number | null;
+  }[];
   totalClasses: number;
   totalStudents: number;
   totalMaterials: number;
@@ -209,6 +218,53 @@ export default function LecturerDashboard() {
           </div>
         ) : stats ? (
           <div className="max-w-7xl mx-auto p-6">
+            {/* Which batch(es) the office has put this tutor on, each with its
+                own numbers. Nothing on this screen named the intake before. */}
+            {stats.assigned && stats.batches && stats.batches.length > 0 ? (
+              <div className="mb-8">
+                <h2 className="text-xl font-bold text-[var(--foreground)] mb-1">Your batches</h2>
+                <p className="text-sm text-[var(--muted)] mb-4">{stats.assignmentLabel}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {stats.batches.map((group) => (
+                    <Link
+                      key={group.key}
+                      href="/lecturer/students"
+                      className="group bg-[var(--surface)] border border-[var(--border)] rounded-lg p-5 transition hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-md"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
+                            {group.batch ? `${group.batch} batch` : "All intakes"}
+                          </p>
+                          <h3 className="mt-1 text-lg font-bold text-[var(--foreground)]">{group.label}</h3>
+                          <p className="text-sm text-[var(--muted)]">
+                            {group.branchName}
+                            {group.batchRange ? ` · ${group.batchRange}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-2xl font-bold text-[var(--foreground)]">{group.students}</p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {group.students === 0 ? "None placed yet" : group.students === 1 ? "Student" : "Students"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-[var(--foreground)]">
+                            {group.attendance === null ? "—" : `${group.attendance}%`}
+                          </p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {group.attendance === null ? "No register yet" : "Attendance"}
+                          </p>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {/* Each figure opens the page it was counted from. They were four
                 dead panels: a tutor could read "23 students" and had no way to
                 get from the number to the twenty-three people. */}

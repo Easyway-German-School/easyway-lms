@@ -91,6 +91,7 @@ export const CRON_PLAN: TickPlan = {
         "profile-branch-nudge",
         "profile-details-nudge",
         "material-send-nudge",
+        "tutor-batch-notice",
         "assignment-availability-nudge",
         "streak-reminders",
         "satzkette-turns",

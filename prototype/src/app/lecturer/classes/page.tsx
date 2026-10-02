@@ -75,7 +75,11 @@ function batchSummary(groups: GroupCard[], assignment: Assignment | undefined): 
   const pinned = groups.filter((group) => group.batchRange);
   if (pinned.length) {
     return pinned
-      .map((group) => `${group.label} · ${group.batchRange}`)
+      .map((group) =>
+        group.batch
+          ? `${group.label} · ${group.batch} batch (${group.batchRange})`
+          : `${group.label} · ${group.batchRange}`,
+      )
       .join(",  ");
   }
   return assignment?.batches.length ? assignment.batches.join(", ") : "All batches";
@@ -274,7 +278,7 @@ export default function LecturerClassesPage() {
                             <>
                               {" · "}
                               <span className="font-medium text-[var(--foreground-soft)]">
-                                {group.batchRange} batch
+                                {group.batch ? `${group.batch} batch · ${group.batchRange}` : `${group.batchRange} batch`}
                               </span>
                             </>
                           ) : null}
