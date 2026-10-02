@@ -1640,8 +1640,11 @@ export default function AdminTutorsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the assignment");
+      const toldBatches: string[] = Array.isArray(data.toldBatches) ? data.toldBatches : [];
       setSuccess(
-        "Assignment saved and the tutor has been told. The students who fit this class are listed below — link them to finish.",
+        `Assignment saved and the tutor has been told${
+          toldBatches.length ? ` (emailed about the ${toldBatches.join(" and ")} batch)` : ""
+        }. The students who fit this class are listed below — link them to finish.`,
       );
       // Stay on the tutor instead of closing: the very next thing the office
       // wants is the list of students who fit the class they just saved.

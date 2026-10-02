@@ -277,6 +277,11 @@ export async function POST(request: NextRequest) {
     await syncLecturerClasses(user.lecturer.id, assignment.levels);
   }
 
+  if (user.lecturer?.id) {
+    const { announceTutorBatches } = await import("@/lib/tutor-batch-notice");
+    await announceTutorBatches({ lecturerId: user.lecturer.id }).catch((error) => console.error("Batch notice failed", error));
+  }
+
   return NextResponse.json(
     {
       success: true,
@@ -440,7 +445,19 @@ export async function PATCH(request: NextRequest) {
     }).catch((error) => console.error("Assignment notification failed", error));
   }
 
-  return NextResponse.json({ success: true });
+  // Name the batch to the tutor (bell, push, email). Deduped per tutor+batch,
+  // so re-saving the same assignment never repeats it.
+  let toldBatches: string[] = [];
+  if (touchesAssignment) {
+    const { announceTutorBatches } = await import("@/lib/tutor-batch-notice");
+    const told = await announceTutorBatches({ lecturerId }).catch((error) => {
+      console.error("Batch notice failed", error);
+      return null;
+    });
+    toldBatches = told?.told ?? [];
+  }
+
+  return NextResponse.json({ success: true, toldBatches });
 }
 
 export async function DELETE(request: NextRequest) {

@@ -279,6 +279,13 @@ async function handleGET(request: NextRequest) {
     return nudgeTutorsWithUnsentMaterials();
   });
 
+  // Tutors assigned to an intake before they were ever told get told once.
+  // Idempotent per tutor+batch via the dedupeKey.
+  register("tutor-batch-notice", async () => {
+    const { announceTutorBatches } = await import("@/lib/tutor-batch-notice");
+    return announceTutorBatches();
+  });
+
   /**
    * "You can submit assignments now" — once ever per student, the tick their
    * portal is both unlocked (deposit or full payment cleared) and there is at
