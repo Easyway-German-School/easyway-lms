@@ -222,7 +222,7 @@ function EnquiriesInner() {
    * "anything new / who is typing" check below, so a student's message shows up
    * within seconds instead of the next queue tick.
    */
-  useEffect(() => startPolling(load, { intervalMs: 15_000, immediate: false }), [load]);
+  useEffect(() => startPolling(load, { intervalMs: 15_000, immediate: false, idle: false }), [load]);
 
   const live = useTicketLive({
     ticketId: selected,

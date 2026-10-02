@@ -1,6 +1,8 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import { fetchJsonShared } from "@/lib/client/shared-fetch";
+import { startPolling } from "@/lib/client/poll";
 import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -228,23 +230,22 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const [unreadCommunity, setUnreadCommunity] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    const poll = async () => {
+    const poll = async (force = false) => {
       try {
-        const res = await fetch("/api/community/unread", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
+        const data = await fetchJsonShared<{ total?: number }>("/api/community/unread", { force });
+        if (cancelled) return;
         setUnreadCommunity(Number(data.total) || 0);
       } catch {
         /* Silent — a missing badge is not worth a console line. */
       }
     };
-    poll();
-    const timer = window.setInterval(poll, 120_000);
-    window.addEventListener("easyway:unread-changed", poll);
+    const onChanged = () => void poll(true);
+    const stopPolling = startPolling(() => poll(), { intervalMs: 120_000 });
+    window.addEventListener("easyway:unread-changed", onChanged);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener("easyway:unread-changed", poll);
+      stopPolling();
+      window.removeEventListener("easyway:unread-changed", onChanged);
     };
   }, []);
 

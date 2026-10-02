@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { idleForMs, idleScale } from "@/lib/client/activity";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
@@ -187,7 +188,7 @@ export default function PortalUpdates() {
         if (!cancelled) {
           timer = window.setTimeout(
             tick,
-            document.visibilityState === "visible" ? POLL_ACTIVE_MS : POLL_HIDDEN_MS,
+            document.visibilityState === "visible" ? POLL_ACTIVE_MS * (idleScale(idleForMs()) ?? 3) : POLL_HIDDEN_MS,
           );
         }
       }
