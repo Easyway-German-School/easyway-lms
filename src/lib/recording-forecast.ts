@@ -27,9 +27,23 @@ export type ForecastGroupSession = {
 };
 
 export type ForecastPrivateClass = {
+  /** Lets a no-show private lesson be matched against an actual session by its booking, not just its time. */
+  id?: string;
   scheduledAt: Date;
   durationMinutes: number | null;
   status: string;
+};
+
+/**
+ * A class that actually happened: a `LiveClassSession` row, reduced to just enough to match it back to the
+ * scheduled window it belongs to. `cohortKey` for a group class (same shape as `ForecastGroupSession.cohortKey`),
+ * `privateClassId` for a one-to-one lesson — whichever applies is set, the other is null.
+ */
+export type ActualSession = {
+  cohortKey: string | null;
+  privateClassId: string | null;
+  startedAt: Date;
+  endedAt: Date | null;
 };
 
 export type ForecastBucket = { start: string; end: string; classes: number };
@@ -37,8 +51,12 @@ export type ForecastBucket = { start: string; end: string; classes: number };
 export type ForecastInput = {
   groupSessions: ForecastGroupSession[];
   privateClasses: ForecastPrivateClass[];
+  /** Classes that actually started, used to tell a real class from a no-show (see `CONFIRM_GRACE_MINUTES`). */
+  actualSessions?: ActualSession[];
   from: Date;
   to: Date;
+  /** The moment "has this started yet" is judged against. Defaults to `from` (the server always passes "now"). */
+  now?: Date;
   /** Resolution of the forecast. Classes start and end on 5-minute marks, so 15 loses nothing. Default 15. */
   bucketMinutes?: number;
   tz?: string;
@@ -46,6 +64,17 @@ export type ForecastInput = {
 
 const DEFAULT_PRIVATE_MINUTES = 60;
 const MINUTE = 60_000;
+
+/**
+ * A scheduled class gets this long, past its start time, to actually open a room before the forecast gives up
+ * on it. Tutors run late; this is the benefit of the doubt. Past this, an unconfirmed class stops costing money
+ * — a no-show (sickness, a forgotten class, a tutor who never logs on) no longer keeps a server paid for.
+ * If a tutor really is just running later than this, the room still opens: `liveNow` on the forecast (and the
+ * recorder fleet's own "live now" allowance) picks up any room opened after the fact, booting a fresh server a
+ * few minutes late rather than one sitting idle and billed for the whole class.
+ */
+export const CONFIRM_GRACE_MINUTES = 15;
+const CONFIRM_GRACE_MS = CONFIRM_GRACE_MINUTES * MINUTE;
 
 /** The moment a group class starts and ends, or null when it is not going to happen. */
 export function groupSessionWindow(session: ForecastGroupSession, tz: string = SCHOOL_TIMEZONE): { start: Date; end: Date } | null {
@@ -75,6 +104,20 @@ export function privateClassWindow(item: ForecastPrivateClass): { start: Date; e
 export function buildForecast(input: ForecastInput): ForecastBucket[] {
   const tz = input.tz ?? SCHOOL_TIMEZONE;
   const step = (input.bucketMinutes ?? 15) * MINUTE;
+  const now = (input.now ?? input.from).getTime();
+  const actual = input.actualSessions ?? [];
+
+  // Did something matching `matches` actually run during (or just before, within the grace window) `w`?
+  const confirmed = (w: { start: number; end: number }, matches: (s: ActualSession) => boolean) =>
+    actual.some((s) => matches(s) && s.startedAt.getTime() < w.end && (s.endedAt ? s.endedAt.getTime() : Infinity) > w.start - CONFIRM_GRACE_MS);
+
+  // Once the grace deadline has passed with nothing confirmed, the window stops counting from there on. Still in
+  // the future, or already confirmed: counts in full (pre-warm, and a late-but-real start keeps its server).
+  const clipNoShow = (w: { start: number; end: number }, matches: (s: ActualSession) => boolean) => {
+    const deadline = w.start + CONFIRM_GRACE_MS;
+    if (now < deadline || confirmed(w, matches)) return w;
+    return { start: w.start, end: Math.min(w.end, deadline) };
+  };
 
   const windows: { start: number; end: number }[] = [];
   const seen = new Set<string>();
@@ -84,11 +127,14 @@ export function buildForecast(input: ForecastInput): ForecastBucket[] {
     const key = `${session.cohortKey}|${w.start.getTime()}`;
     if (seen.has(key)) continue; // the same cohort listed twice is still one class
     seen.add(key);
-    windows.push({ start: w.start.getTime(), end: w.end.getTime() });
+    const clipped = clipNoShow({ start: w.start.getTime(), end: w.end.getTime() }, (s) => s.cohortKey === session.cohortKey);
+    if (clipped.end > clipped.start) windows.push(clipped);
   }
   for (const item of input.privateClasses) {
     const w = privateClassWindow(item);
-    if (w) windows.push({ start: w.start.getTime(), end: w.end.getTime() });
+    if (!w) continue;
+    const clipped = item.id ? clipNoShow({ start: w.start.getTime(), end: w.end.getTime() }, (s) => s.privateClassId === item.id) : { start: w.start.getTime(), end: w.end.getTime() };
+    if (clipped.end > clipped.start) windows.push(clipped);
   }
 
   const from = Math.floor(input.from.getTime() / step) * step;
