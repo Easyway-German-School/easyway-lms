@@ -112,3 +112,23 @@ describe("graduationVerdict", () => {
     expect(graduationVerdict({ ...base, level: "C2" })).toMatchObject({ state: "blocked", reason: "top_of_ladder" });
   });
 });
+
+describe("nextPlacement — per-level opening day", () => {
+  const overrides = { "2026-10:A1": 5, "2026-10:A2": 12 };
+  const base = { batch: "August", registeredAt: registered, now: at("2026-09-28T10:00:00.000Z"), startDayOverrides: overrides };
+
+  it("opens A2 on the 12th when the office set A2 to open then", () => {
+    const place = nextPlacement({ ...base, level: "A2" });
+    expect(place?.label).toBe("October 2026");
+    // Lagos midnight on the 12th is 23:00 UTC on the 11th.
+    expect(place?.startsOn.toISOString()).toBe("2026-10-11T23:00:00.000Z");
+  });
+
+  it("opens A1 on the 5th", () => {
+    expect(nextPlacement({ ...base, level: "A1" })?.startsOn.toISOString()).toBe("2026-10-04T23:00:00.000Z");
+  });
+
+  it("falls back to the month's day when the level has no override", () => {
+    expect(nextPlacement({ ...base, level: "B1" })?.startsOn.toISOString()).toBe("2026-09-30T23:00:00.000Z");
+  });
+});

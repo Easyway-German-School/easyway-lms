@@ -48,7 +48,7 @@ export type ExclusionReason = "top_of_ladder" | "no_batch" | "not_started" | "fi
 export const EXCLUSION_LABEL: Record<ExclusionReason, string> = {
   top_of_ladder: "At the top of the ladder (nothing to move up to)",
   no_batch: "No readable batch month on their record",
-  not_started: "No confirmed start date yet, or classes haven't started",
+  not_started: "Their confirmed start date is still in the future",
   first_month: "Still in their first month of the level",
   long_finished: "Finished more than 45 days ago",
 };
@@ -99,8 +99,9 @@ export type AudienceInput = {
  * Returns null for everybody else — including a new student who has not been
  * taught anything. That was the original level-advance bug (congratulating a
  * sign-up on "finishing A1" before their first class), so a student must have a
- * confirmed start date that has already passed for the `ended` and `midway`
- * routes to open.
+ * batch whose months have run (or a confirmed start date that has passed) for
+ * the `ended` and `midway` routes to open — a no-start-date student is judged
+ * by their batch month rather than being dropped.
  */
 export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | null {
   const now = input.now ?? new Date();
@@ -151,31 +152,34 @@ export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | 
     return { state: "signed_off", finishedLevel: level, targetLevel: target };
   }
 
-  // 3. The batch's months are up, and they were actually taught.
-  if (input.classesStartedAt) {
-    const created = input.createdAt ? new Date(input.createdAt) : null;
-    const window = resolveBatchWindow(batchFromAdmission(admission), {
-      registeredAt: created && !Number.isNaN(created.getTime()) ? created : null,
-      now,
-      months: sessionDurationMonths(input.sessionSlot),
-    });
-    if (window && window.hasEnded && now.getTime() - window.endsOn.getTime() <= JUST_FINISHED_DAYS * DAY_MS) {
-      return { state: "ended", finishedLevel: level, targetLevel: target };
-    }
+  // 3. The batch's months are up. An office-confirmed start date, when there
+  // is one, is respected — in the FUTURE it means "not started yet" and keeps
+  // them out. But most students have NO confirmed date on file (only a batch
+  // month), and requiring one hid nearly everybody ("24 of 500+"), so without a
+  // date the batch month decides. The paid-only rule at send time is what keeps
+  // a no-show from being messaged.
+  const confirmed = input.classesStartedAt ? new Date(input.classesStartedAt) : null;
+  const confirmedValid = confirmed !== null && !Number.isNaN(confirmed.getTime());
+  if (confirmedValid && confirmed.getTime() > now.getTime()) return null;
 
-    // 4. A month in and still teaching: the October intake's turn comes here,
-    // not at the door. They get the same journey with "halfway" wording, so a
-    // seat can be kept early; nobody is congratulated on finishing something
-    // they have not finished.
-    const started = new Date(input.classesStartedAt);
-    if (
-      !Number.isNaN(started.getTime()) &&
-      now.getTime() - started.getTime() >= MIDWAY_DAYS * DAY_MS &&
-      window &&
-      !window.hasEnded
-    ) {
-      return { state: "midway", finishedLevel: level, targetLevel: target };
-    }
+  const created = input.createdAt ? new Date(input.createdAt) : null;
+  const window = resolveBatchWindow(batchFromAdmission(admission), {
+    registeredAt: created && !Number.isNaN(created.getTime()) ? created : null,
+    now,
+    months: sessionDurationMonths(input.sessionSlot),
+  });
+  if (!window) return null;
+
+  if (window.hasEnded && now.getTime() - window.endsOn.getTime() <= JUST_FINISHED_DAYS * DAY_MS) {
+    return { state: "ended", finishedLevel: level, targetLevel: target };
+  }
+
+  // 4. A month in and still teaching: the October intake's turn comes here, not
+  // at the door. Same journey with "halfway" wording, so a seat can be kept
+  // early; nobody is congratulated on finishing something still running.
+  const since = confirmedValid ? confirmed : window.startsOn;
+  if (!window.hasEnded && now.getTime() - since.getTime() >= MIDWAY_DAYS * DAY_MS) {
+    return { state: "midway", finishedLevel: level, targetLevel: target };
   }
 
   return null;
@@ -536,7 +540,7 @@ export function whyExcluded(input: AudienceInput): ExclusionReason | null {
   if (!nextLevelAfter(level)) return "top_of_ladder";
   const batch = batchFromAdmission(input.admission);
   if (!batch) return "no_batch";
-  if (!input.classesStartedAt || new Date(input.classesStartedAt).getTime() > now.getTime()) return "not_started";
+  if (input.classesStartedAt && new Date(input.classesStartedAt).getTime() > now.getTime()) return "not_started";
   const created = input.createdAt ? new Date(input.createdAt) : null;
   const window = resolveBatchWindow(batch, {
     registeredAt: created && !Number.isNaN(created.getTime()) ? created : null,

@@ -118,6 +118,7 @@ export function opensFor(
     registeredAt: student.createdAt,
     now,
     startDayOverrides: overrides,
+    level: audience.targetLevel,
   });
   if (!place) return { opensOn: null, opensLabel: null };
 

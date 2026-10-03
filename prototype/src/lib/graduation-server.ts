@@ -261,6 +261,7 @@ async function scan(options: {
         registeredAt: student.createdAt,
         now,
         startDayOverrides: options.startDayOverrides,
+        level: nextLevelAfter(student.level),
       }),
       verdict: graduationVerdict({
         level: student.level,

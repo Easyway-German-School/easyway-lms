@@ -1,6 +1,6 @@
 import { MONTH_NAMES, resolveBatchWindow } from "@/lib/batch";
 import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
-import { intakeMonthKey, type IntakeStartDayOverrides } from "@/lib/intake";
+import { intakeMonthKey, startDayFor, type IntakeStartDayOverrides } from "@/lib/intake";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 
 /**
@@ -93,6 +93,13 @@ export function nextPlacement(input: {
   registeredAt?: Date | null;
   now?: Date;
   startDayOverrides?: IntakeStartDayOverrides;
+  /**
+   * The level they are MOVING INTO. Intakes can open on a different day per
+   * level (A1 Oct 5, A2–B2 Oct 12); without this the month's default day was
+   * used, so a graduate was stamped with a start date that had already passed
+   * and their portal opened before their level did.
+   */
+  level?: string | null;
 }): NextPlacement | null {
   const now = input.now ?? new Date();
   const window = resolveBatchWindow(input.batch, {
@@ -109,8 +116,7 @@ export function nextPlacement(input: {
   const year = Math.floor(absolute / 12);
   const monthIndex = absolute % 12;
   const monthKey = intakeMonthKey(year, monthIndex);
-  const overrideDay = input.startDayOverrides?.[monthKey];
-  const day = overrideDay && overrideDay >= 1 && overrideDay <= 28 ? overrideDay : 1;
+  const day = startDayFor(input.startDayOverrides, monthKey, input.level);
   const startsOn = zonedTimeToInstant(`${monthKey}-${String(day).padStart(2, "0")}`, "00:00");
 
   return {
