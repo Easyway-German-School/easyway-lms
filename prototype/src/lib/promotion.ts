@@ -303,6 +303,7 @@ export async function promoteStudents(
         registeredAt: student.createdAt,
         now,
         startDayOverrides: overrides,
+        level: next,
       });
     }
     const landingMonth = place?.month ?? monthName;

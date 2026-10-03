@@ -23,13 +23,25 @@ describe("resolveJourneyAudience", () => {
     expect(a).toEqual({ state: "ended", finishedLevel: "A1", targetLevel: "A2" });
   });
 
-  it("never opens for someone with no confirmed start date", () => {
+  it("judges a student with NO confirmed start date by their batch month, not drops them", () => {
     expect(
       resolveJourneyAudience({
         level: "A1",
         admission: { batch: "August" },
         createdAt: created,
         classesStartedAt: null,
+        now,
+      }),
+    ).toEqual({ state: "ended", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("still respects a confirmed start date that is in the future", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "August" },
+        createdAt: created,
+        classesStartedAt: new Date("2026-12-01T00:00:00Z"),
         now,
       }),
     ).toBeNull();
@@ -188,7 +200,7 @@ describe("whyExcluded", () => {
   const base = { level: "A1", createdAt: created, now };
   it("names the first rule that kept a student out", () => {
     expect(whyExcluded({ ...base, admission: {}, classesStartedAt: new Date("2026-08-03") })).toBe("no_batch");
-    expect(whyExcluded({ ...base, admission: { batch: "August" }, classesStartedAt: null })).toBe("not_started");
+    expect(whyExcluded({ ...base, admission: { batch: "August" }, classesStartedAt: new Date("2026-12-01") })).toBe("not_started");
     expect(whyExcluded({ ...base, admission: { batch: "October" }, classesStartedAt: new Date("2026-09-25") })).toBe("first_month");
     expect(
       whyExcluded({ ...base, admission: { batch: "May" }, classesStartedAt: new Date("2026-05-04"), createdAt: new Date("2026-04-20") }),
@@ -197,5 +209,41 @@ describe("whyExcluded", () => {
   });
   it("is null for anyone who IS in the journey", () => {
     expect(whyExcluded({ ...base, admission: { batch: "August" }, classesStartedAt: new Date("2026-08-03") })).toBeNull();
+  });
+});
+
+describe("manual offer (Students → Graduate)", () => {
+  it("opens the journey for a student the automatic rules would skip", () => {
+    const a = resolveJourneyAudience({
+      level: "A1",
+      admission: { batch: "October", nextLevel: { targetLevel: "A2", manualOffer: true } },
+      createdAt: created,
+      classesStartedAt: null,
+      now,
+    });
+    expect(a).toEqual({ state: "invited", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("recognises a manually moved-up student even with no promotion marker", () => {
+    const a = resolveJourneyAudience({
+      level: "A2",
+      admission: { batch: "October", nextLevel: { targetLevel: "A2", manualOffer: true } },
+      createdAt: created,
+      classesStartedAt: null,
+      now,
+    });
+    expect(a).toEqual({ state: "promoted", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("ignores an offer for the wrong level", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "October", nextLevel: { targetLevel: "B2", manualOffer: true } },
+        createdAt: created,
+        classesStartedAt: null,
+        now,
+      }),
+    ).toBeNull();
   });
 });

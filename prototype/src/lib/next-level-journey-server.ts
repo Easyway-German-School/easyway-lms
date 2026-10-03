@@ -53,6 +53,11 @@ export type JourneyPayload = {
    * function that owns the paywall rule (getStudentAccess), never recomputed.
    */
   portalOpen: boolean;
+  /**
+   * Who the pop, bell, push and email may reach: an open portal, OR a student the
+   * office chose by hand (an explicit decision beats the paid-only default).
+   */
+  reachable: boolean;
   recap: Recap;
   offer: JourneyOffer;
   intent: NextLevelIntent | null;
@@ -95,7 +100,7 @@ export async function loadJourneyStudent(where: { id?: string; userId?: string }
 }
 
 /** The first date the next level can be taught, in the school's own calendar. */
-function opensFor(
+export function opensFor(
   student: JourneyStudent,
   audience: JourneyAudience,
   overrides: IntakeStartDayOverrides,
@@ -113,6 +118,7 @@ function opensFor(
     registeredAt: student.createdAt,
     now,
     startDayOverrides: overrides,
+    level: audience.targetLevel,
   });
   if (!place) return { opensOn: null, opensLabel: null };
 
@@ -255,6 +261,7 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
   return {
     audience,
     portalOpen: access?.hasAccess === true,
+    reachable: access?.hasAccess === true || intent?.manualOffer === true,
     recap: await buildStudentRecap(student, audience),
     offer: {
       tuitionFee: fee,
