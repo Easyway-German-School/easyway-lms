@@ -1628,6 +1628,18 @@ model ClassRecording {
   keepForever Boolean @default(false)
 
   /**
+   * Set when the tutor who taught this class chose, in the end-of-class
+   * prompt shown for a class that ran under RETENTION.minWorthKeepingSeconds
+   * (see class-recorder.ts's `leave` flow and `/api/live/recording/discard`),
+   * to delete the recording outright rather than let it sit through the
+   * normal hold-and-48h-grace review. `finaliseRecording` honours this
+   * unconditionally, skipping `isTooShortToKeep` entirely — the tutor was
+   * THERE for the class and already made the call; there is nothing left for
+   * a grace window to protect. Never set for a private one-to-one.
+   */
+  tutorDiscardRequestedAt DateTime?
+
+  /**
    * When retention reclaimed the file. Null while the video still exists.
    */
   purgedAt DateTime?

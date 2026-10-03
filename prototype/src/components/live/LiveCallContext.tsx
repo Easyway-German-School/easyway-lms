@@ -28,6 +28,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { LeaveOutcome } from "./LiveKitClassroom";
 import type { LiveSession } from "@/lib/live-call-session";
 import type { QualityMode } from "@/lib/live-classroom";
+import { SHORT_RECORDING_SECONDS } from "@/lib/recording-thresholds";
 
 export type DockState = "full" | "minimized";
 
@@ -41,6 +42,18 @@ type PendingOutcome = {
   outcome: LeaveOutcome;
 };
 
+/**
+ * Shown once, right after a TUTOR deliberately ends their own class, when
+ * the class they were just in ran under `SHORT_RECORDING_SECONDS` — a
+ * misclick, a connection test, a false start. `durationMs` is the tutor's
+ * own elapsed time in the room (see `LiveKitClassroom`'s `joinedAtRef`), an
+ * estimate: the actual uploaded file is still minutes from finishing
+ * encoding, so this is the earliest moment the tutor can be asked at all.
+ * Never shown for a private one-to-one — a short private lesson is still a
+ * real, paid lesson.
+ */
+export type ShortRecordingPrompt = { roomName: string; durationMs: number };
+
 type LiveCallContextValue = {
   activeCall: ActiveCall | null;
   dockState: DockState;
@@ -49,6 +62,9 @@ type LiveCallContextValue = {
   reportLeave: (outcome: LeaveOutcome) => void;
   /** Called by the page that started the call, once, to claim the outcome and clear it. */
   takeOutcomeFor: (roomName: string) => LeaveOutcome | null;
+  shortRecordingPrompt: ShortRecordingPrompt | null;
+  /** The tutor's answer to the prompt above — "delete" tells the server now, "keep" just dismisses it. */
+  resolveShortRecordingPrompt: (choice: "delete" | "keep") => void;
 };
 
 const LiveCallCtx = createContext<LiveCallContextValue | null>(null);
@@ -79,6 +95,8 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  const [shortRecordingPrompt, setShortRecordingPrompt] = useState<ShortRecordingPrompt | null>(null);
+
   const reportLeave = useCallback(
     (outcome: LeaveOutcome) => {
       setActiveCall((current) => {
@@ -89,6 +107,9 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
         // may not even be mounted when this fires.
         if (current.session.role === "tutor" && outcome.reason === "self") {
           endClassOnServer();
+          if (!current.session.isPrivate && outcome.durationMs < SHORT_RECORDING_SECONDS * 1000) {
+            setShortRecordingPrompt({ roomName: current.session.roomName, durationMs: outcome.durationMs });
+          }
         }
         pendingOutcomeRef.current = { roomName: current.session.roomName, outcome };
         return null;
@@ -102,6 +123,19 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
     if (!pending || pending.roomName !== roomName) return null;
     pendingOutcomeRef.current = null;
     return pending.outcome;
+  }, []);
+
+  const resolveShortRecordingPrompt = useCallback((choice: "delete" | "keep") => {
+    setShortRecordingPrompt((pending) => {
+      if (pending && choice === "delete") {
+        void fetch("/api/live/recording/discard", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomName: pending.roomName }),
+        }).catch(() => {});
+      }
+      return null;
+    });
   }, []);
 
   // THE TUTOR'S HEARTBEAT — moved from the /live page so it keeps beating
@@ -131,8 +165,17 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
   }, [beating, heartbeatMs]);
 
   const value = useMemo<LiveCallContextValue>(
-    () => ({ activeCall, dockState, setDockState, startCall, reportLeave, takeOutcomeFor }),
-    [activeCall, dockState, startCall, reportLeave, takeOutcomeFor],
+    () => ({
+      activeCall,
+      dockState,
+      setDockState,
+      startCall,
+      reportLeave,
+      takeOutcomeFor,
+      shortRecordingPrompt,
+      resolveShortRecordingPrompt,
+    }),
+    [activeCall, dockState, startCall, reportLeave, takeOutcomeFor, shortRecordingPrompt, resolveShortRecordingPrompt],
   );
 
   return <LiveCallCtx.Provider value={value}>{children}</LiveCallCtx.Provider>;

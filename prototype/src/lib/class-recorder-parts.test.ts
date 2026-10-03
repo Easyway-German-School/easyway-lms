@@ -12,6 +12,7 @@ type Row = {
   id: string; egressId: string; roomName: string; tenantId: string; level: string; sessionSlot: string; branchId: string | null;
   privateClassId: string | null; status: string; startedAt: Date; endedAt?: Date; objectKey: string | null; fileUrl: string | null;
   durationSeconds: number | null; sizeBytes: number | null; materialId: string | null; keepForever: boolean;
+  tutorDiscardRequestedAt?: Date | null;
 };
 
 const db = vi.hoisted(() => ({ recordings: [] as unknown[], materials: [] as { id: string; title: string }[], notified: [] as string[] }));
@@ -56,10 +57,12 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/notify", () => ({ KIND: { recordingFailed: "rf", materialPublished: "mp" }, notifyInBackground: (n: { dedupeKey: string }) => db.notified.push(n.dedupeKey) }));
 vi.mock("@/lib/recording-thumbnail", () => ({ createRecordingThumbnail: async () => "/thumb.jpg" }));
+const deleteRecordingObject = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("@/lib/recording", () => ({
   AUDIO_ENCODING: {}, CLASS_ENCODING: {}, buildFileOutput: () => ({}), egressClient: () => null, egressTemplateBaseUrl: () => null,
   recordingConfigured: () => true, recordingObjectKey: () => "k", recordingPublicUrl: (key: string) => `/api/files/${key}`,
   recordingStorage: () => ({}), recordingVariant: () => "video", verifyRecordingObject: async () => ({ ok: true }),
+  deleteRecordingObject,
 }));
 
 import { finaliseRecording } from "./class-recorder";
@@ -87,7 +90,7 @@ function finish(row: Row, minutes: number) {
   });
 }
 
-beforeEach(() => { db.recordings.length = 0; db.materials.length = 0; db.notified.length = 0; n = 0; });
+beforeEach(() => { db.recordings.length = 0; db.materials.length = 0; db.notified.length = 0; n = 0; deleteRecordingObject.mockClear(); });
 
 describe("a class cut into parts is judged as a whole", () => {
   it("THE BUG: a crash 25 minutes before the end — the 25-minute tail is kept, not purged", async () => {
@@ -106,27 +109,27 @@ describe("a class cut into parts is judged as a whole", () => {
     const first = addHeld({ minutes: 0, startedAt: "2026-10-05T09:00:00Z" });
     const second = addHeld({ minutes: 0, startedAt: "2026-10-05T09:35:00Z" });
 
-    expect(await finish(first, 35)).toBe("created");
-    expect(first.materialId).toBeNull(); // 35 min alone: held (the class could still turn out short)
+    expect(await finish(first, 20)).toBe("created");
+    expect(first.materialId).toBeNull(); // 20 min alone: held (the class could still turn out short)
     expect(first.status).toBe("completed");
 
     expect(await finish(second, 120)).toBe("created");
     expect(second.materialId).not.toBeNull();
-    expect(first.materialId).not.toBeNull(); // rescued: the whole class is 155 min
+    expect(first.materialId).not.toBeNull(); // rescued: the whole class is 140 min
     expect(db.materials).toHaveLength(2);
   });
 
   it("two short parts that add up to a real class: the second rescues the first", async () => {
     const first = addHeld({ minutes: 0, startedAt: "2026-10-05T09:00:00Z" });
     const second = addHeld({ minutes: 0, startedAt: "2026-10-05T09:30:00Z" });
-    await finish(first, 30);
+    await finish(first, 20);
     expect(first.materialId).toBeNull();
-    await finish(second, 25); // 55 min total
+    await finish(second, 15); // 35 min total
     expect(second.materialId).not.toBeNull();
     expect(first.materialId).not.toBeNull();
   });
 
-  it("a genuinely short class (parts add up to under 40 minutes) is still held, not shown", async () => {
+  it("a genuinely short class (parts add up to under 30 minutes) is still held, not shown", async () => {
     const first = addHeld({ minutes: 0, startedAt: "2026-10-05T09:00:00Z" });
     const second = addHeld({ minutes: 0, startedAt: "2026-10-05T09:15:00Z" });
     await finish(first, 10);
@@ -140,7 +143,7 @@ describe("a class cut into parts is judged as a whole", () => {
     const mine = addHeld({ minutes: 0, startedAt: "2026-10-05T09:00:00Z" });
     addHeld({ minutes: 0, startedAt: "2026-10-05T09:00:00Z", roomName: "ew-abuja-a1-morning-t-2", status: "completed", durationSeconds: 200 * MIN, materialId: "mx" });
     addHeld({ minutes: 0, startedAt: "2026-10-04T09:00:00Z", status: "completed", durationSeconds: 200 * MIN, materialId: "my" });
-    await finish(mine, 30);
+    await finish(mine, 20);
     expect(mine.materialId).toBeNull(); // the long classes in OTHER rooms/days must not rescue this one
   });
 
@@ -155,5 +158,30 @@ describe("a class cut into parts is judged as a whole", () => {
     const lesson = addHeld({ minutes: 0, startedAt: "2026-10-05T09:00:00Z", privateClassId: "p1" });
     await finish(lesson, 20);
     expect(lesson.materialId).not.toBeNull();
+  });
+
+  it("the tutor's own end-of-class 'delete it' choice is honoured, even for a class long enough to otherwise be kept", async () => {
+    const row = addHeld({
+      minutes: 0,
+      startedAt: "2026-10-05T09:00:00Z",
+      tutorDiscardRequestedAt: new Date("2026-10-05T09:05:00Z"),
+    });
+    expect(await finish(row, 120)).toBe("discarded");
+    expect(row.status).toBe("purged");
+    expect(row.materialId).toBeNull();
+    expect(db.materials).toHaveLength(0);
+    expect(deleteRecordingObject).toHaveBeenCalledWith(row.objectKey);
+  });
+
+  it("the tutor's 'delete it' choice is skipped for a private lesson", async () => {
+    const lesson = addHeld({
+      minutes: 0,
+      startedAt: "2026-10-05T09:00:00Z",
+      privateClassId: "p1",
+      tutorDiscardRequestedAt: new Date("2026-10-05T09:05:00Z"),
+    });
+    await finish(lesson, 20);
+    expect(lesson.materialId).not.toBeNull();
+    expect(deleteRecordingObject).not.toHaveBeenCalled();
   });
 });

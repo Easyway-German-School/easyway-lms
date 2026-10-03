@@ -28,8 +28,16 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
 export default function LiveCallDock() {
-  const { activeCall, dockState, setDockState, reportLeave } = useLiveCall();
+  const { activeCall, dockState, setDockState, reportLeave, shortRecordingPrompt, resolveShortRecordingPrompt } = useLiveCall();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -103,7 +111,38 @@ export default function LiveCallDock() {
 
   const onMinimize = useCallback(() => setDockState("minimized"), [setDockState]);
 
-  if (!activeCall || !activeCall.session.url || !activeCall.session.token) return null;
+  // Rendered regardless of `activeCall` — the moment this prompt is set, the
+  // call that produced it has already gone (`reportLeave` clears it in the
+  // same tick), so a return keyed to `activeCall` below would never show it.
+  const shortRecordingModal = shortRecordingPrompt ? (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-sm space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-xl">
+        <h2 className="text-lg font-bold text-[var(--foreground)]">Keep this recording?</h2>
+        <p className="text-sm text-[var(--foreground-soft)]">
+          That class lasted only <strong>{formatDuration(shortRecordingPrompt.durationMs)}</strong> — too short to be a real
+          lesson. We&apos;d recommend deleting it so it never shows up for your students.
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => resolveShortRecordingPrompt("delete")}
+            className="rounded-2xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
+          >
+            Delete recording (recommended)
+          </button>
+          <button
+            type="button"
+            onClick={() => resolveShortRecordingPrompt("keep")}
+            className="rounded-2xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
+          >
+            Keep it
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  if (!activeCall || !activeCall.session.url || !activeCall.session.token) return shortRecordingModal;
 
   const classroom = (
     <LiveKitClassroom
@@ -124,16 +163,24 @@ export default function LiveCallDock() {
   );
 
   if (dockState === "full") {
-    return <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950 p-3 sm:p-4">{classroom}</div>;
+    return (
+      <>
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950 p-3 sm:p-4">{classroom}</div>
+        {shortRecordingModal}
+      </>
+    );
   }
 
   return (
-    <div
-      ref={cardRef}
-      style={{ left: posRef.current.x, top: posRef.current.y, width: CARD_WIDTH, height: CARD_HEIGHT }}
-      className="fixed z-[70] shadow-2xl"
-    >
-      {classroom}
-    </div>
+    <>
+      <div
+        ref={cardRef}
+        style={{ left: posRef.current.x, top: posRef.current.y, width: CARD_WIDTH, height: CARD_HEIGHT }}
+        className="fixed z-[70] shadow-2xl"
+      >
+        {classroom}
+      </div>
+      {shortRecordingModal}
+    </>
   );
 }
