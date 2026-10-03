@@ -34,6 +34,7 @@ import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
   buildFileOutput,
+  deleteRecordingObject,
   egressClient,
   egressTemplateBaseUrl,
   recordingConfigured,
@@ -412,7 +413,7 @@ export async function finaliseRecording(egress: {
   status?: EgressStatus;
   error?: string;
   fileResults?: Array<{ filename?: string; duration?: bigint | number; size?: bigint | number; location?: string }>;
-}): Promise<"created" | "already" | "failed" | "unknown"> {
+}): Promise<"created" | "already" | "failed" | "unknown" | "discarded"> {
   try {
     const row =
       (await prisma.classRecording.findUnique({ where: { egressId: egress.egressId } })) ??
@@ -502,12 +503,45 @@ export async function finaliseRecording(egress: {
       return "failed";
     }
 
-    // LiveKit reports duration in nanoseconds, as a bigint.
-    const durationSeconds = result?.duration ? Math.round(Number(result.duration) / 1_000_000_000) : null;
+    // LiveKit reports duration in nanoseconds, as a bigint — but some file
+    // results (seen on short captures especially) land without one at all.
+    // Falling back to wall-clock time since the egress started keeps
+    // `isTooShortToKeep` below from being silently skipped: `durationSeconds:
+    // null` reads there as "not short", which is exactly how a genuinely
+    // short recording used to bypass being held and went straight to a
+    // Material row on every portal instead.
+    const durationSeconds = result?.duration
+      ? Math.round(Number(result.duration) / 1_000_000_000)
+      : Math.round((Date.now() - row.startedAt.getTime()) / 1000);
     const sizeBytes = result?.size ? Number(result.size) : null;
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
     const isPrivate = Boolean(row.privateClassId);
+
+    /**
+     * The tutor already made this call, in the moment, having been there for
+     * the actual class — see the end-of-class prompt in LiveCallContext and
+     * `/api/live/recording/discard`. No grace window, no review: delete now,
+     * whatever the confirmed duration turns out to be. Never set for a
+     * private one-to-one (the prompt never offers it there).
+     */
+    if (row.tutorDiscardRequestedAt && !isPrivate) {
+      await deleteRecordingObject(objectKey);
+      await prisma.classRecording.update({
+        where: { id: row.id },
+        data: {
+          status: "purged",
+          endedAt: new Date(),
+          objectKey,
+          fileUrl: null,
+          durationSeconds,
+          sizeBytes,
+          purgedAt: new Date(),
+          error: "Discarded by the tutor right after class ended.",
+        },
+      });
+      return "discarded";
+    }
 
     /**
      * A too-short GROUP recording never becomes a Material row — nobody sees
@@ -519,7 +553,7 @@ export async function finaliseRecording(egress: {
      * short recording pending purge (see planShortRecordingPurge). Only
      * `short-recording-purge` in the daily cron actually deletes it, and
      * only once RETENTION.shortRecordingGraceHours has passed — a class that
-     * genuinely ran close to 40 minutes, or one a dropped connection cut
+     * genuinely ran close to 30 minutes, or one a dropped connection cut
      * short, gets a window to be noticed before its tape is gone for good —
      * an admin can preview and delete it from Materials > Activity too, but
      * not before that same window has passed.
@@ -752,7 +786,7 @@ async function reconcileRecorderRecording(egressId: string, startedAt: Date, sta
   const callback = jobViewToCallback(jobId, job);
   if (!callback) return false; // still recording, encoding or uploading
   const outcome = await finaliseRecording(callbackToEgress(callback));
-  return outcome === "created" || outcome === "failed";
+  return outcome === "created" || outcome === "failed" || outcome === "discarded";
 }
 
 export async function reconcileRecordings(): Promise<{ checked: number; finalised: number }> {
@@ -816,7 +850,7 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
         error: info.error,
         fileResults: info.fileResults,
       });
-      if (outcome === "created" || outcome === "failed") finalised += 1;
+      if (outcome === "created" || outcome === "failed" || outcome === "discarded") finalised += 1;
     } catch (error) {
       console.error(`Reconcile failed for egress ${egressId}:`, error);
     }

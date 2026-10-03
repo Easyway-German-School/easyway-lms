@@ -30,6 +30,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { classDayBounds, otherPartsOf, otherPartsSeconds } from "@/lib/class-parts";
 import { deleteRecordingObject } from "@/lib/recording";
+import { SHORT_RECORDING_SECONDS } from "@/lib/recording-thresholds";
 
 export const RETENTION = {
   /**
@@ -48,13 +49,13 @@ export const RETENTION = {
    * — a short private lesson is still a real, paid lesson a student may
    * want proof of, not a false start.
    */
-  minWorthKeepingSeconds: 40 * 60,
+  minWorthKeepingSeconds: SHORT_RECORDING_SECONDS,
   /**
    * How long a held short recording waits before `short-recording-purge`
    * (the daily cron, see src/app/api/cron/tick/route.ts) actually deletes
    * it. The recording is still never shown to anyone during this window —
    * it just is not yet gone for good, so a class that genuinely ran close
-   * to 40 minutes, or one a dropped connection cut short, sits in the
+   * to 30 minutes, or one a dropped connection cut short, sits in the
    * Materials > Activity preview list for a couple of days before it is
    * destroyed rather than the instant it finishes recording. The window
    * applies whether the delete is triggered by the cron or by an admin's own
