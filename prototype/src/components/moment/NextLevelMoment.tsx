@@ -59,7 +59,7 @@ export default function NextLevelMoment() {
         if (!j) return;
         // Only students whose portal is open (paid at least the deposit). A locked
         // student is never popped at about the next level.
-        if (!j.portalOpen) return;
+        if (!j.reachable) return;
         // Already acted — keeping a seat or paying ends the nudging.
         if (j.intent?.heldAt || j.offer.seat !== "none") return;
         const pop = readPop(j.audience.targetLevel);

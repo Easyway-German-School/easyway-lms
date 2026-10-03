@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+import NextLevelDialog from "@/components/admin/NextLevelDialog";
 import { type StudentWithUser } from "@/types/admin";
 import PasswordInput from "@/components/PasswordInput";
 import BulkStudentAdd from "@/components/BulkStudentAdd";
@@ -260,6 +261,8 @@ function StudentsRoster() {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState("");
   const [studentError, setStudentError] = useState("");
+  /** The student whose "Graduate" dialog is open. The dialog confirms before anything changes. */
+  const [nextLevelFor, setNextLevelFor] = useState<string | null>(null);
   /**
    * Logins minted by the manual add form this session, in the order added.
    * "Save & add another" appends a row; a plain "Save student" starts the list
@@ -1004,6 +1007,15 @@ function StudentsRoster() {
 
   return (
     <AdminShell>
+      {nextLevelFor && (
+        <NextLevelDialog
+          studentId={nextLevelFor}
+          onClose={() => setNextLevelFor(null)}
+          onDone={() => {
+            void loadStudents();
+          }}
+        />
+      )}
       <div className="space-y-6">
         {/*
           THE BANNER IS NOT DECORATION.
@@ -2232,7 +2244,7 @@ function StudentsRoster() {
                       {student.status !== "graduated" ? (
                         <button
                           className="rounded-lg border border-yellow-500 text-yellow-600 px-3 py-2 text-sm"
-                          onClick={() => handleUpdateStudentStatus(student.id, "graduated")}
+                          onClick={() => setNextLevelFor(student.id)}
                         >
                           Graduate
                         </button>

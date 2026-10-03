@@ -44,6 +44,8 @@ export type PipelineRow = {
   priorOwed: number;
   /** Their portal is open (paid at least the deposit, not locked). */
   portalOpen: boolean;
+  /** The office chose them by hand — messaged even if their portal is locked. */
+  manual: boolean;
   /** Will receive the pop, the bell and the email — open portal and not yet held/paid. */
   eligible: boolean;
   /** Why not, in the office's words. */
@@ -118,6 +120,8 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
       const intent = readIntent(admission, x.audience.targetLevel);
       const stage = stageFor(intent, money[idx].seat);
       const portalOpen = access[idx]?.hasAccess === true;
+      const manual = intent?.manualOffer === true;
+      const reachable = portalOpen || manual;
       const answered = stage === "held" || stage === "deposit_paid" || stage === "paid_in_full";
       rows.push({
         studentId: x.s.id,
@@ -140,8 +144,9 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
         heldAt: intent?.heldAt ?? null,
         priorOwed: money[idx].priorOwed,
         portalOpen,
-        eligible: portalOpen && !answered,
-        skipReason: !portalOpen
+        manual,
+        eligible: reachable && !answered,
+        skipReason: !reachable
           ? "Portal is locked — not messaged until they have paid at least the deposit"
           : answered
             ? "Already answered"
@@ -205,7 +210,7 @@ export async function sendInvites(
 
   for (const row of rows) {
     if (!wanted.has(row.studentId)) continue;
-    if (!row.portalOpen) {
+    if (!row.portalOpen && !row.manual) {
       skippedLocked += 1;
       continue;
     }
@@ -216,7 +221,7 @@ export async function sendInvites(
     try {
       const student = await loadJourneyStudent({ id: row.studentId });
       const journey = student ? await loadJourney(student) : null;
-      if (!student || !journey || !journey.portalOpen) {
+      if (!student || !journey || !journey.reachable) {
         skipped += 1;
         continue;
       }

@@ -33,10 +33,12 @@ import { LEVELS, nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
  *              the new intake to open (portal locked on the countdown).
  *  ended       their batch's teaching months are over and the office has not
  *              signed them off yet — the August cohort the day after it ends.
+ *  invited     the office chose this student by hand (Students → Graduate) and
+ *              has not moved them up yet — same wording as `ended`.
  *  midway      a month into the level and still teaching — the early invitation
  *              (this is where an October intake lands after its first month).
  */
-export type JourneyState = "signed_off" | "promoted" | "ended" | "midway";
+export type JourneyState = "signed_off" | "promoted" | "ended" | "midway" | "invited";
 
 /** Days into a level before the early "keep your seat" invitation opens. */
 export const MIDWAY_DAYS = 30;
@@ -62,6 +64,10 @@ export type JourneyAudience = {
 /** How long after a batch ends the "just finished" welcome keeps coming. */
 export const JUST_FINISHED_DAYS = 45;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
 
 export function previousLevelBefore(level: string): string | null {
   const i = (LEVELS as readonly string[]).indexOf(String(level || "").toUpperCase());
@@ -101,6 +107,21 @@ export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | 
   const level = String(input.level || "A1").toUpperCase();
   const admission =
     input.admission && typeof input.admission === "object" ? (input.admission as Record<string, unknown>) : {};
+
+  // 0. The office chose this student by hand. That is an explicit decision, so
+  // it opens the journey whatever the automatic rules below would say — it is
+  // how a student outside the automatic groups still gets their invitation.
+  const manual = asRecord(admission.nextLevel);
+  if (manual.manualOffer === true) {
+    const wanted = String(manual.targetLevel ?? "").toUpperCase();
+    if (wanted === level) {
+      const finished = previousLevelBefore(level);
+      if (finished) return { state: "promoted", finishedLevel: finished, targetLevel: level };
+    }
+    if (wanted && wanted === nextLevelAfter(level)) {
+      return { state: "invited", finishedLevel: level, targetLevel: wanted };
+    }
+  }
 
   // 1. Already moved up by the graduation desk and waiting on the countdown.
   // Promotion stamps `classesStartedAt` with the new intake's opening day, so a
@@ -440,6 +461,9 @@ export type NextLevelIntent = {
   targetLevel: string;
   seenAt?: string;
   heldAt?: string;
+  /** The office picked this student by hand. Reaches them even with a locked portal. */
+  manualOffer?: boolean;
+  offeredAt?: string;
   details?: {
     phone?: string;
     parentPhone?: string;

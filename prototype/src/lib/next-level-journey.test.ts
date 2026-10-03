@@ -199,3 +199,39 @@ describe("whyExcluded", () => {
     expect(whyExcluded({ ...base, admission: { batch: "August" }, classesStartedAt: new Date("2026-08-03") })).toBeNull();
   });
 });
+
+describe("manual offer (Students → Graduate)", () => {
+  it("opens the journey for a student the automatic rules would skip", () => {
+    const a = resolveJourneyAudience({
+      level: "A1",
+      admission: { batch: "October", nextLevel: { targetLevel: "A2", manualOffer: true } },
+      createdAt: created,
+      classesStartedAt: null,
+      now,
+    });
+    expect(a).toEqual({ state: "invited", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("recognises a manually moved-up student even with no promotion marker", () => {
+    const a = resolveJourneyAudience({
+      level: "A2",
+      admission: { batch: "October", nextLevel: { targetLevel: "A2", manualOffer: true } },
+      createdAt: created,
+      classesStartedAt: null,
+      now,
+    });
+    expect(a).toEqual({ state: "promoted", finishedLevel: "A1", targetLevel: "A2" });
+  });
+
+  it("ignores an offer for the wrong level", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "October", nextLevel: { targetLevel: "B2", manualOffer: true } },
+        createdAt: created,
+        classesStartedAt: null,
+        now,
+      }),
+    ).toBeNull();
+  });
+});

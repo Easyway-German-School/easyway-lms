@@ -24,7 +24,7 @@ import { LevelUpIcon } from "@/components/icons";
  */
 
 type Stage = "not_opened" | "opened" | "held" | "deposit_paid" | "paid_in_full";
-type State = "signed_off" | "promoted" | "ended" | "midway";
+type State = "signed_off" | "promoted" | "ended" | "midway" | "invited";
 
 type Row = {
   studentId: string;
@@ -46,6 +46,7 @@ type Row = {
   heldAt: string | null;
   priorOwed: number;
   portalOpen: boolean;
+  manual: boolean;
   eligible: boolean;
   skipReason: string | null;
 };
@@ -80,10 +81,11 @@ const STATE_LABEL: Record<State, string> = {
   promoted: "Moved up — waiting for intake",
   ended: "Batch ended",
   midway: "A month in",
+  invited: "Invited by the office",
 };
 
 const STAGES: Stage[] = ["not_opened", "opened", "held", "deposit_paid", "paid_in_full"];
-const STATES: State[] = ["ended", "signed_off", "midway", "promoted"];
+const STATES: State[] = ["ended", "signed_off", "midway", "promoted", "invited"];
 
 export default function NextLevelPipelinePage() {
   const [data, setData] = useState<Payload | null>(null);
@@ -120,7 +122,7 @@ export default function NextLevelPipelinePage() {
     [data, filter, stateFilter],
   );
   const sendable = rows.filter((r) => r.eligible);
-  const lockedCount = rows.filter((r) => !r.portalOpen).length;
+  const lockedCount = rows.filter((r) => !r.portalOpen && !r.manual).length;
 
   async function post(body: Record<string, unknown>) {
     const res = await fetch("/api/admin/next-level", {
@@ -348,7 +350,8 @@ export default function NextLevelPipelinePage() {
                           {r.studentCode ? `${r.studentCode} · ` : ""}
                           {r.branch ?? "No branch"}
                         </p>
-                        {!r.portalOpen && <p className="text-xs font-semibold text-rose-700">Portal locked — not messaged</p>}
+                        {!r.portalOpen && !r.manual && <p className="text-xs font-semibold text-rose-700">Portal locked — not messaged</p>}
+                        {r.manual && <p className="text-xs font-semibold text-sky-700">Chosen by the office — messaged even if locked</p>}
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-semibold text-[var(--foreground)]">
