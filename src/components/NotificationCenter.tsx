@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { startPolling } from "@/lib/client/poll";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -187,22 +188,9 @@ export default function NotificationCenter({
   }, []);
 
   useEffect(() => {
-    void load();
-    const interval = window.setInterval(() => {
-      // Nothing to gain from polling a tab nobody is looking at, and it keeps
-      // a backgrounded phone from burning battery on it.
-      if (document.visibilityState === "visible") void load();
-    }, POLL_MS);
-
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void load();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
+    // startPolling already skips hidden tabs, catches up the moment one is
+    // visible again, and backs off a tab nobody is touching.
+    return startPolling(load, { intervalMs: POLL_MS });
   }, [load]);
 
   const markRead = useCallback(

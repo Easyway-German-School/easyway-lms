@@ -1089,6 +1089,9 @@ export default function LiveKitClassroom({
     let cancelled = false;
 
     async function poll() {
+      // A student in another tab is not looking at the quiz banner; the poll on
+      // return to this tab (visibilitychange below) finds the game just as well.
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch("/api/live-quiz/join", { cache: "no-store" });
         if (cancelled || !res.ok) return;
@@ -1100,10 +1103,12 @@ export default function LiveKitClassroom({
     }
 
     poll();
-    const timer = window.setInterval(poll, 6_000);
+    const timer = window.setInterval(poll, 8_000);
+    document.addEventListener("visibilitychange", poll);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
     };
   }, [role]);
 
