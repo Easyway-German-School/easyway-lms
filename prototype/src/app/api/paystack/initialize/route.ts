@@ -15,6 +15,7 @@ import {
 import { nextLevelAfter } from "@/lib/levels";
 import { loadStudentLedger } from "@/lib/tuition-charges";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
+import { paystackAccountForCurrentTenant } from "@/lib/paystack-account";
 
 /**
  * Opens a Paystack checkout.
@@ -82,9 +83,11 @@ export async function POST(request: Request) {
       // and the lock screen quote from, so the price shown is the price charged.
       const privatePrice = privateClassPriceForLevel(studentRecord.level);
 
-      const secretKey = process.env.PAYSTACK_SECRET_KEY;
+      // The school's own Paystack account if it connected one, EasyWay's for
+      // EasyWay, and nothing for anyone else — see lib/paystack-account.ts.
+      const secretKey = (await paystackAccountForCurrentTenant())?.secretKey;
       if (!secretKey) {
-        console.error("Paystack checkout blocked: PAYSTACK_SECRET_KEY is not set");
+        console.error("Paystack checkout blocked: no Paystack account is connected for this tenant");
         return NextResponse.json(
           {
             error:
@@ -286,7 +289,7 @@ export async function POST(request: Request) {
     // the whole verification down with it: money charged, "Unable to verify
     // payment" on screen. The enrolment is optional; a wrong id is not.
     const resolvedPathwayId = resolvedPathway?.id ?? "";
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    const secretKey = (await paystackAccountForCurrentTenant())?.secretKey;
     const callbackUrlBase = process.env.PAYSTACK_CALLBACK_URL || `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/enrollment/success`;
     const callbackUrl = `${callbackUrlBase}${callbackUrlBase.includes("?") ? "&" : "?"}source=paystack`;
 
@@ -306,7 +309,7 @@ export async function POST(request: Request) {
       : null;
 
     if (!secretKey) {
-      console.error("Paystack checkout blocked: PAYSTACK_SECRET_KEY is not set");
+      console.error("Paystack checkout blocked: no Paystack account is connected for this tenant");
       return NextResponse.json(
         {
           error:
