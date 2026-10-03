@@ -11,6 +11,7 @@ import { getMergedSchedule } from "@/lib/class-sessions";
 import { sessionDurationMonths } from "@/lib/levels";
 import {
   buildForecast,
+  type ActualSession,
   type ForecastGroupSession,
   type ForecastPrivateClass,
   type RecordingForecast,
@@ -31,17 +32,30 @@ export async function loadRecordingForecast(opts: { tenantId: string; now?: Date
   // schema) — only online/hybrid ever opens a LiveKit room, so only they can need a recorder.
   const needsVideo = { deliveryMode: { in: ["online", "hybrid"] } };
 
-  const [students, privateClasses, liveNow] = await Promise.all([
+  const [students, privateClasses, liveNow, actualSessionRows] = await Promise.all([
     prisma.student.findMany({
       where: { status: "active", branch: branchFilter },
       select: { level: true, classType: true, deliveryMode: true, sessionSlot: true, createdAt: true, admission: true, branch: { select: { id: true } } },
     }),
     prisma.privateClass.findMany({
       where: { student: { status: "active", branch: branchFilter, ...needsVideo }, status: "scheduled", scheduledAt: { gte: new Date(from.getTime() - DAY), lte: to } },
-      select: { scheduledAt: true, durationMinutes: true, status: true },
+      select: { id: true, scheduledAt: true, durationMinutes: true, status: true },
     }),
     prisma.liveClassSession.count({ where: { endedAt: null, lastSeenAt: { gte: new Date(now.getTime() - LIVE_HEARTBEAT_MS) } } }),
+    // Whatever actually opened a room recently: tells a real class from a no-show scheduled one (see
+    // CONFIRM_GRACE_MINUTES in recording-forecast.ts). A generous window either side of "now" is cheap and safe.
+    prisma.liveClassSession.findMany({
+      where: { tenantId: opts.tenantId, startedAt: { gte: new Date(from.getTime() - DAY), lte: to } },
+      select: { branchId: true, level: true, sessionSlot: true, kind: true, privateClassId: true, startedAt: true, endedAt: true },
+    }),
   ]);
+
+  const actualSessions: ActualSession[] = actualSessionRows.map((s) => ({
+    cohortKey: s.kind !== "private" && s.branchId && s.level ? `${s.branchId}:${s.level}:${s.sessionSlot ?? "evening"}` : null,
+    privateClassId: s.kind === "private" ? s.privateClassId : null,
+    startedAt: s.startedAt,
+    endedAt: s.endedAt,
+  }));
 
   // One cohort per branch + level + sitting, exactly as the admin schedule page groups them. A cohort is
   // only forecast if AT LEAST ONE of its students actually attends over video — a cohort made up entirely
@@ -92,7 +106,7 @@ export async function loadRecordingForecast(opts: { tenantId: string; now?: Date
     from: from.toISOString(),
     to: to.toISOString(),
     bucketMinutes: 15,
-    buckets: buildForecast({ groupSessions, privateClasses: privates, from, to }),
+    buckets: buildForecast({ groupSessions, privateClasses: privates, actualSessions, from, to, now }),
     liveNow,
     cohorts: cohorts.size,
   };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildForecast, groupSessionWindow, privateClassWindow, type ForecastGroupSession } from "./recording-forecast";
+import { buildForecast, groupSessionWindow, privateClassWindow, type ActualSession, type ForecastGroupSession } from "./recording-forecast";
 
 // Monday 5 Oct 2026. School time is UTC+1, so 10:00 school time is 09:00 UTC.
 const D = (day: number) => `2026-10-${String(day).padStart(2, "0")}T00:00:00.000Z`;
@@ -11,6 +11,13 @@ function session(over: Partial<ForecastGroupSession> & { cohortKey: string }): F
 }
 const forecast = (groupSessions: ForecastGroupSession[], privateClasses: Parameters<typeof buildForecast>[0]["privateClasses"] = []) =>
   buildForecast({ groupSessions, privateClasses, from, to });
+
+const forecastAt = (
+  now: Date,
+  groupSessions: ForecastGroupSession[],
+  privateClasses: Parameters<typeof buildForecast>[0]["privateClasses"] = [],
+  actualSessions: ActualSession[] = [],
+) => buildForecast({ groupSessions, privateClasses, actualSessions, from: now, to, now });
 
 describe("one class", () => {
   it("is a single run from its start to its end, in UTC", () => {
@@ -97,6 +104,49 @@ describe("private lessons", () => {
   it("a lesson that overlaps a group class adds to it", () => {
     const buckets = forecast([session({ cohortKey: "a" })], [lesson({ scheduledAt: new Date("2026-10-05T10:00:00Z"), durationMinutes: 30 })]);
     expect(Math.max(...buckets.map((b) => b.classes))).toBe(2);
+  });
+});
+
+describe("no-show grace: an unconfirmed scheduled class stops billing a server after CONFIRM_GRACE_MINUTES", () => {
+  const start = new Date("2026-10-05T09:00:00Z"); // 10:00 school time
+  const withinGrace = new Date(start.getTime() + 10 * 60_000); // 10 min in: grace (15 min) hasn't passed
+  const pastGrace = new Date(start.getTime() + 30 * 60_000); // 30 min in: grace is long gone
+
+  it("still counts while its own grace period hasn't passed yet", () => {
+    const buckets = forecastAt(withinGrace, [session({ cohortKey: "a" })]);
+    expect(buckets[0]!.classes).toBe(1);
+  });
+
+  it("stops counting once its grace period passes with nobody ever joining", () => {
+    expect(forecastAt(pastGrace, [session({ cohortKey: "a" })])).toEqual([]);
+  });
+
+  it("a class the tutor actually opened keeps counting past the grace period", () => {
+    const actual: ActualSession[] = [{ cohortKey: "a", privateClassId: null, startedAt: start, endedAt: null }];
+    const buckets = forecastAt(pastGrace, [session({ cohortKey: "a" })], [], actual);
+    expect(buckets[0]!.classes).toBe(1);
+  });
+
+  it("another cohort's open room does not confirm this one", () => {
+    const actual: ActualSession[] = [{ cohortKey: "b", privateClassId: null, startedAt: start, endedAt: null }];
+    expect(forecastAt(pastGrace, [session({ cohortKey: "a" })], [], actual)).toEqual([]);
+  });
+
+  it("a private lesson with no id to match against is never clipped (old callers keep working)", () => {
+    const lesson = { scheduledAt: start, durationMinutes: 60, status: "scheduled" };
+    expect(forecastAt(pastGrace, [], [lesson])[0]!.classes).toBe(1);
+  });
+
+  it("a private lesson with an id stops counting once unconfirmed past the grace period", () => {
+    const lesson = { id: "p1", scheduledAt: start, durationMinutes: 60, status: "scheduled" };
+    expect(forecastAt(pastGrace, [], [lesson])).toEqual([]);
+  });
+
+  it("a private lesson confirmed by its own booking keeps counting", () => {
+    const lesson = { id: "p1", scheduledAt: start, durationMinutes: 60, status: "scheduled" };
+    const actual: ActualSession[] = [{ cohortKey: null, privateClassId: "p1", startedAt: start, endedAt: null }];
+    const buckets = forecastAt(pastGrace, [], [lesson], actual);
+    expect(buckets[0]!.classes).toBe(1);
   });
 });
 
