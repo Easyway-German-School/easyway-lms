@@ -28,6 +28,7 @@ function journey(state: "ended" | "midway"): JourneyPayload {
   return {
     audience: { state, finishedLevel: "A1", targetLevel: "A2" },
     portalOpen: true,
+    reachable: true,
     recap,
     offer: {
       tuitionFee: 150000,
