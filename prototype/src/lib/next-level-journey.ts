@@ -550,3 +550,49 @@ export function whyExcluded(input: AudienceInput): ExclusionReason | null {
   if (!window) return "no_batch";
   return window.hasEnded ? "long_finished" : "first_month";
 }
+
+/* -------------------------------------------------------------------------- */
+/* Who has been messaged                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every send (the pipeline button, the automatic run, the Graduate dialog) writes
+ * a notification whose dedupe key names the student, the level and the day:
+ *
+ *   next-level-invite:<studentId>:<targetLevel>:<YYYY-MM-DD>
+ *
+ * "Has this student been messaged?" is answered from those rows — one source of
+ * truth that also covers every message sent before this was tracked — instead of
+ * a second flag that could disagree with what students actually received.
+ */
+export const INVITE_KEY_PREFIX = "next-level-invite:";
+
+export function inviteKey(studentId: string, targetLevel: string, day: string): string {
+  return `${INVITE_KEY_PREFIX}${studentId}:${targetLevel}:${day}`;
+}
+
+export function parseInviteKey(key: string | null | undefined): { studentId: string; targetLevel: string; day: string } | null {
+  if (!key || !key.startsWith(INVITE_KEY_PREFIX)) return null;
+  const [studentId, targetLevel, day] = key.slice(INVITE_KEY_PREFIX.length).split(":");
+  return studentId && targetLevel && /^\d{4}-\d{2}-\d{2}$/.test(day ?? "") ? { studentId, targetLevel, day } : null;
+}
+
+/** A student who has not opened it after this long may be reminded once more. */
+export const REMIND_AFTER_DAYS = 3;
+
+export type SendDecision = "send" | "remind" | "already";
+
+/**
+ *   send     never messaged
+ *   remind   messaged, has not opened or answered, and `REMIND_AFTER_DAYS` have passed
+ *   already  messaged recently, or they have opened / answered it
+ */
+export function sendDecision(
+  input: { messagedAt: string | null; seenAt: string | null; heldAt: string | null },
+  now: Date = new Date(),
+): SendDecision {
+  if (!input.messagedAt) return "send";
+  if (input.seenAt || input.heldAt) return "already";
+  const at = Date.parse(input.messagedAt);
+  return Number.isNaN(at) || now.getTime() - at >= REMIND_AFTER_DAYS * DAY_MS ? "remind" : "already";
+}

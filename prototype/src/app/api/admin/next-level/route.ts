@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { loadPipeline, previewInvite, sendInvites } from "@/lib/next-level-pipeline-server";
+import {
+  loadPipeline,
+  previewInvite,
+  readNextLevelAuto,
+  sendInvites,
+  writeNextLevelAuto,
+} from "@/lib/next-level-pipeline-server";
 
 /**
  * The next-level pipeline.
@@ -11,9 +17,11 @@ import { loadPipeline, previewInvite, sendInvites } from "@/lib/next-level-pipel
  *                                        details they gave
  *   POST {action:"preview", studentId}   the exact bell text and designed email a
  *                                        student would get, to read before sending
- *   POST {action:"send", studentIds}     send it — bell, push and email together —
- *                                        to those among them whose portal is open
- *                                        and who have not answered yet
+ *   POST {action:"send", studentIds,     send it — bell, push and email together —
+ *        includeReminders?}              to those among them whose portal is open,
+ *                                        who have not answered, and who have not
+ *                                        been messaged yet (reminders only when asked)
+ *   POST {action:"setAuto", enabled}     switch the automatic daily send on or off
  */
 
 export const dynamic = "force-dynamic";
@@ -36,7 +44,8 @@ export async function GET() {
   if (!gate.ok) return gate.response;
   try {
     const { where, tenantId } = fence(gate);
-    return NextResponse.json(await loadPipeline({ where, tenantId }));
+    const [pipeline, auto] = await Promise.all([loadPipeline({ where, tenantId }), readNextLevelAuto(tenantId)]);
+    return NextResponse.json({ ...pipeline, auto });
   } catch (error) {
     console.error("Next-level pipeline failed to load:", error);
     return NextResponse.json({ error: "Unable to load the next-level pipeline" }, { status: 500 });
@@ -49,8 +58,14 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const action = body?.action;
-  if (action !== "send" && action !== "preview") {
+  if (action !== "send" && action !== "preview" && action !== "setAuto") {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  }
+
+  if (action === "setAuto") {
+    const tenantId = gate.session.user.tenantId ?? null;
+    if (!tenantId) return NextResponse.json({ error: "No school to switch this on for" }, { status: 400 });
+    return NextResponse.json({ auto: await writeNextLevelAuto(tenantId, { enabled: body?.enabled === true }) });
   }
 
   try {
@@ -70,7 +85,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "studentIds required" }, { status: 400 });
     }
     const ids = (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string").slice(0, MAX_NUDGES);
-    return NextResponse.json(await sendInvites(pipeline.rows, ids));
+    return NextResponse.json(await sendInvites(pipeline.rows, ids, { includeReminders: body.includeReminders === true }));
   } catch (error) {
     console.error("Next-level admin action failed:", error);
     return NextResponse.json({ error: "Could not complete that" }, { status: 500 });
