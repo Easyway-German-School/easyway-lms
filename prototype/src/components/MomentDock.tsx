@@ -30,7 +30,7 @@ export default function MomentDock() {
   if (waiting.length === 0) return null;
 
   return (
-    <div className="fixed bottom-6 left-4 z-[55] flex flex-col items-start gap-2 sm:left-6">
+    <div data-moment-dock className="fixed bottom-6 left-4 z-[55] flex flex-col items-start gap-2 sm:left-6">
       <AnimatePresence>
         {open ? (
           <motion.div

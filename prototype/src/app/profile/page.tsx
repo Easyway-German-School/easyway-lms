@@ -13,6 +13,9 @@ import PhotoCapture from "@/components/PhotoCapture";
 import AppAlertsCard from "@/components/AppAlertsCard";
 import { ProfileDetailsCard } from "@/components/ProfileDetailsPrompt";
 import { useGamification } from "@/lib/useGamification";
+import { useLook } from "@/lib/useLook";
+import YouthProfileHero from "@/components/YouthProfileHero";
+import LookSwitch from "@/components/LookSwitch";
 import { uploadErrorMessage, uploadImage, validateImageFile } from "@/lib/upload";
 import type { Badge, BadgeIcon } from "@/lib/gamification";
 import {
@@ -258,6 +261,8 @@ export default function ProfilePage() {
   /** ?setup=details — Becca's "finish your profile" nudge links here. */
   const [detailsAutoOpen, setDetailsAutoOpen] = useState(false);
   const { game } = useGamification();
+  const { look } = useLook();
+  const youth = look === "youth";
   const queryClient = useQueryClient();
 
   async function changePassword(event: React.FormEvent<HTMLFormElement>) {
@@ -489,6 +494,7 @@ export default function ProfilePage() {
     <StudentShell>
       <div className="pb-16">
         {/* ---------- Cinematic cover ---------- */}
+        {!youth && (
         <div className="relative h-64 overflow-hidden sm:h-72">
           <div className="absolute inset-0 bg-[linear-gradient(135deg,_#041418_0%,_#0b2f36_45%,_#12100a_100%)]" />
           {/* Slow drifting colour fields — the "cinematic" part */}
@@ -538,9 +544,36 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        )}
+
+        {/* The new look: avatar, numbers, pinned badges, study grid. */}
+        {youth && (
+          <>
+            <YouthProfileHero
+              fullName={profile.fullName}
+              studentCode={profile.studentCode}
+              level={profile.currentLevel}
+              branch={profile.branch}
+              tierName={tier?.name ?? null}
+              game={game}
+              badgeIcons={BADGE_ICONS}
+              photoUrl={profile.photoUrl}
+              photoBroken={photoBroken}
+              onPhotoBroken={() => setPhotoBroken(true)}
+              uploading={uploading}
+              onTakePhoto={() => setShowCamera(true)}
+              onEditProfile={() => setEditing(true)}
+            />
+            {(message || error) && (
+              <p className={`mx-auto mt-4 max-w-3xl px-6 text-sm ${error ? "text-red-500" : "text-emerald-600"}`}>{error || message}</p>
+            )}
+          </>
+        )}
+
         {/* ---------- Identity + stats, overlapping the cover ---------- */}
-        <div className="relative -mt-24 px-6 sm:px-10">
-          <div className="mx-auto max-w-6xl">
+        <div className={`relative px-6 sm:px-10 ${youth ? "mt-4" : "-mt-24"}`}>
+          <div className={`mx-auto ${youth ? "max-w-3xl" : "max-w-6xl"}`}>
+            {!youth && (
             <div className="rounded-[36px] border border-[var(--border)] bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end">
                 {/* Avatar with a tier-coloured story ring. `data-guide-target`
@@ -689,6 +722,7 @@ export default function ProfilePage() {
                 <p className={`mt-5 text-sm ${error ? "text-red-300" : "text-emerald-300"}`}>{error || message}</p>
               )}
             </div>
+            )}
 
             {needsBranch ? (
               <BranchSetupCard
@@ -705,6 +739,9 @@ export default function ProfilePage() {
                 student the office onboarded by hand. Renders itself only when
                 the account is genuinely off-form and still has gaps. */}
             <ProfileDetailsCard autoOpen={detailsAutoOpen} />
+
+            {/* Which look: an invitation on the classic one, a way back on the new one. */}
+            <LookSwitch />
 
             {/* ---------- Tabs ---------- */}
             <div className="mt-8 flex gap-1 rounded-full cinematic-card p-1.5">

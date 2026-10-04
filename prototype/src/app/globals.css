@@ -1022,3 +1022,34 @@ html.theme-custom ::selection {
   .ew-msg-in, .ew-pop { animation: none; }
   .ew-typing-ring { animation: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   The youth look (see src/lib/youth-look.ts for who gets it)
+
+   Tailwind v4 reads every `rounded-*` from a theme variable, so redefining
+   those variables inside one scope class rounds every existing card, button
+   and input beneath it in a single place — no page has to be edited, and the
+   classic look (which never carries this class) is untouched. Arbitrary values
+   such as `rounded-[36px]` are deliberate one-offs and are left alone.
+
+   Colour, theme and layout still come from the three themes above; this only
+   changes shape and spacing — friendlier, bigger targets, softer corners.
+   --------------------------------------------------------------------------- */
+.look-youth {
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+  --radius-3xl: 2.25rem;
+}
+
+/* The floating "notes waiting" dock would sit under the phone tab bar. */
+@media (max-width: 1023px) {
+  .look-youth [data-moment-dock] {
+    bottom: calc(5.25rem + env(safe-area-inset-bottom));
+  }
+  /* The help button floats above the tab bar rather than behind it. */
+  .look-youth [data-help-launcher] {
+    bottom: calc(5.75rem + env(safe-area-inset-bottom));
+  }
+}

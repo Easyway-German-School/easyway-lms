@@ -361,8 +361,8 @@ export type AvatarProps = {
   config?: unknown;
   /** Stable text for the fallback face — usually the student's name. */
   seed?: string;
-  /** Pixel size. The avatar is always square; round it with `rounded`. */
-  size?: number;
+  /** Pixel size, or "full" to fill the width of its container. Always square. */
+  size?: number | "full";
   /** Round (chat, profile) or a soft square (tiles). */
   shape?: "circle" | "squircle";
   className?: string;
@@ -383,7 +383,7 @@ export default function Avatar({ config, seed = "", size = 40, shape = "circle",
   return (
     <span
       className={`relative inline-block shrink-0 ${className}`}
-      style={{ width: size, height: size }}
+      style={size === "full" ? { width: "100%", aspectRatio: "1 / 1" } : { width: size, height: size }}
       role="img"
       aria-label={title ?? "Avatar"}
     >
