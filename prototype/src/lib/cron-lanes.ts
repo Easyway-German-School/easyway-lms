@@ -80,6 +80,7 @@ export const CRON_PLAN: TickPlan = {
       jobs: [
         "seat-nudges",
         "auto-graduation",
+        "auto-next-level",
         "exam-reminders",
         "exam-campaign-reminders",
         "pretest-reminders",

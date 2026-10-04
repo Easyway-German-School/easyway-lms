@@ -125,6 +125,14 @@ async function handleGET(request: NextRequest) {
     return runAutoGraduation();
   });
 
+  register("auto-next-level", async () => {
+    // Off until a school switches it on at /admin/next-level. Messages (bell, push
+    // and email) every student who has become eligible and has never been
+    // messaged — and nobody twice. Reminders stay a button.
+    const { runAutoNextLevel } = await import("@/lib/next-level-pipeline-server");
+    return runAutoNextLevel();
+  });
+
   register("fee-reminders", async () => {
     const { sendDueFeeReminders } = await import("@/lib/fee-reminders");
     return sendDueFeeReminders();

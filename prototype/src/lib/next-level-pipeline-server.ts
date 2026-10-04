@@ -1,16 +1,22 @@
 import { prisma } from "@/lib/prisma";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { KIND, notify } from "@/lib/notify";
+import { runWithTenant } from "@/lib/tenant/context";
 import {
-  STAGE_LABEL,
-  readIntent,
   EXCLUSION_LABEL,
+  INVITE_KEY_PREFIX,
+  STAGE_LABEL,
+  inviteKey,
+  parseInviteKey,
+  readIntent,
   resolveJourneyAudience,
+  sendDecision,
   stageFor,
   whyExcluded,
   type ExclusionReason,
   type JourneyStage,
   type JourneyState,
+  type SendDecision,
 } from "@/lib/next-level-journey";
 import { loadJourney, loadJourneyStudent, seatAndOwed } from "@/lib/next-level-journey-server";
 import { buildInvite } from "@/lib/next-level-invite";
@@ -18,9 +24,9 @@ import { getStudentAccess } from "@/lib/student-access";
 
 /**
  * The office's view of the next-level journey: everyone who has just finished
- * (or been moved up), where each one stands, and what they told us — so the
- * front desk calls the people who have gone quiet instead of waiting to be
- * asked about A2.
+ * (or been moved up), where each one stands, who has been messaged, and what
+ * they told us — so the front desk calls the people who have gone quiet instead
+ * of waiting to be asked about A2.
  */
 
 export type PipelineRow = {
@@ -46,8 +52,16 @@ export type PipelineRow = {
   portalOpen: boolean;
   /** The office chose them by hand — messaged even if their portal is locked. */
   manual: boolean;
-  /** Will receive the pop, the bell and the email — open portal and not yet held/paid. */
+  /** May receive the pop, the bell and the email — open portal and not yet held/paid. */
   eligible: boolean;
+  /** When Becca's message last went to them (any route), or null if it never has. */
+  messagedAt: string | null;
+  /**
+   * What a send would do for them: "send" (never messaged), "remind" (messaged
+   * 3+ days ago and still hasn't opened it) or "already" (leave them be).
+   * Only meaningful while `eligible`.
+   */
+  decision: SendDecision;
   /** Why not, in the office's words. */
   skipReason: string | null;
 };
@@ -60,6 +74,12 @@ export type Pipeline = {
     activeTotal: number;
     onList: number;
     portalLocked: number;
+    /** Eligible and never messaged — what the Send button will reach. */
+    toSend: number;
+    /** Eligible, messaged 3+ days ago, still haven't opened it. */
+    toRemind: number;
+    /** Already messaged. */
+    messaged: number;
     excluded: Array<{ reason: ExclusionReason; label: string; count: number }>;
   };
 };
@@ -68,6 +88,24 @@ const STAGES = Object.keys(STAGE_LABEL) as JourneyStage[];
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+/** studentId:targetLevel -> the most recent time a message went out. */
+async function loadMessagedAt(): Promise<Map<string, string>> {
+  const rows = await prisma.notification.findMany({
+    where: { dedupeKey: { startsWith: INVITE_KEY_PREFIX } },
+    select: { dedupeKey: true, createdAt: true },
+  });
+  const latest = new Map<string, string>();
+  for (const row of rows) {
+    const parsed = parseInviteKey(row.dedupeKey);
+    if (!parsed) continue;
+    const key = `${parsed.studentId}:${parsed.targetLevel}`;
+    const at = row.createdAt.toISOString();
+    const prev = latest.get(key);
+    if (!prev || at > prev) latest.set(key, at);
+  }
+  return latest;
 }
 
 export async function loadPipeline(opts: { where: Record<string, unknown>; tenantId: string | null }): Promise<Pipeline> {
@@ -90,6 +128,8 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
       user: { select: { name: true, email: true } },
     },
   });
+
+  const messagedAt = await loadMessagedAt();
 
   const inAudience = students
     .map((s) => ({
@@ -123,6 +163,7 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
       const manual = intent?.manualOffer === true;
       const reachable = portalOpen || manual;
       const answered = stage === "held" || stage === "deposit_paid" || stage === "paid_in_full";
+      const sentAt = messagedAt.get(`${x.s.id}:${x.audience.targetLevel}`) ?? null;
       rows.push({
         studentId: x.s.id,
         name: x.s.user.name || x.s.user.email,
@@ -146,6 +187,8 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
         portalOpen,
         manual,
         eligible: reachable && !answered,
+        messagedAt: sentAt,
+        decision: sendDecision({ messagedAt: sentAt, seenAt: intent?.seenAt ?? null, heldAt: intent?.heldAt ?? null }, now),
         skipReason: !reachable
           ? "Portal is locked — not messaged until they have paid at least the deposit"
           : answered
@@ -181,7 +224,10 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
   const summary: Pipeline["summary"] = {
     activeTotal: students.length,
     onList: rows.length,
-    portalLocked: rows.filter((r) => !r.portalOpen).length,
+    portalLocked: rows.filter((r) => !r.portalOpen && !r.manual).length,
+    toSend: rows.filter((r) => r.eligible && r.decision === "send").length,
+    toRemind: rows.filter((r) => r.eligible && r.decision === "remind").length,
+    messaged: rows.filter((r) => r.messagedAt).length,
     excluded: [...reasons.entries()]
       .map(([reason, count]) => ({ reason, label: EXCLUSION_LABEL[reason], count }))
       .sort((a, b) => b.count - a.count),
@@ -195,16 +241,22 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
  * Becca pop on their dashboard is driven by the same eligibility, so a student
  * sees all of it at the same moment.
  *
- * Only rows that are `eligible` (portal open, not yet answered) are sent to,
- * whatever ids the browser names. One per student per day (the dedupeKey).
+ * Whatever ids the browser names, a student is only sent to when they are
+ * `eligible` AND the decision allows it: never-messaged students always; a
+ * reminder only when `includeReminders` is set and they still haven't opened it
+ * 3+ days on. Anyone messaged recently is left alone, so pressing Send twice —
+ * or the automatic run firing every hour — can never double-message anyone.
  */
 export async function sendInvites(
   rows: PipelineRow[],
   studentIds: string[],
-): Promise<{ sent: number; skipped: number; skippedLocked: number }> {
+  opts: { includeReminders?: boolean; now?: Date } = {},
+): Promise<{ sent: number; alreadyMessaged: number; skippedLocked: number; skipped: number }> {
   const wanted = new Set(studentIds);
-  const day = new Date().toISOString().slice(0, 10);
+  const now = opts.now ?? new Date();
+  const day = now.toISOString().slice(0, 10);
   let sent = 0;
+  let alreadyMessaged = 0;
   let skipped = 0;
   let skippedLocked = 0;
 
@@ -218,6 +270,10 @@ export async function sendInvites(
       skipped += 1;
       continue;
     }
+    if (row.decision === "already" || (row.decision === "remind" && !opts.includeReminders)) {
+      alreadyMessaged += 1;
+      continue;
+    }
     try {
       const student = await loadJourneyStudent({ id: row.studentId });
       const journey = student ? await loadJourney(student) : null;
@@ -226,7 +282,7 @@ export async function sendInvites(
         continue;
       }
       const invite = buildInvite(journey, student.user.name);
-      await notify({
+      const result = await notify({
         to: { studentIds: [row.studentId] },
         kind: KIND.levelAdvance,
         severity: "info",
@@ -235,15 +291,18 @@ export async function sendInvites(
         emailBody: invite.emailBody,
         emailHtmlFor: () => invite.html,
         link: "/next-level",
-        dedupeKey: `next-level-invite:${row.studentId}:${row.targetLevel}:${day}`,
+        dedupeKey: inviteKey(row.studentId, row.targetLevel, day),
       });
-      sent += 1;
+      // `created` is zero when the same message already went out today, so a
+      // double-click is reported honestly instead of as a second send.
+      if (result.created > 0) sent += 1;
+      else alreadyMessaged += 1;
     } catch (error) {
       skipped += 1;
       console.error("next-level invite failed", { studentId: row.studentId, error });
     }
   }
-  return { sent, skipped, skippedLocked };
+  return { sent, alreadyMessaged, skippedLocked, skipped };
 }
 
 /** What a student would get, for the office to look at before pressing send. */
@@ -252,4 +311,102 @@ export async function previewInvite(studentId: string) {
   const journey = student ? await loadJourney(student) : null;
   if (!student || !journey) return null;
   return { name: student.user.name || student.user.email, ...buildInvite(journey, student.user.name) };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Automatic mode                                                              */
+/* -------------------------------------------------------------------------- */
+
+export const NEXT_LEVEL_AUTO_KEY = "next-level.auto";
+
+export type NextLevelAuto = {
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastRunSummary: string | null;
+};
+
+function parseAuto(value: unknown): NextLevelAuto {
+  const raw = asRecord(value);
+  return {
+    enabled: raw.enabled === true,
+    lastRunAt: typeof raw.lastRunAt === "string" ? raw.lastRunAt : null,
+    lastRunSummary: typeof raw.lastRunSummary === "string" ? raw.lastRunSummary : null,
+  };
+}
+
+export async function readNextLevelAuto(tenantId: string | null | undefined): Promise<NextLevelAuto> {
+  if (!tenantId) return parseAuto(null);
+  try {
+    const row = await prisma.schoolSetting.findUnique({
+      where: { tenantId_key: { tenantId, key: NEXT_LEVEL_AUTO_KEY } },
+    });
+    return parseAuto(row?.value);
+  } catch {
+    return parseAuto(null);
+  }
+}
+
+export async function writeNextLevelAuto(tenantId: string, patch: Partial<NextLevelAuto>): Promise<NextLevelAuto> {
+  const next = { ...(await readNextLevelAuto(tenantId)), ...patch };
+  await prisma.schoolSetting.upsert({
+    where: { tenantId_key: { tenantId, key: NEXT_LEVEL_AUTO_KEY } },
+    update: { value: next },
+    create: { tenantId, key: NEXT_LEVEL_AUTO_KEY, value: next },
+  });
+  return next;
+}
+
+/**
+ * The hands-off mode. For every school that has switched it on, anyone who has
+ * become eligible and has NEVER been messaged gets Becca's message — bell, push
+ * and email — without anyone pressing anything. Reminders stay a button: an
+ * automatic nudge to someone who already ignored one is how a school gets
+ * filtered into the spam folder.
+ *
+ * Safe to run as often as the scheduler likes: it only ever reaches people with
+ * decision "send", and the send itself is de-duplicated.
+ */
+export async function runAutoNextLevel(
+  options: { now?: Date; cap?: number; budgetMs?: number } = {},
+): Promise<{ schools: number; sent: number; skipped: number }> {
+  const now = options.now ?? new Date();
+  const cap = options.cap ?? 120;
+  const started = Date.now();
+  const budgetMs = options.budgetMs ?? 40_000;
+  const total = { schools: 0, sent: 0, skipped: 0 };
+
+  const settings = await prisma.schoolSetting.findMany({
+    where: { key: NEXT_LEVEL_AUTO_KEY },
+    select: { tenantId: true, value: true },
+  });
+
+  for (const setting of settings) {
+    if (!parseAuto(setting.value).enabled) continue;
+    total.schools += 1;
+    if (Date.now() - started > budgetMs) break;
+
+    await runWithTenant(setting.tenantId, async () => {
+      const tenantId = setting.tenantId;
+      const pipeline = await loadPipeline({
+        where: { OR: [{ tenantId }, { branch: { tenantId } }, { user: { tenantId } }] },
+        tenantId,
+      });
+      const ids = pipeline.rows
+        .filter((row) => row.eligible && row.decision === "send")
+        .map((row) => row.studentId)
+        .slice(0, cap);
+      if (ids.length === 0) return;
+
+      const result = await sendInvites(pipeline.rows, ids, { now });
+      total.sent += result.sent;
+      total.skipped += result.skipped + result.alreadyMessaged + result.skippedLocked;
+      if (result.sent > 0) {
+        await writeNextLevelAuto(tenantId, {
+          lastRunAt: now.toISOString(),
+          lastRunSummary: `Messaged ${result.sent} new student${result.sent === 1 ? "" : "s"} automatically.`,
+        });
+      }
+    });
+  }
+  return total;
 }

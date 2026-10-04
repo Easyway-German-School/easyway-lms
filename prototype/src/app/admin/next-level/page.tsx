@@ -48,6 +48,8 @@ type Row = {
   portalOpen: boolean;
   manual: boolean;
   eligible: boolean;
+  messagedAt: string | null;
+  decision: "send" | "remind" | "already";
   skipReason: string | null;
 };
 
@@ -55,9 +57,13 @@ type Summary = {
   activeTotal: number;
   onList: number;
   portalLocked: number;
+  toSend: number;
+  toRemind: number;
+  messaged: number;
   excluded: Array<{ reason: string; label: string; count: number }>;
 };
-type Payload = { rows: Row[]; counts: Record<Stage, number>; summary?: Summary };
+type Auto = { enabled: boolean; lastRunAt: string | null; lastRunSummary: string | null };
+type Payload = { rows: Row[]; counts: Record<Stage, number>; summary?: Summary; auto?: Auto };
 type Preview = { name: string; title: string; message: string; html: string } | null;
 
 const STAGE_TEXT: Record<Stage, string> = {
@@ -121,7 +127,11 @@ export default function NextLevelPipelinePage() {
       ),
     [data, filter, stateFilter],
   );
-  const sendable = rows.filter((r) => r.eligible);
+  // Three groups, so the button always says what pressing it will really do.
+  const toSend = rows.filter((r) => r.eligible && r.decision === "send");
+  const toRemind = rows.filter((r) => r.eligible && r.decision === "remind");
+  const messagedCount = rows.filter((r) => r.messagedAt).length;
+  const sendable = toSend;
   const lockedCount = rows.filter((r) => !r.portalOpen && !r.manual).length;
 
   async function post(body: Record<string, unknown>) {
@@ -150,15 +160,29 @@ export default function NextLevelPipelinePage() {
     }
   }
 
-  async function send(ids: string[]) {
+  async function setAuto(enabled: boolean) {
+    setBusy(true);
+    try {
+      const json = await post({ action: "setAuto", enabled });
+      setData((prev) => (prev ? { ...prev, auto: json.auto } : prev));
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Could not change that");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send(ids: string[], includeReminders = false) {
     if (ids.length === 0) return;
-    if (!window.confirm(`Send Becca's message to ${ids.length} student${ids.length === 1 ? "" : "s"}? It goes out as a bell, a push and an email, once each.`)) return;
+    const what = includeReminders ? "a reminder" : "Becca's message";
+    if (!window.confirm(`Send ${what} to ${ids.length} student${ids.length === 1 ? "" : "s"}? It goes out as a bell, a push and an email, once each.`)) return;
     setBusy(true);
     setMessage("");
     try {
-      const json = await post({ action: "send", studentIds: ids });
+      const json = await post({ action: "send", studentIds: ids, includeReminders });
       setMessage(
         `Sent to ${json.sent} student${json.sent === 1 ? "" : "s"}.` +
+          (json.alreadyMessaged ? ` ${json.alreadyMessaged} had already been messaged — left alone.` : "") +
           (json.skippedLocked ? ` ${json.skippedLocked} skipped — portal locked.` : "") +
           (json.skipped ? ` ${json.skipped} skipped — already answered.` : ""),
       );
@@ -251,6 +275,32 @@ export default function NextLevelPipelinePage() {
               ))}
             </div>
 
+            {data.auto && (
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-[var(--foreground)]">
+                    Send automatically — {data.auto.enabled ? "ON" : "OFF"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--muted)]">
+                    When on, every morning anyone new who becomes eligible (portal open, never messaged) gets Becca&apos;s message by
+                    bell, push and email — nobody twice, and you press nothing.
+                    {data.auto.lastRunSummary ? ` Last run: ${data.auto.lastRunSummary}` : ""}
+                  </p>
+                </div>
+                <button
+                  disabled={busy}
+                  onClick={() => setAuto(!data.auto?.enabled)}
+                  aria-pressed={data.auto.enabled}
+                  className={`relative h-7 w-12 shrink-0 rounded-full transition ${data.auto.enabled ? "bg-emerald-500" : "bg-[var(--border)]"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${data.auto.enabled ? "left-[22px]" : "left-0.5"}`}
+                  />
+                  <span className="sr-only">Toggle automatic sending</span>
+                </button>
+              </div>
+            )}
+
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <button
                 disabled={busy || rows.length === 0}
@@ -259,13 +309,28 @@ export default function NextLevelPipelinePage() {
               >
                 Preview the message
               </button>
-              <button
-                disabled={busy || sendable.length === 0}
-                onClick={() => send(sendable.map((r) => r.studentId))}
-                className="rounded-full btn-glow px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-              >
-                Send to {sendable.length} student{sendable.length === 1 ? "" : "s"} — bell, push &amp; email
-              </button>
+              {toSend.length > 0 ? (
+                <button
+                  disabled={busy}
+                  onClick={() => send(toSend.map((r) => r.studentId))}
+                  className="rounded-full btn-glow px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  Send to {toSend.length} new student{toSend.length === 1 ? "" : "s"} — bell, push &amp; email
+                </button>
+              ) : (
+                <span className="rounded-full border border-emerald-300 bg-emerald-50 px-5 py-2.5 text-sm font-bold text-emerald-800">
+                  ✓ Everyone reachable has been messaged{messagedCount > 0 ? ` (${messagedCount})` : ""}
+                </span>
+              )}
+              {toRemind.length > 0 && (
+                <button
+                  disabled={busy}
+                  onClick={() => send(toRemind.map((r) => r.studentId), true)}
+                  className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
+                >
+                  Remind {toRemind.length} who haven&apos;t opened it (3+ days)
+                </button>
+              )}
               <button
                 disabled={busy || selected.size === 0}
                 onClick={() => send([...selected])}
@@ -364,6 +429,11 @@ export default function NextLevelPipelinePage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${TONE[r.stage]}`}>{r.stageLabel}</span>
+                        {r.messagedAt && (
+                          <p className="mt-1 text-xs text-[var(--muted)]">
+                            Messaged {new Date(r.messagedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs text-[var(--muted)]">
                         {r.heldAt || r.phone ? (

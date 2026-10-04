@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  inviteKey,
+  parseInviteKey,
+  sendDecision,
   whyExcluded,
   buildRecap,
   cleanDetails,
@@ -245,5 +248,25 @@ describe("manual offer (Students → Graduate)", () => {
         now,
       }),
     ).toBeNull();
+  });
+});
+
+describe("who has been messaged", () => {
+  it("round-trips the dedupe key that every send already writes", () => {
+    const key = inviteKey("stu_1", "A2", "2026-10-04");
+    expect(key).toBe("next-level-invite:stu_1:A2:2026-10-04");
+    expect(parseInviteKey(key)).toEqual({ studentId: "stu_1", targetLevel: "A2", day: "2026-10-04" });
+    expect(parseInviteKey("something-else:x")).toBeNull();
+    expect(parseInviteKey("next-level-invite:stu_1:A2:not-a-day")).toBeNull();
+  });
+
+  it("sends once, then waits, then reminds only people who never opened it", () => {
+    const now = new Date("2026-10-10T09:00:00Z");
+    const none = { messagedAt: null, seenAt: null, heldAt: null };
+    expect(sendDecision(none, now)).toBe("send");
+    expect(sendDecision({ ...none, messagedAt: "2026-10-09T09:00:00Z" }, now)).toBe("already");
+    expect(sendDecision({ ...none, messagedAt: "2026-10-05T09:00:00Z" }, now)).toBe("remind");
+    expect(sendDecision({ ...none, messagedAt: "2026-10-05T09:00:00Z", seenAt: "2026-10-06T00:00:00Z" }, now)).toBe("already");
+    expect(sendDecision({ ...none, messagedAt: "2026-10-05T09:00:00Z", heldAt: "2026-10-06T00:00:00Z" }, now)).toBe("already");
   });
 });
