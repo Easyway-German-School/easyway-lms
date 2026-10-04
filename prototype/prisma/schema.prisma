@@ -541,6 +541,24 @@ model Student {
   // Arbitrary admission form payload saved as JSON
   admission     Json?
 
+  /**
+   * The cartoon avatar classmates see in chat, leaderboards and the profile —
+   * a few choices (hair, outfit, colours), never an image. Validated through
+   * `sanitizeAvatar` in src/lib/avatar.ts on every write and read, so a row can
+   * only ever hold values that file approves. Null means "no avatar made yet";
+   * the UI then draws a stable default from the student's name. The record
+   * photo (admission.photoUrl) is a different thing and is never shown to
+   * other students.
+   */
+  avatar        Json?
+
+  /**
+   * Which portal look this student picked: "youth" | "classic". Null means "no
+   * answer", and the age-based rollout decides (src/lib/youth-look.ts) — so
+   * nobody's layout changes because of a value they never set.
+   */
+  uiLook        String?
+
   // Graduation tracking
   graduationDate DateTime?
 
