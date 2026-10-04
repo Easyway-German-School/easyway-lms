@@ -20,6 +20,14 @@ import {
 } from "@/lib/next-level-journey";
 import { loadJourney, loadJourneyStudent, seatAndOwed } from "@/lib/next-level-journey-server";
 import { buildInvite } from "@/lib/next-level-invite";
+import {
+  LOCKED_KEY_PREFIX,
+  buildLockedNotice,
+  lockedNoticeDue,
+  lockedNoticeKey,
+  parseLockedNoticeKey,
+  type LockedFacts,
+} from "@/lib/locked-notice";
 import { getStudentAccess } from "@/lib/student-access";
 
 /**
@@ -64,6 +72,10 @@ export type PipelineRow = {
   decision: SendDecision;
   /** Why not, in the office's words. */
   skipReason: string | null;
+  /** The real figures behind a locked portal, for the status notice. Null when not locked. */
+  lock: Omit<LockedFacts, "firstName" | "level"> | null;
+  /** When the locked-portal status notice last went to them, or null. */
+  noticedAt: string | null;
 };
 
 export type Pipeline = {
@@ -80,11 +92,32 @@ export type Pipeline = {
     toRemind: number;
     /** Already messaged. */
     messaged: number;
+    /** Locked portals that have never been sent the status notice. */
+    lockedToNotify: number;
+    /** Locked portals already sent it. */
+    lockedNoticed: number;
     excluded: Array<{ reason: ExclusionReason; label: string; count: number }>;
   };
 };
 
 const STAGES = Object.keys(STAGE_LABEL) as JourneyStage[];
+
+/** studentId -> the most recent time the locked-portal status notice went out. */
+async function loadNoticedAt(): Promise<Map<string, string>> {
+  const rows = await prisma.notification.findMany({
+    where: { dedupeKey: { startsWith: LOCKED_KEY_PREFIX } },
+    select: { dedupeKey: true, createdAt: true },
+  });
+  const latest = new Map<string, string>();
+  for (const row of rows) {
+    const parsed = parseLockedNoticeKey(row.dedupeKey);
+    if (!parsed) continue;
+    const at = row.createdAt.toISOString();
+    const prev = latest.get(parsed.studentId);
+    if (!prev || at > prev) latest.set(parsed.studentId, at);
+  }
+  return latest;
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -130,6 +163,7 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
   });
 
   const messagedAt = await loadMessagedAt();
+  const noticedAt = await loadNoticedAt();
 
   const inAudience = students
     .map((s) => ({
@@ -164,6 +198,7 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
       const reachable = portalOpen || manual;
       const answered = stage === "held" || stage === "deposit_paid" || stage === "paid_in_full";
       const sentAt = messagedAt.get(`${x.s.id}:${x.audience.targetLevel}`) ?? null;
+      const acc = access[idx];
       rows.push({
         studentId: x.s.id,
         name: x.s.user.name || x.s.user.email,
@@ -194,6 +229,19 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
           : answered
             ? "Already answered"
             : null,
+        lock:
+          !portalOpen && !manual && acc
+            ? {
+                reason: acc.lockReason,
+                depositOutstanding: acc.outstanding,
+                requiredDeposit: acc.requiredDeposit,
+                balanceOutstanding: acc.outstandingBalance,
+                tuitionFee: acc.tuitionFee,
+                totalPaid: acc.totalPaid,
+                lockAt: acc.lockAt,
+              }
+            : null,
+        noticedAt: noticedAt.get(x.s.id) ?? null,
       });
     });
   }
@@ -228,6 +276,8 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
     toSend: rows.filter((r) => r.eligible && r.decision === "send").length,
     toRemind: rows.filter((r) => r.eligible && r.decision === "remind").length,
     messaged: rows.filter((r) => r.messagedAt).length,
+    lockedToNotify: rows.filter((r) => r.lock && lockedNoticeDue(r.noticedAt, now) === "send").length,
+    lockedNoticed: rows.filter((r) => r.lock && r.noticedAt).length,
     excluded: [...reasons.entries()]
       .map(([reason, count]) => ({ reason, label: EXCLUSION_LABEL[reason], count }))
       .sort((a, b) => b.count - a.count),
@@ -311,6 +361,79 @@ export async function previewInvite(studentId: string) {
   const journey = student ? await loadJourney(student) : null;
   if (!student || !journey) return null;
   return { name: student.user.name || student.user.email, ...buildInvite(journey, student.user.name) };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Locked portals: the status notice                                           */
+/* -------------------------------------------------------------------------- */
+
+function factsFor(row: PipelineRow): LockedFacts | null {
+  if (!row.lock) return null;
+  return { ...row.lock, firstName: row.name.split(/\s+/)[0] || "", level: row.finishedLevel };
+}
+
+/**
+ * The separate message for students the next-level message skips: where they
+ * stand, in their own figures, and what opens their portal. Bell + email, never
+ * SMS (a text per student costs money, and tuition reminders text by default).
+ *
+ * Only rows that really are locked are sent to, whatever ids the browser names;
+ * anyone noticed in the last week is left alone, so a second press does nothing.
+ */
+export async function sendLockedNotices(
+  rows: PipelineRow[],
+  studentIds: string[],
+  opts: { includeAgain?: boolean; now?: Date } = {},
+): Promise<{ sent: number; alreadyNoticed: number; notLocked: number; failed: number }> {
+  const wanted = new Set(studentIds);
+  const now = opts.now ?? new Date();
+  const day = now.toISOString().slice(0, 10);
+  let sent = 0;
+  let alreadyNoticed = 0;
+  let notLocked = 0;
+  let failed = 0;
+
+  for (const row of rows) {
+    if (!wanted.has(row.studentId)) continue;
+    const facts = factsFor(row);
+    if (!facts) {
+      notLocked += 1;
+      continue;
+    }
+    const due = lockedNoticeDue(row.noticedAt, now);
+    if (due === "already" || (due === "again" && !opts.includeAgain)) {
+      alreadyNoticed += 1;
+      continue;
+    }
+    try {
+      const notice = buildLockedNotice(facts);
+      const result = await notify({
+        to: { studentIds: [row.studentId] },
+        kind: KIND.tuitionReminder,
+        severity: "info",
+        title: notice.title,
+        message: notice.message,
+        emailBody: notice.emailBody,
+        emailHtmlFor: () => notice.html,
+        link: "/payments",
+        sms: false,
+        dedupeKey: lockedNoticeKey(row.studentId, day),
+      });
+      if (result.created > 0) sent += 1;
+      else alreadyNoticed += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("locked notice failed", { studentId: row.studentId, error });
+    }
+  }
+  return { sent, alreadyNoticed, notLocked, failed };
+}
+
+/** What a locked student would get, to read before pressing send. */
+export function previewLockedNotice(rows: PipelineRow[], studentId?: string | null) {
+  const row = (studentId ? rows.find((r) => r.studentId === studentId && r.lock) : null) ?? rows.find((r) => r.lock);
+  const facts = row ? factsFor(row) : null;
+  return row && facts ? { name: row.name, ...buildLockedNotice(facts) } : null;
 }
 
 /* -------------------------------------------------------------------------- */

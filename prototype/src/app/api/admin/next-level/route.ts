@@ -4,8 +4,10 @@ import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
   loadPipeline,
   previewInvite,
+  previewLockedNotice,
   readNextLevelAuto,
   sendInvites,
+  sendLockedNotices,
   writeNextLevelAuto,
 } from "@/lib/next-level-pipeline-server";
 
@@ -22,6 +24,11 @@ import {
  *                                        who have not answered, and who have not
  *                                        been messaged yet (reminders only when asked)
  *   POST {action:"setAuto", enabled}     switch the automatic daily send on or off
+ *   POST {action:"previewLocked"}        the status notice a locked-portal student gets
+ *   POST {action:"sendLocked", studentIds, includeAgain?}
+ *                                        send that notice (bell + email, no SMS) to
+ *                                        the locked students named; anyone noticed in
+ *                                        the last week is left alone
  */
 
 export const dynamic = "force-dynamic";
@@ -58,7 +65,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const action = body?.action;
-  if (action !== "send" && action !== "preview" && action !== "setAuto") {
+  if (action !== "send" && action !== "preview" && action !== "setAuto" && action !== "previewLocked" && action !== "sendLocked") {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
@@ -73,6 +80,19 @@ export async function POST(request: Request) {
     // names ids, never who is eligible.
     const { where, tenantId } = fence(gate);
     const pipeline = await loadPipeline({ where, tenantId });
+
+    if (action === "previewLocked") {
+      const id = typeof body.studentId === "string" ? body.studentId : null;
+      return NextResponse.json({ preview: previewLockedNotice(pipeline.rows, id) });
+    }
+
+    if (action === "sendLocked") {
+      if (!Array.isArray(body.studentIds)) {
+        return NextResponse.json({ error: "studentIds required" }, { status: 400 });
+      }
+      const lockedIds = (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string").slice(0, 300);
+      return NextResponse.json(await sendLockedNotices(pipeline.rows, lockedIds, { includeAgain: body.includeAgain === true }));
+    }
 
     if (action === "preview") {
       const id = typeof body.studentId === "string" ? body.studentId : null;
