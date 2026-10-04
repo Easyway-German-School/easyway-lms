@@ -51,6 +51,8 @@ type Row = {
   messagedAt: string | null;
   decision: "send" | "remind" | "already";
   skipReason: string | null;
+  lock: object | null;
+  noticedAt: string | null;
 };
 
 type Summary = {
@@ -132,7 +134,6 @@ export default function NextLevelPipelinePage() {
   const toRemind = rows.filter((r) => r.eligible && r.decision === "remind");
   const messagedCount = rows.filter((r) => r.messagedAt).length;
   const sendable = toSend;
-  const lockedCount = rows.filter((r) => !r.portalOpen && !r.manual).length;
 
   async function post(body: Record<string, unknown>) {
     const res = await fetch("/api/admin/next-level", {
@@ -155,6 +156,46 @@ export default function NextLevelPipelinePage() {
       setShowPreview(true);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not load the preview");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Locked portals get their own message: where they stand, in their own figures.
+  const lockedRows = rows.filter((r) => r.lock);
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const lockedNew = lockedRows.filter((r) => !r.noticedAt);
+  const lockedAgain = lockedRows.filter((r) => r.noticedAt && Date.now() - Date.parse(r.noticedAt) >= WEEK_MS);
+
+  async function openLockedPreview() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const json = await post({ action: "previewLocked", studentId: (lockedNew[0] ?? lockedRows[0])?.studentId });
+      setPreview(json.preview ?? null);
+      setShowPreview(true);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Could not load the preview");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendLocked(ids: string[], includeAgain = false) {
+    if (ids.length === 0) return;
+    if (!window.confirm(`Send the status notice to ${ids.length} locked student${ids.length === 1 ? "" : "s"}? It goes out as a bell and an email (no SMS), once each.`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const json = await post({ action: "sendLocked", studentIds: ids, includeAgain });
+      setMessage(
+        `Status notice sent to ${json.sent} student${json.sent === 1 ? "" : "s"}.` +
+          (json.alreadyNoticed ? ` ${json.alreadyNoticed} had it recently — left alone.` : "") +
+          (json.failed ? ` ${json.failed} failed.` : ""),
+      );
+      load();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Could not send");
     } finally {
       setBusy(false);
     }
@@ -340,10 +381,48 @@ export default function NextLevelPipelinePage() {
               </button>
               {message && <span className="text-sm font-semibold text-emerald-700">{message}</span>}
             </div>
-            {lockedCount > 0 && (
-              <p className="mt-2 text-xs text-[var(--muted)]">
-                {lockedCount} on this list {lockedCount === 1 ? "has" : "have"} a locked portal and will not be messaged.
-              </p>
+            {lockedRows.length > 0 && (
+              <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <p className="text-sm font-bold text-[var(--foreground)]">
+                  Locked portals ({lockedRows.length}) — these students can&apos;t be reached by the next-level message
+                </p>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  They are skipped above on purpose. Send them a separate status update instead: why their portal is locked, the
+                  exact amount that opens it again, and a link to pay — written from their own figures, by bell and email (no
+                  SMS). No deadlines or threats, and anyone who got it in the last week is left alone.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    disabled={busy}
+                    onClick={openLockedPreview}
+                    className="rounded-full border border-[var(--border)] px-5 py-2 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
+                  >
+                    Preview the status notice
+                  </button>
+                  {lockedNew.length > 0 ? (
+                    <button
+                      disabled={busy}
+                      onClick={() => sendLocked(lockedNew.map((r) => r.studentId))}
+                      className="rounded-full btn-glow px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
+                    >
+                      Send status notice to {lockedNew.length} locked student{lockedNew.length === 1 ? "" : "s"}
+                    </button>
+                  ) : (
+                    <span className="rounded-full border border-emerald-300 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-800">
+                      ✓ Every locked student has been sent their status ({lockedRows.filter((r) => r.noticedAt).length})
+                    </span>
+                  )}
+                  {lockedAgain.length > 0 && (
+                    <button
+                      disabled={busy}
+                      onClick={() => sendLocked(lockedAgain.map((r) => r.studentId), true)}
+                      className="rounded-full border border-[var(--border)] px-5 py-2 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
+                    >
+                      Send again to {lockedAgain.length} (a week or more since)
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
 
             {showPreview && (
@@ -415,7 +494,14 @@ export default function NextLevelPipelinePage() {
                           {r.studentCode ? `${r.studentCode} · ` : ""}
                           {r.branch ?? "No branch"}
                         </p>
-                        {!r.portalOpen && !r.manual && <p className="text-xs font-semibold text-rose-700">Portal locked — not messaged</p>}
+                        {!r.portalOpen && !r.manual && (
+                          <p className="text-xs font-semibold text-rose-700">
+                            Portal locked
+                            {r.noticedAt
+                              ? ` — status notice sent ${new Date(r.noticedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
+                              : " — no message yet"}
+                          </p>
+                        )}
                         {r.manual && <p className="text-xs font-semibold text-sky-700">Chosen by the office — messaged even if locked</p>}
                       </td>
                       <td className="px-4 py-3">
