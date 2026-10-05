@@ -8,6 +8,7 @@ import { markChannelRead } from "@/lib/community-unread";
 import { announceChatMessage } from "@/lib/community-notify";
 import { clearTyping } from "@/lib/community-typing";
 import { notify, KIND } from "@/lib/notify";
+import { sanitizeAvatar } from "@/lib/avatar";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ function serialise(
     attachmentName: string | null;
     attachmentDurationSec: number | null;
     replyToId: string | null;
-    author: { id: string; name: string | null; role: string };
+    author: { id: string; name: string | null; role: string; student?: { avatar: unknown } | null };
     replyTo?: {
       id: string;
       body: string;
@@ -86,6 +87,9 @@ function serialise(
       id: message.author.id,
       name: message.author.name ?? "Someone",
       role: String(message.author.role ?? "").toLowerCase(),
+      // A student's cartoon avatar, or null — never the record photo, which
+      // classmates do not see. The client draws a stable default for null.
+      avatar: sanitizeAvatar(message.author.student?.avatar),
     },
     replyTo: message.replyTo
       ? {
@@ -130,7 +134,7 @@ function foldReactions(rows: Array<{ emoji: string; userId: string }>, viewerId:
 }
 
 const INCLUDE = {
-  author: { select: { id: true, name: true, role: true } },
+  author: { select: { id: true, name: true, role: true, student: { select: { avatar: true } } } },
   replyTo: { select: { id: true, body: true, hiddenAt: true, author: { select: { name: true } } } },
   reactions: { select: { emoji: true, userId: true } },
   gameMatch: { select: { id: true, title: true, status: true } },

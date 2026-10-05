@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
+import LookRolloutCard from "@/components/admin/LookRolloutCard";
 
 type Band = {
   key: string;
@@ -186,6 +187,8 @@ export default function AgeReportPage() {
                 </ul>
               )}
             </section>
+
+            <LookRolloutCard />
 
             <p className="mt-6 text-xs text-[var(--muted)]">
               Students only. Tutors, parents and office staff have no birth date on file, so they are not counted.

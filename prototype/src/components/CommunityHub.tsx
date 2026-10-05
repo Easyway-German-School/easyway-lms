@@ -10,6 +10,8 @@ import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
 import CommunityWins from "@/components/CommunityWins";
 import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import StoryTour from "@/components/StoryTour";
+import Avatar from "@/components/Avatar";
+import { useLook } from "@/lib/useLook";
 import {
   CHAT_THEMES,
   CHAT_THEME_STORAGE_KEY,
@@ -102,7 +104,8 @@ type ChatMessage = {
     /** Whole seconds, on a voice note only. */
     durationSec?: number | null;
   } | null;
-  author: { id: string; name: string; role: string };
+  /** `avatar` is only ever set for students; the record photo is never sent. */
+  author: { id: string; name: string; role: string; avatar?: unknown };
   replyTo: { id: string; author: string; body: string; hidden: boolean } | null;
   /** Folded one-per-emoji, with whether this reader is in the count. */
   reactions?: ReactionSummary[];
@@ -380,6 +383,8 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
 function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const searchParams = useSearchParams();
   const deepLinkChannel = searchParams?.get("channel") ?? null;
+  // Classmates' cartoon avatars replace initials for students on the new look.
+  const youthLook = useLook().look === "youth";
 
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [isStaff, setIsStaff] = useState(false);
@@ -1607,9 +1612,13 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                     {!message.mine ? (
                       <div className="w-8 shrink-0">
                         {!grouped ? (
+                          youthLook && message.author.role === "student" ? (
+                            <Avatar config={message.author.avatar} seed={message.author.name} size={32} />
+                          ) : (
                           <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-[var(--accent)]">
                             {initials(message.author.name)}
                           </span>
+                          )
                         ) : null}
                       </div>
                     ) : null}

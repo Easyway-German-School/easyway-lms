@@ -123,11 +123,12 @@ export type MomentId =
   | "profile-details"
   | "live-feedback"
   | "fee-reminder"
-  | "install-offline-notes";
+  | "install-offline-notes"
+  | "new-look";
 
 type Kind = "toast" | "modal";
 
-type Definition = {
+export type Definition = {
   priority: number;
   kind: Kind;
   /** What the dock calls it if this one gets deferred. */
@@ -135,7 +136,7 @@ type Definition = {
   dockBlurb: string;
 };
 
-const MOMENTS: Record<MomentId, Definition> = {
+export const MOMENTS: Record<MomentId, Definition> = {
   "payment-success": {
     priority: 100,
     kind: "toast",
@@ -414,6 +415,25 @@ const MOMENTS: Record<MomentId, Definition> = {
    * dashboard, an advert for a convenience, and the two-modal cap should
    * almost always push it to the dock rather than in front of anyone.
    */
+  /**
+   * Becca on the new student look — "we gave the app a fresh look", or, for
+   * the phone-heavy 25–34s, "want to try it?".
+   *
+   * A TOAST, NOT A MODAL, ON PURPOSE. This is news, not a decision the student
+   * must make, and the one thing the queue exists to prevent is a pile of
+   * dialogs standing between a student and the welcome tour. A toast does not
+   * dim the page, does not block a tap, never counts against MAX_MODALS, and
+   * dismisses itself. It is ranked LOW so every real modal — the tour, the
+   * payment, the level — has its turn first; Becca speaks only once the screen
+   * is quiet. Once per student, ever. See components/moment/NewLookMoment.tsx
+   * and the test in lib/moment-queue.test.ts that pins this down.
+   */
+  "new-look": {
+    priority: 35,
+    kind: "toast",
+    dockLabel: "See the new look",
+    dockBlurb: "Becca has something to show you — a fresher way around the app.",
+  },
   "install-offline-notes": {
     priority: 25,
     kind: "modal",

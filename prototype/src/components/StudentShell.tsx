@@ -16,6 +16,7 @@ import NextLevelMoment from "@/components/moment/NextLevelMoment";
 import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
+import NewLookMoment from "@/components/moment/NewLookMoment";
 import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import HybridComboMoment from "@/components/moment/HybridComboMoment";
@@ -45,6 +46,8 @@ import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute 
 import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
 import { LiveDot, LivePill, LIVE_ICON_TILE } from "@/components/LiveNavBadge";
 import { useStudentAccess } from "@/lib/useStudentAccess";
+import { useLook } from "@/lib/useLook";
+import YouthTabBar from "@/components/YouthTabBar";
 import { homePathForRole } from "@/lib/portal";
 import {
   AssignmentIcon,
@@ -170,6 +173,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { data: session, status } = useSession();
   const { live } = useLiveClass();
+  // Which look this student has — see lib/youth-look.ts for who gets the new one.
+  const { look, avatar, name: lookName } = useLook();
+  const youth = look === "youth";
+  const inClassroom = pathname?.startsWith("/live") ?? false;
 
   /**
    * The account was deleted (or the whole roster reset) while this person was
@@ -401,7 +408,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     <ImpersonationBanner />
     {/* Was a hardcoded blue gradient, which is why the portal stayed daylight-
         blue whatever theme was chosen. The themed canvas is the page's job. */}
-    <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
+    <div className={`app-canvas flex min-h-screen text-[var(--foreground)] ${youth ? "look-youth" : ""}`}>
       {/* Scrim, phones only. Tapping anywhere off the drawer closes it. */}
       {drawerOpen && (
         <button
@@ -577,7 +584,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       <main
         className={`min-w-0 w-0 flex-1 max-w-[100vw] overflow-x-clip transition-all duration-300 ${
           collapsed ? "lg:ml-20" : "lg:ml-72"
-        }`}
+        } ${youth && !inClassroom ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0" : ""}`}
       >
         {/* The only chrome on a phone: the way back to the menu, and the bell.
             On desktop it keeps the bell reachable from every page, which it
@@ -638,7 +645,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* Lives in the shell, not on one page, so the community (and its unread
           badge) is one tap away from anywhere in the portal. The community is
           itself a paid feature, so it goes away entirely while locked. */}
-      {pathname !== "/community" && hasAccess && <CommunityLauncher />}
+      {/* On the new look the Chats tab IS the way in, so the floating bubble
+          steps aside on phones — but a laptop has no tab bar, so it stays there. */}
+      {pathname !== "/community" && hasAccess && (
+        <div className={youth ? "hidden lg:block" : "contents"}>
+          <CommunityLauncher />
+        </div>
+      )}
       {/* "Anna is typing in General" — only for a student who can open the chat. */}
       {hasAccess && <TypingNudge />}
 
@@ -650,6 +663,12 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       */}
 
       <HelpLauncher />
+
+      {/* The phone's bottom bar — the new look's navigation. Not inside the
+          live classroom, which is full-screen and has its own controls. */}
+      {youth && !inClassroom && !accountRevoked && (
+        <YouthTabBar unreadChats={unreadCommunity} liveNow={Boolean(live)} avatar={avatar} name={lookName} />
+      )}
 
       {/*
         Becca walks a paid, photo-less student to the camera control that
@@ -716,6 +735,15 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         components/moment/ProfileDetailsMoment.tsx.
       */}
       <ProfileDetailsMoment />
+
+      {/*
+        Becca on the new student look — once per student, always skippable, and
+        only for the cohorts it is about (the under-25 wave, and phone-heavy
+        25–34s who get an invitation). Ungated by `hasAccess`: it is news about
+        the app itself, and a locked student sees the same app. Queue-ranked at
+        64. See components/moment/NewLookMoment.tsx and lib/youth-look.ts.
+      */}
+      <NewLookMoment />
 
       {/*
         Right after that reply, for the Travel Package / marketing enquirers
