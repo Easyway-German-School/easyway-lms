@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import Mascot from "@/components/Mascot";
 import { useMoment } from "@/lib/moment-queue";
 import { useStudentAccess } from "@/lib/useStudentAccess";
@@ -37,6 +38,7 @@ type Card = { headline: string; body: string; cta: string };
 
 export default function FeeReminderMoment() {
   const { access, hasAccess } = useStudentAccess();
+  const pathname = usePathname();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [seenToday, setSeenToday] = useState(false);
 
@@ -96,7 +98,9 @@ export default function FeeReminderMoment() {
     }
   }
 
-  const due = Boolean(card && enabled === true && !seenToday);
+  // Not over Becca's next-level journey: that page has its own, better-timed way to pay
+  // (the seat step), and a second pop talking over it breaks the flow.
+  const due = Boolean(card && enabled === true && !seenToday && pathname !== "/next-level");
   const { open, close } = useMoment("fee-reminder", due);
 
   if (!open || !card || typeof document === "undefined") return null;

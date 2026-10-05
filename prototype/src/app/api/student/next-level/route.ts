@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    const intent = await holdSeat(student, journey.audience.targetLevel, body?.details);
+    const intent = await holdSeat(student, journey.audience, body?.details);
     return NextResponse.json({ ok: true, intent });
   } catch (error) {
     console.error("next-level POST failed", error);

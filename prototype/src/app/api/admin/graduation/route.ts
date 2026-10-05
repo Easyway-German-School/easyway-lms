@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { graduateStudents, loadGraduationDesk, writeGraduationAuto } from "@/lib/graduation-server";
+import { graduateStudents, loadGraduationDesk, setBatchAutomatic } from "@/lib/graduation-server";
 
 /**
  * The graduation desk.
@@ -10,10 +10,12 @@ import { graduateStudents, loadGraduationDesk, writeGraduationAuto } from "@/lib
  *                                        finishes within a fortnight), grouped
  *                                        by branch · level · batch, with who is
  *                                        ready and who is not and why
- *   POST {action:"graduate", studentIds} sign off, certificate, move up to the
- *                                        next level and intake, and tell them —
- *                                        for the ready learners among these
- *   POST {action:"setAuto", enabled}     switch the automatic daily run on/off
+ *   POST {action:"graduate", studentIds} for the learners named: move up the ready ones
+ *                                        (sign off, certificate, next level and
+ *                                        intake) and INVITE the ones who only owe on
+ *                                        the level just finished; everyone gets
+ *                                        Becca's next-level message, and tutors a note
+ *   POST {action:"setAuto", enabled}     one switch for the whole thing, run each morning
  *
  * The browser sends ids, never a verdict: readiness is recomputed here at the
  * moment of the click (see lib/graduation-server.ts).
@@ -76,7 +78,7 @@ export async function POST(request: Request) {
 
     if (action === "setAuto") {
       if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
-      const auto = await writeGraduationAuto(tenantId, { enabled: body.enabled === true });
+      const auto = await setBatchAutomatic(tenantId, body.enabled === true);
       return NextResponse.json({ ok: true, auto });
     }
 

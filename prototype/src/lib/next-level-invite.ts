@@ -55,7 +55,15 @@ export function buildInvite(journey: JourneyPayload, name: string | null | undef
   const first = firstNameOf(name);
   const { audience, recap, offer } = journey;
   const target = audience.targetLevel;
-  const text = lead(journey, first);
+  const baseText = lead(journey, first);
+  // Their certificate is theirs whether or not they go on — say so, in the same breath.
+  const certLine = journey.certificateReady
+    ? `Your ${audience.finishedLevel} certificate is ready in your portal.`
+    : "";
+  const text = {
+    ...baseText,
+    message: certLine ? `${baseText.message} ${certLine}` : baseText.message,
+  };
 
   const stats = recap.stats.slice(0, 3);
   const plan = recap.plan.slice(0, 3);
@@ -84,6 +92,7 @@ export function buildInvite(journey: JourneyPayload, name: string | null | undef
     .join("");
 
   const facts: string[] = [];
+  if (certLine) facts.push(`<strong>${escapeHtml(certLine)}</strong>`);
   if (offer.opensLabel) facts.push(`${target} opens <strong>${escapeHtml(offer.opensLabel)}</strong>.`);
   if (offer.tuitionFee > 0) {
     facts.push(
@@ -127,7 +136,7 @@ export function buildInvite(journey: JourneyPayload, name: string | null | undef
     }
     <tr><td style="padding:6px 24px 28px;font-family:${FONT};">
       <a href="${escapeHtml(url)}" style="display:inline-block;background:${ORANGE};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 26px;border-radius:10px;">See my ${escapeHtml(target)} plan</a>
-      <p style="margin:14px 0 0;font-size:12px;line-height:18px;color:${MUTED};">No coupon, no countdown — just the plan, the real price and the real opening day.</p>
+      <p style="margin:14px 0 0;font-size:12px;line-height:18px;color:${MUTED};">No coupon, no countdown — just the plan, the real price and the real opening day. Not ready yet? That is fine: your results and certificate stay yours, and your portal simply stays locked until you confirm your seat.</p>
     </td></tr>`,
   });
 

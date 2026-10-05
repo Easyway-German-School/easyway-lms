@@ -3,7 +3,7 @@ import { buildInvite } from "./next-level-invite";
 import { buildRecap } from "./next-level-journey";
 import type { JourneyPayload } from "./next-level-journey-server";
 
-function journey(state: "ended" | "midway"): JourneyPayload {
+function journey(state: "ended" | "midway", certificateReady = false): JourneyPayload {
   const recap = buildRecap({
     state,
     firstName: "Ada",
@@ -30,6 +30,7 @@ function journey(state: "ended" | "midway"): JourneyPayload {
     portalOpen: true,
     reachable: true,
     recap,
+    certificateReady,
     offer: {
       tuitionFee: 150000,
       requiredDeposit: 90000,
@@ -42,9 +43,10 @@ function journey(state: "ended" | "midway"): JourneyPayload {
       opensOn: null,
       opensLabel: "Monday, 12 October",
       payHref: null,
+      batchChoices: [],
     },
     intent: null,
-    prefill: { name: "Ada", phone: "", parentPhone: "", sessionSlot: "morning", deliveryMode: "physical" },
+    prefill: { name: "Ada", phone: "", parentPhone: "", sessionSlot: "morning", deliveryMode: "physical", batch: "" },
   };
 }
 
@@ -63,6 +65,14 @@ describe("buildInvite", () => {
     const invite = buildInvite(journey("midway"), "Ada Okafor");
     expect(invite.title).toMatch(/month into A1/);
     expect(invite.message).not.toMatch(/finished A1/);
+  });
+
+  it("says the certificate is theirs, and that stopping here is fine", () => {
+    const invite = buildInvite(journey("ended", true), "Ada Okafor");
+    expect(invite.message).toContain("Your A1 certificate is ready in your portal.");
+    expect(invite.html).toContain("A1 certificate is ready");
+    expect(invite.html).toContain("portal simply stays locked");
+    expect(buildInvite(journey("ended", false), "Ada").message).not.toMatch(/certificate/);
   });
 
   it("escapes anything that came from a name", () => {

@@ -11,6 +11,9 @@ import { issueCertificateForStudent } from "@/lib/certificates";
 import { promoteStudents } from "@/lib/promotion";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import type { IntakeStartDayOverrides } from "@/lib/intake";
+import { resolveJourneyAudience } from "@/lib/next-level-journey";
+import { markOffered, sendBeccaInvite } from "@/lib/next-level-manual-server";
+import { writeNextLevelAuto } from "@/lib/next-level-pipeline-server";
 import {
   cohortTiming,
   graduationVerdict,
@@ -37,13 +40,18 @@ import {
  *                                  placement "next-intake"); the portal locks
  *                                  on the new level's deposit / the intake
  *                                  countdown by itself
- *   4. tell them                 — one message: finished, results and
- *                                  certificate are ready, here is what the next
- *                                  class costs to confirm
+ *   4. tell them                 — Becca's next-level journey, the same one the
+ *                                  pop on their dashboard shows: bell, push and
+ *                                  a designed email with their own numbers and a
+ *                                  Pay button that works
  *
- * Only learners the desk calls "ready" are ever touched, by hand or by the
- * automatic run. The verdict is recomputed on the server at click time — the
- * browser's list is never trusted.
+ * A learner the desk calls "ready" is moved and told. One who only owes on the
+ * level just finished ("fees") is NOT moved — the money rule stands — but is
+ * still invited: the checkout bills that old balance and the new deposit in one
+ * payment and signs the level off as it does, so they are never stuck waiting on
+ * the office. Anyone who never started or was held back is left alone. The
+ * verdict is recomputed on the server at click time — the browser's list is
+ * never trusted.
  */
 
 export const GRADUATION_AUTO_KEY = "graduation.auto";
@@ -54,6 +62,8 @@ export type DeskStudent = {
   email: string;
   sitting: string;
   verdict: GraduationVerdict;
+  /** Already invited to the next level (the invitation went out, they have not moved yet). */
+  offered: boolean;
 };
 
 export type DeskCohort = {
@@ -70,6 +80,9 @@ export type DeskCohort = {
   ended: boolean;
   landing: { label: string; startsOn: string; hasStarted: boolean } | null;
   ready: number;
+  /** Owe only on the level just finished: not moved, but invited. */
+  owes: number;
+  /** Never started or held back: left alone. */
   blocked: number;
   students: DeskStudent[];
 };
@@ -103,6 +116,9 @@ type Scanned = {
   email: string;
   branchId: string | null;
   branch: string;
+  tutorId: string | null;
+  /** The office has already invited this learner to the next level. */
+  offered: boolean;
   level: string;
   batch: string;
   sessionSlot: string;
@@ -152,6 +168,7 @@ async function scan(options: {
       heldBackAt: true,
       heldBackReason: true,
       branchId: true,
+      tutorId: true,
       branch: { select: { name: true } },
       user: { select: { name: true, email: true } },
     },
@@ -249,6 +266,8 @@ async function scan(options: {
       email: student.user?.email ?? "",
       branchId: student.branchId ?? null,
       branch: student.branch?.name ?? "Unassigned",
+      tutorId: student.tutorId ?? null,
+      offered: readJson(readJson(student.admission).nextLevel).manualOffer === true,
       level: student.level,
       batch,
       sessionSlot: student.sessionSlot,
@@ -349,6 +368,7 @@ export async function loadGraduationDesk(options: {
           ? { label: row.landing.label, startsOn: row.landing.startsOn.toISOString(), hasStarted: row.landing.hasStarted }
           : null,
         ready: 0,
+        owes: 0,
         blocked: 0,
         students: [],
       };
@@ -360,8 +380,10 @@ export async function loadGraduationDesk(options: {
       email: row.email,
       sitting: row.sessionSlot,
       verdict: row.verdict,
+      offered: row.offered,
     });
     if (row.verdict.state === "ready") cohort.ready += 1;
+    else if (row.verdict.reason === "fees") cohort.owes += 1;
     else cohort.blocked += 1;
   }
 
@@ -381,12 +403,18 @@ export async function loadGraduationDesk(options: {
 /* ------------------------------- graduating ------------------------------- */
 
 export type GraduationRun = {
+  /** Signed off, certificate, moved up, and invited. */
   graduated: Array<{ studentId: string; name: string }>;
+  /** Not moved (they owe on the level just finished) but invited — they can pay and move up themselves. */
+  invited: Array<{ studentId: string; name: string; detail: string }>;
   skipped: Array<{ studentId: string; name: string; reason: string }>;
   certificatesIssued: number;
   /** Graduated but no certificate could be issued (reason per learner). */
   certificatesPending: Array<{ name: string; reason: string }>;
+  /** Becca messages that went out (bell + push + email), moved and invited together. */
   notified: number;
+  /** Tutors told how their class finished. */
+  tutorsNotified: number;
 };
 
 export async function graduateStudents(
@@ -402,10 +430,12 @@ export async function graduateStudents(
   const now = options.now ?? new Date();
   const run: GraduationRun = {
     graduated: [],
+    invited: [],
     skipped: [],
     certificatesIssued: 0,
     certificatesPending: [],
     notified: 0,
+    tutorsNotified: 0,
   };
   if (studentIds.length === 0) return run;
 
@@ -414,8 +444,7 @@ export async function graduateStudents(
   const { candidates } = await scan({ where: options.where, ids: studentIds, now, startDayOverrides });
   const byId = new Map(candidates.map((row) => [row.studentId, row]));
 
-  type Told = { row: Scanned; certificate: boolean };
-  const told: Told[] = [];
+  const told: Array<{ row: Scanned; moved: boolean }> = [];
 
   for (const studentId of studentIds) {
     const row = byId.get(studentId);
@@ -423,7 +452,8 @@ export async function graduateStudents(
       run.skipped.push({ studentId, name: studentId, reason: "Not due yet, or not found" });
       continue;
     }
-    if (row.verdict.state !== "ready") {
+    const owesOnly = row.verdict.state === "blocked" && row.verdict.reason === "fees";
+    if (row.verdict.state !== "ready" && !owesOnly) {
       run.skipped.push({ studentId, name: row.name, reason: row.verdict.detail });
       continue;
     }
@@ -431,9 +461,25 @@ export async function graduateStudents(
       run.skipped.push({ studentId, name: row.name, reason: "Batch has not finished yet" });
       continue;
     }
+    const next = nextLevelAfter(row.level);
+    if (!next) continue;
 
     try {
-      // 1. Sign off. Quiet: the message below replaces the generic one.
+      if (owesOnly) {
+        // Invite, don't move: the money rule stands. They are marked offered so
+        // the invitation reaches them even on a locked portal, and the checkout
+        // takes it from there. An automatic run leaves anyone already invited alone.
+        const { alreadyOffered } = await markOffered(studentId, next, now);
+        if (options.endedOnly && alreadyOffered) {
+          run.skipped.push({ studentId, name: row.name, reason: "Already invited" });
+          continue;
+        }
+        run.invited.push({ studentId, name: row.name, detail: row.verdict.state === "blocked" ? row.verdict.detail : "" });
+        told.push({ row, moved: false });
+        continue;
+      }
+
+      // 1. Sign off. Quiet: Becca's message below replaces the generic one.
       await completeLevelForStudents([studentId], { now, announce: false });
 
       // 2. Certificate, while they are still on the level they finished. Dated
@@ -459,82 +505,143 @@ export async function graduateStudents(
         });
         continue;
       }
+      // A moved-up learner is locked on the new level's deposit — the very person
+      // the next-level message is for. Marking them offered is what lets it reach them.
+      await markOffered(studentId, next, now);
 
       run.graduated.push({ studentId, name: row.name });
-      told.push({ row, certificate: certificate.issued });
+      told.push({ row, moved: true });
     } catch (error) {
       console.error("Graduation failed for a learner", { studentId, error });
       run.skipped.push({ studentId, name: row.name, reason: "Something went wrong — try this learner again" });
     }
   }
 
-  // 4. Tell them. Learners in the same position get identical words, so a
-  // whole batch is a handful of notify() calls, not one per person.
-  const groups = new Map<string, { title: string; message: string; emailBody: string; studentIds: string[]; dedupeKey: string }>();
-  for (const { row, certificate } of told) {
-    const next = nextLevelAfter(row.level);
-    if (!next) continue;
-    const deposit = requiredDepositFor({
-      level: next,
-      branch: row.branch === "Unassigned" ? null : row.branch,
-      classType: row.classType,
-      pathway: row.pathway,
-    });
-    const place = row.landing;
-    const opens = place
-      ? place.startsOn.toLocaleDateString("en-NG", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          timeZone: "Africa/Lagos",
-        })
-      : null;
-    const results = certificate
-      ? "Your results and your certificate are ready in your portal."
-      : "Your results are ready in your portal.";
-    const nextStep =
-      place && !place.hasStarted
-        ? `Your ${next} class opens ${opens}. Confirm your seat by paying the ${naira(deposit)} deposit from your Payments page.`
-        : `Your ${next} class is under way. Pay the ${naira(deposit)} deposit from your Payments page to open your classroom.`;
-
-    const title = `You have finished ${row.level} — well done!`;
-    const message = `Becca here — congratulations on finishing ${row.level}! ${results} ${nextStep}`;
-    const key = `${title}\u0000${message}`;
-    const group =
-      groups.get(key) ??
-      {
-        title,
-        message,
-        emailBody: `${message}\n\nYour ${next} classroom opens as soon as your deposit is in. Your results and certificate stay open to you whatever happens next.`,
-        studentIds: [],
-        dedupeKey: `graduation:${row.level}:${row.batch}:${place?.label ?? "now"}`,
-      };
-    group.studentIds.push(row.studentId);
-    groups.set(key, group);
-  }
-
-  for (const group of groups.values()) {
+  // 4. Tell them — Becca's journey, personal to each learner, so one message
+  // each (bell + push + email). A failure for one never stops the others.
+  for (const { row } of told) {
     try {
-      const outcome = await notify({
-        to: { studentIds: group.studentIds },
-        title: group.title,
-        message: group.message,
-        emailBody: group.emailBody,
-        kind: "level-complete",
-        severity: "success",
-        link: "/certificates",
-        dedupeKey: group.dedupeKey,
-        push: true,
-        email: true,
-        sms: false,
-      });
-      run.notified += outcome.created;
+      if (await sendBeccaInvite(row.studentId, now)) run.notified += 1;
     } catch (error) {
-      console.error("Graduation announcement failed", error);
+      console.error("Next-level invite failed after graduation", { studentId: row.studentId, error });
     }
   }
 
+  // 5. Tell their tutors how the class finished — one note per tutor.
+  run.tutorsNotified = await notifyTutors(told, now);
+
   return run;
+}
+
+/**
+ * One short note per tutor: how many of their learners moved up and how many
+ * were invited. Tutors never press a button for this; it just tells them why
+ * their roster changed.
+ */
+async function notifyTutors(told: Array<{ row: Scanned; moved: boolean }>, now: Date): Promise<number> {
+  const byTutor = new Map<string, { moved: number; invited: number; level: string; next: string; batch: string }>();
+  for (const { row, moved } of told) {
+    if (!row.tutorId) continue;
+    const next = nextLevelAfter(row.level);
+    if (!next) continue;
+    const key = `${row.tutorId}|${row.level}|${row.batch}`;
+    const entry = byTutor.get(key) ?? { moved: 0, invited: 0, level: row.level, next, batch: row.batch };
+    if (moved) entry.moved += 1;
+    else entry.invited += 1;
+    byTutor.set(key, entry);
+  }
+
+  let sent = 0;
+  for (const [key, entry] of byTutor) {
+    const tutorId = key.split("|")[0];
+    const parts = [
+      entry.moved ? `${entry.moved} moved up to ${entry.next}` : "",
+      entry.invited ? `${entry.invited} invited to ${entry.next} (they still owe on ${entry.level})` : "",
+    ].filter(Boolean);
+    try {
+      const outcome = await notify({
+        to: { lecturers: { lecturerIds: [tutorId] } },
+        title: `Your ${entry.batch} ${entry.level} class has finished`,
+        message: `${parts.join(" and ")}. Each of them has been sent their ${entry.next} plan and can confirm a seat from their portal.`,
+        kind: "level-complete",
+        severity: "info",
+        link: "/lecturer/dashboard",
+        dedupeKey: `graduation-tutor:${tutorId}:${entry.level}:${entry.batch}:${now.toISOString().slice(0, 10)}`,
+        push: true,
+        sms: false,
+      });
+      sent += outcome.created;
+    } catch (error) {
+      console.error("Tutor graduation note failed", error);
+    }
+  }
+  return sent;
+}
+
+/**
+ * Paying is signing off. A student whose batch has ended (or whom the office
+ * invited) opens the next-level checkout, and the checkout calls this first, so
+ * they never wait on a person to press "sign off" before they can pay. The same
+ * gates the desk uses apply — held back or never started and it says no — and
+ * the certificate is issued best-effort while they are still on the level they
+ * finished. Anything owed on that level is NOT waived: the checkout bills it
+ * together with the new deposit.
+ */
+export async function signOffForCheckout(studentId: string, now = new Date()): Promise<boolean> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: {
+      id: true,
+      level: true,
+      levelCompletedFor: true,
+      levelCompletedAt: true,
+      admission: true,
+      classesStartedAt: true,
+      createdAt: true,
+      sessionSlot: true,
+      tenantId: true,
+      heldBackAt: true,
+      heldBackReason: true,
+    },
+  });
+  if (!student) return false;
+  if (student.levelCompletedFor === student.level && student.levelCompletedAt) return true;
+
+  const overrides = await readIntakeStartDayOverrides(student.tenantId ?? null);
+  const audience = resolveJourneyAudience({
+    level: student.level,
+    levelCompletedFor: student.levelCompletedFor,
+    levelCompletedAt: student.levelCompletedAt,
+    admission: student.admission,
+    classesStartedAt: student.classesStartedAt,
+    createdAt: student.createdAt,
+    sessionSlot: student.sessionSlot,
+    startDayOverrides: overrides,
+    now,
+  });
+  if (!audience || (audience.state !== "ended" && audience.state !== "invited")) return false;
+
+  const attendedCount =
+    audience.state === "invited"
+      ? 1
+      : await prisma.attendance.count({
+          where: { studentId, status: { in: ["present", "late"] } },
+        });
+  const verdict = graduationVerdict({
+    level: student.level,
+    heldBackAt: student.heldBackAt,
+    heldBackReason: student.heldBackReason,
+    hasStarted: Boolean(
+      (student.classesStartedAt && student.classesStartedAt.getTime() <= now.getTime()) || attendedCount > 0,
+    ),
+    // The checkout bills what is owed; it is not a reason to refuse the sign-off.
+    priorLevelOwed: 0,
+  });
+  if (verdict.state !== "ready") return false;
+
+  await completeLevelForStudents([studentId], { now, announce: false });
+  await issueCertificateForStudent(studentId, { now }).catch(() => undefined);
+  return true;
 }
 
 /* ------------------------------ automatic run ------------------------------ */
@@ -544,20 +651,32 @@ function tenantWhere(tenantId: string) {
 }
 
 /**
+ * One switch for the office: "do this for me when a batch ends". It runs both
+ * automatic halves together — this module's daily move-up-and-invite, and the
+ * pipeline's hourly message to anyone who becomes eligible later — so there is
+ * nothing else to find and flip. Reads back from this module's own flag.
+ */
+export async function setBatchAutomatic(tenantId: string, enabled: boolean): Promise<GraduationAuto> {
+  await writeNextLevelAuto(tenantId, { enabled });
+  return writeGraduationAuto(tenantId, { enabled });
+}
+
+/**
  * The daily automatic run. For every school that has switched it on, moves on
  * every learner the desk calls ready whose batch has actually FINISHED (the
- * manual button may go a fortnight early; the automatic one never does).
- * Capped per run so the cron job's time budget holds — the remainder is picked
- * up the next day, and the desk shows anything left.
+ * manual button may go a fortnight early; the automatic one never does), and
+ * invites — without moving — the ones who only owe on the level just finished,
+ * once each. Capped per run so the cron job's time budget holds — the remainder
+ * is picked up the next day, and the desk shows anything left.
  */
 export async function runAutoGraduation(
   options: { now?: Date; cap?: number; budgetMs?: number } = {},
-): Promise<{ schools: number; graduated: number; skipped: number }> {
+): Promise<{ schools: number; graduated: number; invited: number; skipped: number }> {
   const now = options.now ?? new Date();
   const cap = options.cap ?? 60;
   const started = Date.now();
   const budgetMs = options.budgetMs ?? 35_000;
-  const total = { schools: 0, graduated: 0, skipped: 0 };
+  const total = { schools: 0, graduated: 0, invited: 0, skipped: 0 };
 
   const rows = await prisma.schoolSetting.findMany({
     where: { key: GRADUATION_AUTO_KEY },
@@ -574,11 +693,18 @@ export async function runAutoGraduation(
       const startDayOverrides = await readIntakeStartDayOverrides(row.tenantId);
       const { candidates } = await scan({ where, now, startDayOverrides });
       const ids = candidates
-        .filter((candidate) => candidate.verdict.state === "ready" && candidate.timing.ended)
+        .filter(
+          (candidate) =>
+            candidate.timing.ended &&
+            (candidate.verdict.state === "ready" ||
+              // Owes on the level just finished: invited once, never moved.
+              (candidate.verdict.state === "blocked" && candidate.verdict.reason === "fees" && !candidate.offered)),
+        )
         .map((candidate) => candidate.studentId)
         .slice(0, cap);
 
       let graduated = 0;
+      let invited = 0;
       let skipped = 0;
       // Small slices, so a slow run stops between them instead of mid-learner.
       for (let i = 0; i < ids.length; i += 10) {
@@ -590,15 +716,22 @@ export async function runAutoGraduation(
           endedOnly: true,
         });
         graduated += result.graduated.length;
+        invited += result.invited.length;
         skipped += result.skipped.length;
       }
 
       total.graduated += graduated;
+      total.invited += invited;
       total.skipped += skipped;
-      if (graduated > 0 || skipped > 0) {
+      if (graduated > 0 || invited > 0 || skipped > 0) {
+        const parts = [
+          `Moved up ${graduated} learner${graduated === 1 ? "" : "s"}`,
+          invited ? `invited ${invited} who still owe` : "",
+          skipped ? `${skipped} left for the office` : "",
+        ].filter(Boolean);
         await writeGraduationAuto(row.tenantId, {
           lastRunAt: now.toISOString(),
-          lastRunSummary: `Moved up ${graduated} learner${graduated === 1 ? "" : "s"}${skipped ? `, ${skipped} left for the office` : ""}.`,
+          lastRunSummary: `${parts.join(", ")}.`,
         });
       }
     });
