@@ -559,6 +559,13 @@ model Student {
    */
   uiLook        String?
 
+  /**
+   * When Becca's "new look" popup was first shown to this student. Null = never
+   * shown. The popup appears exactly once, ever — skipping it is an answer, and
+   * the switch on the profile page is always there afterwards.
+   */
+  lookPromptedAt DateTime?
+
   // Graduation tracking
   graduationDate DateTime?
 

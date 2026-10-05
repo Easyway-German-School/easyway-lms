@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 
 import type { AvatarConfig } from "@/lib/avatar";
-import type { Look } from "@/lib/youth-look";
+import type { Cohort, Look } from "@/lib/youth-look";
 
 export const lookQueryKey = ["student", "look"] as const;
 
@@ -13,6 +13,9 @@ export type LookState = {
   look: Look;
   reason: "chosen" | "wave" | "default";
   inWave: boolean;
+  cohort?: Cohort;
+  /** Becca's one-time popup: what to say, or null for nothing. */
+  prompt?: "announce" | "invite" | null;
   avatar: AvatarConfig | null;
   name: string | null;
 };
@@ -94,6 +97,26 @@ export function useLook() {
     [queryClient],
   );
 
+  /** Tell the server Becca's popup has been shown, so it never appears again. */
+  const markPromptSeen = useCallback(async () => {
+    const current = queryClient.getQueryData<LookState>(lookQueryKey);
+    // Clear it locally first: nothing may re-open the popup while the request is in flight.
+    if (current) queryClient.setQueryData(lookQueryKey, { ...current, prompt: null });
+    try {
+      const response = await fetch("/api/student/look", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promptSeen: true }),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as LookState;
+        writeCache(data);
+      }
+    } catch {
+      /* Worst case it shows once more next visit; never an error in the portal. */
+    }
+  }, [queryClient]);
+
   const saveAvatar = useCallback(
     async (avatar: AvatarConfig) => {
       const response = await fetch("/api/student/avatar", {
@@ -127,7 +150,11 @@ export function useLook() {
     name: state?.name ?? null,
     /** False until we have any answer at all — callers that must not guess wait on this. */
     ready: state !== null,
+    /** Only ever the server's answer — a cached copy must not be able to re-open the popup. */
+    prompt: (query.data?.prompt ?? null) as "announce" | "invite" | null,
+    cohort: (state?.cohort ?? "classic") as Cohort,
     setLook,
+    markPromptSeen,
     saveAvatar,
   };
 }

@@ -123,7 +123,8 @@ export type MomentId =
   | "profile-details"
   | "live-feedback"
   | "fee-reminder"
-  | "install-offline-notes";
+  | "install-offline-notes"
+  | "new-look";
 
 type Kind = "toast" | "modal";
 
@@ -414,6 +415,21 @@ const MOMENTS: Record<MomentId, Definition> = {
    * dashboard, an advert for a convenience, and the two-modal cap should
    * almost always push it to the dock rather than in front of anyone.
    */
+  /**
+   * Becca on the new student look — "we gave the app a fresh look", or, for
+   * the phone-heavy 25–34s, "want to try it?". Once per student, ever, and
+   * always skippable: nothing about it is required, and the switch on the
+   * profile is there afterwards. Above the recurring motivation moments (it is
+   * news about the app they are standing in, and only ever shown once) but
+   * below everything that is about THEM — their payment, their level, their
+   * account. See components/moment/NewLookMoment.tsx and lib/youth-look.ts.
+   */
+  "new-look": {
+    priority: 64,
+    kind: "modal",
+    dockLabel: "See the new look",
+    dockBlurb: "Becca has something to show you — a fresher way around the app.",
+  },
   "install-offline-notes": {
     priority: 25,
     kind: "modal",

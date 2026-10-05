@@ -16,6 +16,7 @@ import NextLevelMoment from "@/components/moment/NextLevelMoment";
 import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
+import NewLookMoment from "@/components/moment/NewLookMoment";
 import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import HybridComboMoment from "@/components/moment/HybridComboMoment";
@@ -734,6 +735,15 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         components/moment/ProfileDetailsMoment.tsx.
       */}
       <ProfileDetailsMoment />
+
+      {/*
+        Becca on the new student look — once per student, always skippable, and
+        only for the cohorts it is about (the under-25 wave, and phone-heavy
+        25–34s who get an invitation). Ungated by `hasAccess`: it is news about
+        the app itself, and a locked student sees the same app. Queue-ranked at
+        64. See components/moment/NewLookMoment.tsx and lib/youth-look.ts.
+      */}
+      <NewLookMoment />
 
       {/*
         Right after that reply, for the Travel Package / marketing enquirers

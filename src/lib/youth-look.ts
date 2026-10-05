@@ -3,27 +3,35 @@
  *
  * The student portal is being reshaped for the young learner: a phone tab bar,
  * avatars, a profile that reads like a feed. That is a real change to how the
- * product feels, so it goes out in waves by age rather than to everybody at
- * once — the older learners the age report tells us struggle most with the
- * portal are the last people who should have the layout move under them.
+ * product feels, so it goes out by cohort rather than to everybody at once —
+ * the older learners the age report tells us struggle most with the portal are
+ * the last people who should have the layout move under them.
  *
- * Three inputs decide it, in this order:
+ * Three cohorts, and a student belongs to exactly one:
  *
- *   1. The student's own choice. Someone who tapped "New look" or "Classic
- *      look" in their profile has answered the question; nothing overrides it.
- *   2. The wave. `maxAge` is the oldest age that gets the new look by default.
- *      It starts at 24 (the "Under 18" and "18 – 24" bands in lib/age-bands.ts)
- *      and is a SchoolSetting, so widening the pilot to 25–34 is a settings
- *      change and not a deploy.
- *   3. Not knowing. A student with no usable birth date stays on the classic
- *      look unless the wave says otherwise — guessing wrong in the direction of
- *      "moved your layout without asking" is the costlier mistake.
+ *   WAVE     Under 25 (configurable). Gets the new look BY DEFAULT, and Becca
+ *            tells them once — "we gave the app a fresh look, keep it or go
+ *            back".
+ *
+ *   INVITED  A little older (25–34) AND demonstrably living on their phone —
+ *            most of their recent portal activity is on a mobile. Nothing
+ *            changes for them; Becca asks once whether they would like to try
+ *            it. The phone-share test is the data doing the work: a bottom tab
+ *            bar is built for a thumb, so it is offered to the people who are
+ *            already using the portal with one.
+ *
+ *   CLASSIC  Everyone else, including anybody whose age we cannot work out. They
+ *            are never prompted. The switch on their profile is always there.
+ *
+ * On top of that, the student's own choice wins over all of it, in both
+ * directions, forever. The school sets the default; the student decides.
  *
  * Pure on purpose, like age-bands.ts: no I/O, unit-tested without a database,
  * and safe to import from client components.
  */
 
 export type Look = "youth" | "classic";
+export type Cohort = "wave" | "invited" | "classic";
 
 /** SchoolSetting key the wave is stored under. */
 export const LOOK_WAVE_KEY = "ui.look-wave";
@@ -33,10 +41,25 @@ export type LookWave = {
   maxAge: number;
   /** Whether a student whose age we cannot work out is in the wave. */
   includeUnknownAge: boolean;
+  /** Oldest age, inclusive, that is INVITED to try it. Equal to maxAge switches invitations off. */
+  inviteMaxAge: number;
+  /** Share (0–1) of recent portal activity that must be on a phone to be invited. */
+  invitePhoneShare: number;
+  /** Fewest recent activity events before the phone share is believed. */
+  inviteMinEvents: number;
 };
 
-/** Wave one: under 25. */
-export const DEFAULT_LOOK_WAVE: LookWave = { maxAge: 24, includeUnknownAge: false };
+/** Wave one: under 25 get it, 25–34 who live on their phone are invited. */
+export const DEFAULT_LOOK_WAVE: LookWave = {
+  maxAge: 24,
+  includeUnknownAge: false,
+  inviteMaxAge: 34,
+  invitePhoneShare: 0.6,
+  inviteMinEvents: 10,
+};
+
+const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
 
 /**
  * Reads a stored wave. Never throws: a malformed or missing row means "wave
@@ -44,19 +67,22 @@ export const DEFAULT_LOOK_WAVE: LookWave = { maxAge: 24, includeUnknownAge: fals
  */
 export function parseLookWave(raw: unknown): LookWave {
   if (!raw || typeof raw !== "object") return DEFAULT_LOOK_WAVE;
-  const value = raw as { maxAge?: unknown; includeUnknownAge?: unknown };
+  const value = raw as Record<string, unknown>;
 
-  const maxAge =
-    typeof value.maxAge === "number" && Number.isFinite(value.maxAge)
-      ? Math.min(120, Math.max(0, Math.round(value.maxAge)))
-      : DEFAULT_LOOK_WAVE.maxAge;
+  const maxAge = clampInt(value.maxAge, 0, 120, DEFAULT_LOOK_WAVE.maxAge);
+  // Invitations can never reach DOWN into the wave: the oldest invited age is at least the wave's.
+  const inviteMaxAge = Math.max(maxAge, clampInt(value.inviteMaxAge, 0, 120, DEFAULT_LOOK_WAVE.inviteMaxAge));
 
   return {
     maxAge,
     includeUnknownAge:
-      typeof value.includeUnknownAge === "boolean"
-        ? value.includeUnknownAge
-        : DEFAULT_LOOK_WAVE.includeUnknownAge,
+      typeof value.includeUnknownAge === "boolean" ? value.includeUnknownAge : DEFAULT_LOOK_WAVE.includeUnknownAge,
+    inviteMaxAge,
+    invitePhoneShare:
+      typeof value.invitePhoneShare === "number" && Number.isFinite(value.invitePhoneShare)
+        ? Math.min(1, Math.max(0, value.invitePhoneShare))
+        : DEFAULT_LOOK_WAVE.invitePhoneShare,
+    inviteMinEvents: clampInt(value.inviteMinEvents, 1, 10_000, DEFAULT_LOOK_WAVE.inviteMinEvents),
   };
 }
 
@@ -65,24 +91,68 @@ export function parseLookChoice(raw: unknown): Look | null {
   return raw === "youth" || raw === "classic" ? raw : null;
 }
 
+/** How a student has been using the portal lately — the invitation's evidence. */
+export type PhoneUsage = {
+  /** Activity events in the recent window. */
+  events: number;
+  /** Of those, how many came from a phone. */
+  mobileEvents: number;
+};
+
 export type LookDecision = {
   look: Look;
   /** Why — so the profile can say "you chose this" rather than guess. */
   reason: "chosen" | "wave" | "default";
+  /** Which cohort the school's rules put this student in, before their own choice. */
+  cohort: Cohort;
   /** Whether the age alone would have put this student in the wave. */
   inWave: boolean;
 };
+
+/** Whether this student's age is one where phone usage is worth looking at. */
+export function isInviteAge(age: number | null | undefined, wave: LookWave = DEFAULT_LOOK_WAVE): boolean {
+  return typeof age === "number" && Number.isFinite(age) && age > wave.maxAge && age <= wave.inviteMaxAge;
+}
+
+export function phoneShareOf(usage: PhoneUsage | null | undefined): number | null {
+  if (!usage || usage.events <= 0) return null;
+  return usage.mobileEvents / usage.events;
+}
 
 export function resolveLook(input: {
   age: number | null | undefined;
   choice: Look | null | undefined;
   wave?: LookWave;
+  usage?: PhoneUsage | null;
 }): LookDecision {
   const wave = input.wave ?? DEFAULT_LOOK_WAVE;
   const age = typeof input.age === "number" && Number.isFinite(input.age) ? input.age : null;
   const inWave = age === null ? wave.includeUnknownAge : age <= wave.maxAge;
 
-  if (input.choice) return { look: input.choice, reason: "chosen", inWave };
-  if (inWave) return { look: "youth", reason: "wave", inWave };
-  return { look: "classic", reason: "default", inWave };
+  let cohort: Cohort = "classic";
+  if (inWave) {
+    cohort = "wave";
+  } else if (isInviteAge(age, wave)) {
+    const share = phoneShareOf(input.usage);
+    if (share !== null && (input.usage?.events ?? 0) >= wave.inviteMinEvents && share >= wave.invitePhoneShare) {
+      cohort = "invited";
+    }
+  }
+
+  if (input.choice) return { look: input.choice, reason: "chosen", cohort, inWave };
+  if (cohort === "wave") return { look: "youth", reason: "wave", cohort, inWave };
+  return { look: "classic", reason: "default", cohort, inWave };
+}
+
+/**
+ * Whether Becca should pop up, and with which message. Only ever for a student
+ * who has not been prompted before, and only for the cohorts the popup is
+ * about — a classic-cohort student is never interrupted, and anyone who has
+ * already picked a look themselves has already answered the question.
+ */
+export function promptFor(decision: LookDecision, promptedBefore: boolean): "announce" | "invite" | null {
+  if (promptedBefore || decision.reason === "chosen") return null;
+  if (decision.cohort === "wave") return "announce";
+  if (decision.cohort === "invited") return "invite";
+  return null;
 }

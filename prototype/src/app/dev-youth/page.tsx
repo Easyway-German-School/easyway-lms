@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 
+import NewLookMoment from "@/components/moment/NewLookMoment";
 import YouthProfileHero from "@/components/YouthProfileHero";
 import YouthTabBar from "@/components/YouthTabBar";
 import {
@@ -48,9 +49,9 @@ const GAME = {
   ],
 } as unknown as GamificationPayload;
 
-function seeded(saved: boolean) {
+function seeded(saved: boolean, prompt: "announce" | "invite" | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
-  client.setQueryData(lookQueryKey, { look: "youth", reason: "wave", inWave: true, name: "Ada Okafor", avatar: saved ? hashAvatar("Ada Okafor") : null });
+  client.setQueryData(lookQueryKey, { look: "youth", reason: "wave", inWave: true, prompt, name: "Ada Okafor", avatar: saved ? hashAvatar("Ada Okafor") : null });
   const days: string[] = [];
   for (let i = 0; i < 80; i += 1) {
     if ((i * 7) % 5 < 3) for (let n = 0; n <= (i * 3) % 4; n += 1) days.push(new Date(Date.now() - i * 86_400_000).toISOString());
@@ -63,13 +64,14 @@ export default function DevYouth() {
   const [saved, setSaved] = useState(true);
   const [client, setClient] = useState(() => seeded(true));
   const [live, setLive] = useState(false);
+  const [popup, setPopup] = useState(0);
 
   if (process.env.NODE_ENV === "production") return null;
 
   return (
     <QueryClientProvider client={client}>
       <div className="look-youth app-canvas min-h-screen pb-28 text-[var(--foreground)]">
-        <div className="flex gap-3 p-3 text-xs">
+        <div className="flex flex-wrap gap-2 p-3 text-xs">
           <button
             className="rounded-full border px-3 py-1"
             onClick={() => {
@@ -78,6 +80,12 @@ export default function DevYouth() {
             }}
           >
             {saved ? "Show: no avatar yet" : "Show: avatar saved"}
+          </button>
+          <button className="rounded-full border px-3 py-1" onClick={() => { setClient(seeded(saved, "announce")); setPopup((n) => n + 1); }}>
+            Popup: announce
+          </button>
+          <button className="rounded-full border px-3 py-1" onClick={() => { setClient(seeded(saved, "invite")); setPopup((n) => n + 1); }}>
+            Popup: invite
           </button>
           <button className="rounded-full border px-3 py-1" onClick={() => setLive(!live)}>
             {live ? "Live: on" : "Live: off"}
@@ -99,6 +107,8 @@ export default function DevYouth() {
           onTakePhoto={() => {}}
           onEditProfile={() => {}}
         />
+
+        <NewLookMoment key={popup} />
 
         <YouthTabBar unreadChats={3} liveNow={live} avatar={saved ? hashAvatar("Ada Okafor") : null} name="Ada Okafor" />
       </div>
