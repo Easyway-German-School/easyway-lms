@@ -79,7 +79,7 @@ export default function ExamCampaignBanner({ variant = "banner", className = "" 
     <div
       className={`relative overflow-hidden rounded-2xl border text-white ${
         closingSoon ? "border-[#B91C1C]/40" : "border-[#0D7C7E]/40"
-      } bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] ${tight ? "p-3.5" : "p-4 sm:p-5"} ${tight ? "" : className}`}
+      } bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] ${tight ? "p-2.5 sm:p-3.5" : "p-4 sm:p-5"} ${tight ? "" : className}`}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/75">
@@ -91,7 +91,9 @@ export default function ExamCampaignBanner({ variant = "banner", className = "" 
         </span>
       </div>
 
-      <p className={`mt-1.5 font-extrabold leading-snug ${tight ? "text-sm" : "text-base sm:text-lg"}`}>
+      {/* Pinned in a chat on a phone, the strip is a nudge, not a poster: the long title
+          goes (the headline chip above already says what and when) so the messages stay on screen. */}
+      <p className={`mt-1.5 font-extrabold leading-snug ${tight ? "hidden text-sm sm:block" : "text-base sm:text-lg"}`}>
         {config.title}
       </p>
       {!tight && (
@@ -100,7 +102,7 @@ export default function ExamCampaignBanner({ variant = "banner", className = "" 
         </p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className={`flex flex-wrap items-center gap-2 ${tight ? "mt-2 sm:mt-3" : "mt-3"}`}>
         <Link
           href="/exams/osd"
           className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-[#0D7C7E] transition hover:bg-white/90"

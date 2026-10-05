@@ -367,6 +367,7 @@ export default function HelpLauncher() {
         aria-label={open ? "Close help" : anyoneTyping ? "The office is typing a reply" : "Need help?"}
         title="Need help?"
         data-help-launcher
+        data-hide-in-chat
         className={`fixed bottom-40 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] shadow-[var(--shadow)] transition hover:text-[var(--accent)] sm:bottom-6 sm:right-24 ${
           open ? "max-sm:hidden" : ""
         }`}
