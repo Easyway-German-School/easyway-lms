@@ -68,6 +68,7 @@ export type StudentForLook = {
   tenantId: string | null;
   uiLook: string | null;
   lookPromptedAt: Date | null;
+  createdAt: Date | null;
   admission: unknown;
   profile: { dateOfBirth: Date | null } | null;
 };
@@ -85,5 +86,5 @@ export async function decideLookForStudent(
   const usage = !choice && isInviteAge(age, wave) ? await readPhoneUsage(userId) : null;
 
   const decision = resolveLook({ age, choice, wave, usage });
-  return { ...decision, prompt: promptFor(decision, student.lookPromptedAt !== null) };
+  return { ...decision, prompt: promptFor(decision, student.lookPromptedAt !== null, { createdAt: student.createdAt }) };
 }

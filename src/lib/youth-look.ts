@@ -145,14 +145,44 @@ export function resolveLook(input: {
 }
 
 /**
- * Whether Becca should pop up, and with which message. Only ever for a student
- * who has not been prompted before, and only for the cohorts the popup is
- * about — a classic-cohort student is never interrupted, and anyone who has
- * already picked a look themselves has already answered the question.
+ * When the new look first reached students. An "announce" ("we gave the app a
+ * fresh look") only makes sense to someone who knew the OLD one — a student who
+ * joined after this date has only ever seen the new look, so there is nothing
+ * to announce, and on a first visit they are already busy with the welcome
+ * tour. They simply have the new look, quietly.
  */
-export function promptFor(decision: LookDecision, promptedBefore: boolean): "announce" | "invite" | null {
+export const NEW_LOOK_LAUNCH_AT = new Date("2026-10-05T00:00:00Z");
+
+/** An invitation waits until a student has found their feet. */
+export const INVITE_MIN_ACCOUNT_DAYS = 7;
+
+/**
+ * Whether Becca should say something, and what. Only ever for a student who has
+ * not been told before, and only for the cohorts it is about — a classic-cohort
+ * student is never interrupted, and anyone who already picked a look themselves
+ * has already answered the question.
+ *
+ * It is a gentle banner, never a modal (see components/moment/NewLookMoment.tsx),
+ * and these rules are the other half of keeping it out of the way: nobody on
+ * their first days gets it, so it can never join the welcome tour's pile-up.
+ */
+export function promptFor(
+  decision: LookDecision,
+  promptedBefore: boolean,
+  student?: { createdAt: Date | null; now?: Date },
+): "announce" | "invite" | null {
   if (promptedBefore || decision.reason === "chosen") return null;
-  if (decision.cohort === "wave") return "announce";
-  if (decision.cohort === "invited") return "invite";
+
+  const created = student?.createdAt ?? null;
+  const now = student?.now ?? new Date();
+  const accountDays = created ? (now.getTime() - created.getTime()) / 86_400_000 : null;
+
+  if (decision.cohort === "wave") {
+    // Joined after launch → never knew the old look. Unknown join date → say nothing rather than guess.
+    return created && created < NEW_LOOK_LAUNCH_AT ? "announce" : null;
+  }
+  if (decision.cohort === "invited") {
+    return accountDays !== null && accountDays >= INVITE_MIN_ACCOUNT_DAYS ? "invite" : null;
+  }
   return null;
 }

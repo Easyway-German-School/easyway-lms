@@ -13,6 +13,7 @@ const SELECT = {
   tenantId: true,
   uiLook: true,
   lookPromptedAt: true,
+  createdAt: true,
   avatar: true,
   admission: true,
   profile: { select: { dateOfBirth: true } },

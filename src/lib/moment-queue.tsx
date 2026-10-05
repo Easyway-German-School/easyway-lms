@@ -108,6 +108,7 @@ export type MomentId =
   | "hybrid-combo"
   | "cohort-check"
   | "level-advance"
+  | "next-level"
   | "office-reply"
   | "class-schedule-changed"
   | "lesson-complete"
@@ -120,11 +121,14 @@ export type MomentId =
   | "poster"
   | "game-turn"
   | "profile-details"
-  | "install-offline-notes";
+  | "live-feedback"
+  | "fee-reminder"
+  | "install-offline-notes"
+  | "new-look";
 
 type Kind = "toast" | "modal";
 
-type Definition = {
+export type Definition = {
   priority: number;
   kind: Kind;
   /** What the dock calls it if this one gets deferred. */
@@ -132,7 +136,7 @@ type Definition = {
   dockBlurb: string;
 };
 
-const MOMENTS: Record<MomentId, Definition> = {
+export const MOMENTS: Record<MomentId, Definition> = {
   "payment-success": {
     priority: 100,
     kind: "toast",
@@ -193,6 +197,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Quick check",
     dockBlurb: "Tell us if you're new or already in class, so your dashboard matches.",
+  },
+  /**
+   * Becca, personally: "your A1 is done, here is what you did and your A2
+   * plan." The same earned-news slot as level-advance, ranked just above it —
+   * it replaces that modal for anyone in the next-level audience, and it is the
+   * reason a graduate on a locked portal still gets spoken to. Never above
+   * orientation or the goal question (see the order note at the top).
+   */
+  "next-level": {
+    priority: 74,
+    kind: "modal",
+    dockLabel: "Your next level",
+    dockBlurb: "What you achieved, and your plan for what comes next.",
   },
   "level-advance": {
     priority: 70,
@@ -317,6 +334,32 @@ const MOMENTS: Record<MomentId, Definition> = {
    * the first slot on a quiet morning and the journey moment follows or docks.
    * Never load-bearing — a missed day costs nothing but a nudge.
    */
+  /**
+   * "How was your last class?" — found a class the student left without rating.
+   * News about something they just did, so it outranks the daily habit
+   * moments, but it is a favour we are asking, so it never preempts earned news
+   * or anything that needs a decision. See components/moment/LiveFeedbackMoment.
+   */
+  /**
+   * "Your seat is waiting." Commerce goes LAST, always — see the module note at
+   * the top. Below Becca's hello, the journey and the poster, and only ever
+   * shown once a day to a student who is locked out for money; if the two-modal
+   * cap is already spent it waits in the dock. Not offered to a student whose
+   * portal is open — the daily briefing carries their balance. See
+   * components/moment/FeeReminderMoment.tsx; the office can switch it off.
+   */
+  "fee-reminder": {
+    priority: 20,
+    kind: "modal",
+    dockLabel: "Your tuition",
+    dockBlurb: "What it takes to open your classes.",
+  },
+  "live-feedback": {
+    priority: 56,
+    kind: "modal",
+    dockLabel: "Rate your class",
+    dockBlurb: "Two taps: how was your last live class, and what should we improve?",
+  },
   "daily-briefing": {
     priority: 52,
     kind: "modal",
@@ -372,6 +415,25 @@ const MOMENTS: Record<MomentId, Definition> = {
    * dashboard, an advert for a convenience, and the two-modal cap should
    * almost always push it to the dock rather than in front of anyone.
    */
+  /**
+   * Becca on the new student look — "we gave the app a fresh look", or, for
+   * the phone-heavy 25–34s, "want to try it?".
+   *
+   * A TOAST, NOT A MODAL, ON PURPOSE. This is news, not a decision the student
+   * must make, and the one thing the queue exists to prevent is a pile of
+   * dialogs standing between a student and the welcome tour. A toast does not
+   * dim the page, does not block a tap, never counts against MAX_MODALS, and
+   * dismisses itself. It is ranked LOW so every real modal — the tour, the
+   * payment, the level — has its turn first; Becca speaks only once the screen
+   * is quiet. Once per student, ever. See components/moment/NewLookMoment.tsx
+   * and the test in lib/moment-queue.test.ts that pins this down.
+   */
+  "new-look": {
+    priority: 35,
+    kind: "toast",
+    dockLabel: "See the new look",
+    dockBlurb: "Becca has something to show you — a fresher way around the app.",
+  },
   "install-offline-notes": {
     priority: 25,
     kind: "modal",

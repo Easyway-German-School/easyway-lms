@@ -134,23 +134,41 @@ describe("promptFor", () => {
   const wave = resolveLook({ age: 17, choice: null });
   const invited = resolveLook({ age: 29, choice: null, usage: { events: 50, mobileEvents: 50 } });
   const classic = resolveLook({ age: 52, choice: null });
+  const now = new Date("2026-10-06T08:00:00Z");
+  const oldTimer = { createdAt: new Date("2026-08-01T00:00:00Z"), now };
+  const joinedAfterLaunch = { createdAt: new Date("2026-10-05T09:00:00Z"), now };
 
-  it("announces to the wave and invites the invited, once", () => {
-    expect(promptFor(wave, false)).toBe("announce");
-    expect(promptFor(invited, false)).toBe("invite");
+  it("announces to existing wave students and invites the invited, once", () => {
+    expect(promptFor(wave, false, oldTimer)).toBe("announce");
+    expect(promptFor(invited, false, oldTimer)).toBe("invite");
   });
 
   it("never prompts the same student twice", () => {
-    expect(promptFor(wave, true)).toBeNull();
-    expect(promptFor(invited, true)).toBeNull();
+    expect(promptFor(wave, true, oldTimer)).toBeNull();
+    expect(promptFor(invited, true, oldTimer)).toBeNull();
   });
 
   it("never interrupts the classic cohort", () => {
-    expect(promptFor(classic, false)).toBeNull();
+    expect(promptFor(classic, false, oldTimer)).toBeNull();
   });
 
   it("never prompts someone who already picked a look themselves", () => {
-    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false)).toBeNull();
-    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false)).toBeNull();
+    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false, oldTimer)).toBeNull();
+    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false, oldTimer)).toBeNull();
+  });
+
+  it("does not announce a 'fresh look' to a student who joined after launch — they never knew the old one", () => {
+    expect(promptFor(wave, false, joinedAfterLaunch)).toBeNull();
+  });
+
+  it("does not guess when the join date is unknown", () => {
+    expect(promptFor(wave, false)).toBeNull();
+    expect(promptFor(wave, false, { createdAt: null })).toBeNull();
+    expect(promptFor(invited, false)).toBeNull();
+  });
+
+  it("holds an invitation back until the student's first week is over", () => {
+    expect(promptFor(invited, false, { createdAt: new Date("2026-10-02T00:00:00Z"), now })).toBeNull();
+    expect(promptFor(invited, false, { createdAt: new Date("2026-09-28T00:00:00Z"), now })).toBe("invite");
   });
 });
