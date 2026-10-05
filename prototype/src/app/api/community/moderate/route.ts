@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { authorizeMessage, isStaffRole } from "@/lib/community-spaces";
+import { authorizeMessage, isStaffRole, studentsInSpace } from "@/lib/community-spaces";
 import { canModerate, minutesForPreset } from "@/lib/community-moderation";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { previewOf } from "@/lib/community-notify";
@@ -68,14 +68,10 @@ export async function POST(request: Request) {
       if (pinning && message.channel.space) {
         const space = message.channel.space;
         const pinnedByName = session.user.name ?? "A moderator";
+        // Only this room's students — its batch, not every batch of the sitting.
+        const roomStudents = await studentsInSpace(space);
         notifyInBackground({
-          to: {
-            students: {
-              branchId: space.branchId,
-              level: space.level,
-              sessionSlot: space.sessionSlot,
-            },
-          },
+          to: { studentIds: roomStudents.map((student) => student.id) },
           kind: KIND.announcement,
           severity: "info",
           title: `${pinnedByName} pinned a message in ${message.channel.name}`,

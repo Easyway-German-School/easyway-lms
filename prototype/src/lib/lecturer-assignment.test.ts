@@ -7,6 +7,8 @@ import {
   matchesBatch,
   parseGroupKey,
   readAssignment,
+  spaceWhereForAssignment,
+  studentsInGroup,
   studentWhereForAssignment,
   studentWhereForLecturerScope,
   teachingGroups,
@@ -240,16 +242,16 @@ describe("teachingGroups", () => {
     });
 
     const groups = teachingGroups(assignment, names);
-    expect(groups.map((group) => group.key)).toEqual(["b1:A1:morning", "b1:B1:evening"]);
+    expect(groups.map((group) => group.key)).toEqual(["b1:A1:morning:August", "b1:B1:evening:September"]);
     expect(groups[0]).toMatchObject({
       branchName: "Lagos",
-      label: "A1 · Morning",
+      label: "A1 · Morning · August batch",
       batch: "August",
       batchRange: "August – September",
-      roomName: "ew-lagos-a1-morning",
+      roomName: "ew-lagos-a1-morning-b-august",
     });
     expect(groups[1].batchRange).toBe("September – October");
-    expect(groups[1].roomName).toBe("ew-lagos-b1-evening");
+    expect(groups[1].roomName).toBe("ew-lagos-b1-evening-b-september");
   });
 
   it("falls back to the flat lists for a legacy single-class tutor", () => {
@@ -288,10 +290,158 @@ describe("teachingGroups", () => {
   });
 
   it("parseGroupKey round-trips and rejects junk", () => {
-    expect(parseGroupKey("b1:a1:morning")).toEqual({ branchId: "b1", level: "A1", sessionSlot: "morning" });
+    expect(parseGroupKey("b1:a1:morning")).toEqual({
+      branchId: "b1",
+      level: "A1",
+      sessionSlot: "morning",
+      batch: "",
+    });
+    expect(parseGroupKey("b1:a1:morning:october")).toEqual({
+      branchId: "b1",
+      level: "A1",
+      sessionSlot: "morning",
+      batch: "October",
+    });
     expect(parseGroupKey("b1:A1")).toBeNull();
+    expect(parseGroupKey("b1:A1:morning:Smarch")).toBeNull();
+    expect(parseGroupKey("b1:A1:morning:October:extra")).toBeNull();
     expect(parseGroupKey("")).toBeNull();
     expect(parseGroupKey(null)).toBeNull();
+  });
+});
+
+/**
+ * September and October A1 morning overlap for a month: two classes, two
+ * timetables. A tutor who teaches both must see two classes — each with its own
+ * label, key, live room and students — not one merged card.
+ */
+describe("teaching groups split by batch", () => {
+  const names = new Map([["b1", "Lagos"]]);
+  const student = (batch: string | null, extra: Record<string, unknown> = {}) => ({
+    branchId: "b1",
+    level: "A1",
+    sessionSlot: "morning",
+    admission: batch ? { batch } : {},
+    ...extra,
+  });
+  const everyIntake = readAssignment({
+    branchIds: ["b1"],
+    levels: ["A1"],
+    sessionSlots: ["morning"],
+    assignmentGroups: [{ branchId: "b1", level: "A1", sessionSlot: "morning" }],
+  });
+
+  it("an every-intake group becomes one class per batch the tutor really has students in", () => {
+    const roster = [student("October"), student("September"), student("september"), student("October")];
+    const groups = teachingGroups(everyIntake, names, "cmtutorA", roster);
+
+    // Chronological: September started first.
+    expect(groups.map((group) => group.label)).toEqual([
+      "A1 · Morning · September batch",
+      "A1 · Morning · October batch",
+    ]);
+    expect(groups.map((group) => group.key)).toEqual(["b1:A1:morning:September", "b1:A1:morning:October"]);
+    expect(groups[0].roomName).toBe("ew-lagos-a1-morning-b-september-t-cmtutora");
+    expect(groups[1].roomName).toBe("ew-lagos-a1-morning-b-october-t-cmtutora");
+    expect(groups[0].roomName).not.toBe(groups[1].roomName);
+  });
+
+  it("without a roster (or with no batches on it) the cohort stays one class, as before", () => {
+    expect(teachingGroups(everyIntake, names, "t")).toHaveLength(1);
+    expect(teachingGroups(everyIntake, names, "t", [])).toHaveLength(1);
+    const unplaced = teachingGroups(everyIntake, names, "t", [student(null), student(null)]);
+    expect(unplaced).toHaveLength(1);
+    expect(unplaced[0]).toMatchObject({ key: "b1:A1:morning", batch: null, label: "A1 · Morning" });
+  });
+
+  it("two admin-pinned groups of the same sitting are two classes (they used to collapse to one)", () => {
+    const assignment = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1"],
+      sessionSlots: ["morning"],
+      assignmentGroups: [
+        { branchId: "b1", level: "A1", sessionSlot: "morning", batch: "September" },
+        { branchId: "b1", level: "A1", sessionSlot: "morning", batch: "October" },
+      ],
+    });
+    expect(teachingGroups(assignment, names).map((group) => group.batch)).toEqual(["September", "October"]);
+  });
+
+  it("a pinned group is never split further, whatever the roster says", () => {
+    const assignment = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1"],
+      sessionSlots: ["morning"],
+      assignmentGroups: [{ branchId: "b1", level: "A1", sessionSlot: "morning", batch: "October" }],
+    });
+    const groups = teachingGroups(assignment, names, "t", [student("September"), student("October")]);
+    expect(groups.map((group) => group.batch)).toEqual(["October"]);
+  });
+
+  it("a flat-list tutor restricted to two months teaches each as its own class", () => {
+    const assignment = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1"],
+      sessionSlots: ["morning"],
+      batches: ["September", "October"],
+    });
+    expect(teachingGroups(assignment, names).map((group) => group.batch)).toEqual(["September", "October"]);
+  });
+
+  it("only students in the cohort decide the split — another level's batches do not leak in", () => {
+    const roster = [student("October"), student("November", { level: "B1" }), student("December", { branchId: "b9" })];
+    expect(teachingGroups(everyIntake, names, "t", roster).map((group) => group.batch)).toEqual(["October"]);
+  });
+
+  it("studentsInGroup counts exactly one batch's students; a batch-less class takes the cohort", () => {
+    const roster = [student("September"), student("October"), student("October"), student(null)];
+    const [sept, oct] = teachingGroups(everyIntake, names, "t", roster);
+    expect(studentsInGroup(sept, roster)).toHaveLength(1);
+    expect(studentsInGroup(oct, roster)).toHaveLength(2);
+    // The student with no batch is in neither batch's class.
+    const placed = new Set([...studentsInGroup(sept, roster), ...studentsInGroup(oct, roster)]);
+    expect(placed.has(roster[3])).toBe(false);
+    const whole = teachingGroups(everyIntake, names, "t")[0];
+    expect(studentsInGroup(whole, roster)).toHaveLength(4);
+  });
+
+  it("assignmentHasGroup: an every-intake group opens as any batch; a pinned one only as its own", () => {
+    const opened = assignmentHasGroup(everyIntake, names, { branchId: "b1", level: "A1", sessionSlot: "morning", batch: "October" }, "t");
+    expect(opened).toMatchObject({ batch: "October", key: "b1:A1:morning:October" });
+
+    const pinned = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1"],
+      sessionSlots: ["morning"],
+      assignmentGroups: [{ branchId: "b1", level: "A1", sessionSlot: "morning", batch: "September" }],
+    });
+    const target = { branchId: "b1", level: "A1", sessionSlot: "morning" };
+    expect(assignmentHasGroup(pinned, names, { ...target, batch: "September" })?.batch).toBe("September");
+    // October is not the batch the office gave this tutor.
+    expect(assignmentHasGroup(pinned, names, { ...target, batch: "October" })).toBeNull();
+    // An old bookmark with no batch lands on the class the tutor does have.
+    expect(assignmentHasGroup(pinned, names, target)?.batch).toBe("September");
+    // And a class the office never assigned stays refused.
+    expect(assignmentHasGroup(everyIntake, names, { ...target, level: "B1", batch: "October" })).toBeNull();
+  });
+
+  it("a tutor pinned to September sees September's community room, not October's", () => {
+    const pinned = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1"],
+      sessionSlots: ["morning"],
+      assignmentGroups: [{ branchId: "b1", level: "A1", sessionSlot: "morning", batch: "September" }],
+    });
+    expect(spaceWhereForAssignment(pinned)).toEqual({
+      OR: [{ branchId: "b1", level: "A1", sessionSlot: "morning", batch: "September" }],
+    });
+    // An every-intake tutor teaches both and sees both.
+    expect(spaceWhereForAssignment(everyIntake)).toEqual({
+      OR: [{ branchId: "b1", level: "A1", sessionSlot: "morning" }],
+    });
+    // The flat lists carry standalone months the same way.
+    const flat = readAssignment({ branchIds: ["b1"], levels: ["A1"], batches: ["October"] });
+    expect(spaceWhereForAssignment(flat)).toMatchObject({ batch: { in: ["October"] } });
   });
 });
 

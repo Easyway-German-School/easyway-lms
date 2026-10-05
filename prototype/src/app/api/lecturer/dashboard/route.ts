@@ -8,6 +8,7 @@ import {
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
+  studentsInGroup,
   teachingGroups,
 } from "@/lib/lecturer-assignment";
 
@@ -172,7 +173,6 @@ export async function GET() {
      * branch / level / sitting, and the pinned month when there is one), so a
      * tutor on September AND October sees each batch's students apart.
      */
-    const lower = (value: string | null | undefined) => (value ?? "").toLowerCase();
     const presentByStudent = new Map<string, { present: number; total: number }>();
     for (const row of attendance) {
       const tally = presentByStudent.get(row.studentId) ?? { present: 0, total: 0 };
@@ -180,21 +180,13 @@ export async function GET() {
       if (row.present) tally.present += 1;
       presentByStudent.set(row.studentId, tally);
     }
-    const batchOf = (admission: unknown) => {
-      const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
-      return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
-    };
     const batches = teachingGroups(
       assignment,
       new Map(branches.map((branch) => [branch.id, branch.name])),
+      null,
+      mine,
     ).map((group) => {
-      const roster = mine.filter(
-        (student) =>
-          lower(student.branchId) === lower(group.branchId) &&
-          lower(student.level) === lower(group.level) &&
-          (!group.sessionSlot || lower(student.sessionSlot) === group.sessionSlot) &&
-          (!group.batch || batchOf(student.admission) === group.batch.toLowerCase()),
-      );
+      const roster = studentsInGroup(group, mine);
       let present = 0;
       let total = 0;
       for (const student of roster) {

@@ -254,7 +254,7 @@ function GroupChooser({ groups, liveKey }: { groups: ChooserGroup[]; liveKey: st
         <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85">
           {single
             ? "Take your time to set up — camera, mic, whatever you need. Nothing opens and no student is notified until you press start."
-            : "You run more than one class. Pick the one to open now — only its students are rung, and its room stays separate from your other classes."}
+            : "You run more than one class — or more than one batch of the same class. Pick the one to open now: only its students are rung, and its room stays separate from your other classes."}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -277,7 +277,7 @@ function GroupChooser({ groups, liveKey }: { groups: ChooserGroup[]; liveKey: st
               </div>
               <p className="mt-1 text-sm text-[var(--muted)]">
                 {groupOption.branchName}
-                {groupOption.batchRange ? ` · ${groupOption.batchRange} batch` : ""}
+                {groupOption.batchRange ? ` · runs ${groupOption.batchRange}` : ""}
               </p>
               <span className="mt-4 inline-flex text-sm font-semibold text-[#0D7C7E]">
                 {isLive ? "Resume this class →" : "Start this class →"}

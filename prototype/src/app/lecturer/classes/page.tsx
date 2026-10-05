@@ -58,6 +58,8 @@ type Payload = {
   profile: Profile;
   assignment: Assignment;
   groups: GroupCard[];
+  /** Students in a cohort taught by batch who have no batch on record. */
+  unplaced?: RosterEntry[];
   cohort: Cohort;
   roster: RosterEntry[];
   branches: Array<{ id: string; name: string; mode: string }>;
@@ -66,21 +68,15 @@ type Payload = {
 /**
  * The "Batch" row on the facts panel.
  *
- * A per-group intake is spelled out as its full teaching span against the class
- * it belongs to — "B1 Evening · September – October" — so a tutor running two
- * intakes can tell them apart at a glance. Falls back to the standalone picker,
- * then to "All batches".
+ * Each batch class is spelled out with its full teaching span — "B1 · Evening ·
+ * September batch (September – October)" — so a tutor running two intakes can
+ * tell them apart at a glance. (The label already names the batch.) Falls back
+ * to the standalone picker, then to "All batches".
  */
 function batchSummary(groups: GroupCard[], assignment: Assignment | undefined): string {
   const pinned = groups.filter((group) => group.batchRange);
   if (pinned.length) {
-    return pinned
-      .map((group) =>
-        group.batch
-          ? `${group.label} · ${group.batch} batch (${group.batchRange})`
-          : `${group.label} · ${group.batchRange}`,
-      )
-      .join(",  ");
+    return pinned.map((group) => `${group.label} (${group.batchRange})`).join(",  ");
   }
   return assignment?.batches.length ? assignment.batches.join(", ") : "All batches";
 }
@@ -269,16 +265,14 @@ export default function LecturerClassesPage() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border)] bg-[var(--surface-alt)] p-5">
                       <div className="min-w-0">
-                        <p className="text-lg font-semibold text-[var(--foreground)]">
-                          {group.label} class
-                        </p>
+                        <p className="text-lg font-semibold text-[var(--foreground)]">{group.label}</p>
                         <p className="mt-0.5 text-sm text-[var(--muted)]">
                           {group.branchName}
                           {group.batchRange ? (
                             <>
                               {" · "}
                               <span className="font-medium text-[var(--foreground-soft)]">
-                                {group.batch ? `${group.batch} batch · ${group.batchRange}` : `${group.batchRange} batch`}
+                                runs {group.batchRange}
                               </span>
                             </>
                           ) : null}
@@ -293,7 +287,7 @@ export default function LecturerClassesPage() {
                             className="inline-flex items-center gap-1.5 rounded-full bg-[#0D7C7E] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110"
                           >
                             <BroadcastIcon className="h-3.5 w-3.5" />
-                            Go live with this class
+                            {group.batch ? `Go live · ${group.batch} batch` : "Go live with this class"}
                           </Link>
                         ) : null}
                         <Link
@@ -341,11 +335,31 @@ export default function LecturerClassesPage() {
                 );
               })}
 
+              {/* Students in a cohort taught by batch who have no intake month on
+                  record. Not in any batch's class, so named here with the reason
+                  instead of vanishing — and they can still join any live class. */}
+              {(data?.unplaced?.length ?? 0) > 0 ? (
+                <section className="overflow-hidden rounded-2xl border border-amber-300 bg-amber-50/60">
+                  <div className="p-5">
+                    <p className="text-lg font-semibold text-amber-900">Not placed in a batch yet</p>
+                    <p className="mt-0.5 text-sm text-amber-900/80">
+                      {data!.unplaced!.length} {data!.unplaced!.length === 1 ? "student has" : "students have"} no
+                      intake month on record, so they are not in any batch&apos;s class above. They can still join
+                      your live classes. Ask the office to place them:{" "}
+                      {data!.unplaced!.map((student) => student.name).join(", ")}.
+                    </p>
+                  </div>
+                </section>
+              ) : null}
+
               {/* Students on this tutor by name who do not fall into any single
                   class cohort — a mid-term move, a one-to-one cover. Shown so
                   they are never dropped just because they do not match a group. */}
               {(() => {
-                const grouped = new Set(groups.flatMap((group) => group.roster.map((student) => student.id)));
+                const grouped = new Set([
+                  ...groups.flatMap((group) => group.roster.map((student) => student.id)),
+                  ...(data?.unplaced ?? []).map((student) => student.id),
+                ]);
                 const loose = (data?.roster ?? []).filter((student) => !grouped.has(student.id));
                 if (loose.length === 0) return null;
                 return (

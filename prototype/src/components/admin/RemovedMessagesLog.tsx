@@ -40,6 +40,7 @@ type Message = {
       name: string;
       level: string;
       sessionSlot: string;
+      batch?: string;
       branch: { id: string; name: string };
     };
   };
@@ -215,7 +216,8 @@ export default function RemovedMessagesLog() {
                   <span className={`rounded-full px-2 py-0.5 font-semibold ${badge.className}`}>{badge.label}</span>
                   <span className="text-[var(--muted)]">
                     {message.channel.space.branch?.name} · {message.channel.space.level} ·{" "}
-                    {SLOT_LABEL[message.channel.space.sessionSlot] ?? message.channel.space.sessionSlot} · #
+                    {SLOT_LABEL[message.channel.space.sessionSlot] ?? message.channel.space.sessionSlot}
+                    {message.channel.space.batch ? ` · ${message.channel.space.batch} batch` : ""} · #
                     {message.channel.name}
                   </span>
                   <span className="ml-auto text-[var(--muted)]">

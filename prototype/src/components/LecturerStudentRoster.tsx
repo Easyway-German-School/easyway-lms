@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { deliveryModeLabel, groupByClass } from "@/lib/lecturer-class-groups";
+import { deliveryModeLabel, goLiveKeyFor, groupByClass } from "@/lib/lecturer-class-groups";
+import { BroadcastIcon } from "@/components/icons";
 
 export type LecturerStudent = {
   id: string;
@@ -12,6 +13,9 @@ export type LecturerStudent = {
   studentCode: string | null;
   level: string;
   sessionSlot: string;
+  branchId?: string | null;
+  /** physical | online — whether the student's branch has a video room. */
+  branchMode?: string | null;
   classType: string;
   deliveryMode: string | null;
   branchName: string | null;
@@ -48,8 +52,10 @@ export type LecturerStudent = {
  * same names and the same details in both places — two roster views that
  * disagreed would be worse than one. A tutor who takes more than one level, or
  * the same level online and in the room, used to get all of it in one flat
- * pile; it now groups by level · delivery mode · sitting (see
- * lib/lecturer-class-groups) with a "Message this group" shortcut per class.
+ * pile; it now groups by level · delivery mode · sitting · BATCH (see
+ * lib/lecturer-class-groups) with "Go live" and "Message this group" per class.
+ * September and October A1 morning overlap for a month and are two classes —
+ * one header each, so the tutor goes live with the one they mean.
  */
 
 function naira(amount: number) {
@@ -355,6 +361,11 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
             <div className="space-y-4">
               {groups.map((group) => {
                 const ids = group.members.map((member) => member.id);
+                // A class with no batch, sitting next to classes that have one, is
+                // the students the office never placed in an intake. Going live "for
+                // them" would ring the whole cohort, so it has no button of its own.
+                const unplacedAlongsideBatches = !group.batch && groups.some((other) => other.batch);
+                const liveKey = unplacedAlongsideBatches ? null : goLiveKeyFor(group);
                 return (
                   <details key={group.key} open className="group rounded-2xl border border-[var(--border)]">
                     <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 rounded-2xl px-4 py-3 [&::-webkit-details-marker]:hidden">
@@ -363,16 +374,36 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
                       <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-xs font-semibold text-[var(--muted)]">
                         {group.members.length} student{group.members.length === 1 ? "" : "s"}
                       </span>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          messageGroup(group.label, ids);
-                        }}
-                        className="ml-auto rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-bold text-white transition hover:brightness-110"
-                      >
-                        Message this group
-                      </button>
+                      {unplacedAlongsideBatches ? (
+                        <span
+                          className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                          title="These students have no intake month on record. They can still join any of your live classes. Ask the office to place them."
+                        >
+                          No batch on record
+                        </span>
+                      ) : null}
+                      <span className="ml-auto flex flex-wrap items-center gap-2">
+                        {liveKey ? (
+                          <Link
+                            href={`/live?group=${encodeURIComponent(liveKey)}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[#0D7C7E] px-3.5 py-1.5 text-xs font-bold text-white transition hover:brightness-110"
+                          >
+                            <BroadcastIcon className="h-3.5 w-3.5" />
+                            Go live{group.batch ? ` · ${group.batch}` : ""}
+                          </Link>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            messageGroup(group.label, ids);
+                          }}
+                          className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-bold text-white transition hover:brightness-110"
+                        >
+                          Message this group
+                        </button>
+                      </span>
                     </summary>
                     <div className="border-t border-[var(--border)] p-3">
                       <GroupTable students={group.members} onSelect={setSelectedId} />

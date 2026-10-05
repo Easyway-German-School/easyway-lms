@@ -30,6 +30,8 @@
  * `livekit-server-sdk` (server-only) or `livekit-client` (browser-only).
  */
 
+import { batchSlug, batchTitle } from "@/lib/class-batch";
+
 /** Which backend the room will actually use. There is now only one. */
 export type LiveProvider = "livekit";
 
@@ -105,6 +107,12 @@ function slug(value: string): string {
  * that only needs the cohort's shape). Students never derive this: they follow
  * the live session row (`liveSessionForStudent`), which names the room.
  *
+ * THE BATCH IS PART OF THE ROOM TOO. September and October A1 morning are two
+ * groups on two timetables (October starts while September is mid-course), so
+ * a tutor teaching both goes live for ONE of them at a time, and each gets its
+ * own room. Omit `batch` for the old batch-less name — a class that was already
+ * running when this shipped keeps its room (see `ownOpenCohortRoom`).
+ *
  * `ClassSession.roomName` overrides this when a tutor pins a specific room.
  */
 export function cohortRoomName({
@@ -112,17 +120,20 @@ export function cohortRoomName({
   level,
   sessionSlot,
   lecturerId,
+  batch,
 }: {
   branchName?: string | null;
   level?: string | null;
   sessionSlot?: string | null;
   lecturerId?: string | null;
+  batch?: string | null;
 }): string {
   const branch = slug(branchName || "easyway");
   const lvl = slug(level || "a1");
   const slot = slug(sessionSlot || "morning");
+  const intake = batchSlug(batch);
   const tutor = lecturerId ? slug(lecturerId) : "";
-  return tutor ? `ew-${branch}-${lvl}-${slot}-t-${tutor}` : `ew-${branch}-${lvl}-${slot}`;
+  return `ew-${branch}-${lvl}-${slot}${intake ? `-b-${intake}` : ""}${tutor ? `-t-${tutor}` : ""}`;
 }
 
 /** A one-to-one private class gets its own room, keyed on the booking. */
@@ -137,13 +148,16 @@ export function roomDisplayName({
   branchName,
   level,
   sessionSlot,
+  batch,
 }: {
   branchName?: string | null;
   level?: string | null;
   sessionSlot?: string | null;
+  batch?: string | null;
 }): string {
   const slot = String(sessionSlot || "morning");
-  return `${branchName || "EasyWay"} · ${String(level || "A1").toUpperCase()} · ${slot.charAt(0).toUpperCase()}${slot.slice(1)}`;
+  const intake = batchTitle(batch);
+  return `${branchName || "EasyWay"} · ${String(level || "A1").toUpperCase()} · ${slot.charAt(0).toUpperCase()}${slot.slice(1)}${intake ? ` · ${intake}` : ""}`;
 }
 
 // ---------------------------------------------------------------------------

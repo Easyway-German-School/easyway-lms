@@ -6,7 +6,8 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { studentCanEnterLiveClass } from "@/lib/live-eligibility";
 import { liveSessionForStudent, liveWhere } from "@/lib/live-presence";
 import { cohortRoomName } from "@/lib/live-classroom";
-import { readAssignment, teachingGroups } from "@/lib/lecturer-assignment";
+import { canonicalBatch } from "@/lib/class-batch";
+import { tutorTeachingGroups } from "@/lib/tutor-classes-server";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,8 @@ export async function GET() {
           // cohort fields never lined up with it — see liveSessionForStudent.
           tutorId: true,
           coTutors: { select: { lecturerId: true } },
+          // Their batch lives here — a class pinned to another batch is not theirs.
+          admission: true,
           branch: { select: { name: true, mode: true } },
         },
       }),
@@ -71,22 +74,28 @@ export async function GET() {
         lecturerId: lecturer.id,
       });
 
-      // Every class this tutor runs, so a multi-class tutor's dashboard can
-      // both label which one is live and offer to start another.
+      // Every class this tutor runs — one per BATCH they have students in — so a
+      // multi-class tutor's dashboard can both label which one is live and offer
+      // to start another ("Start A1 · Morning · October batch").
       const activeBranches = await prisma.branch.findMany({
         where: { status: "active" },
         select: { id: true, name: true },
       });
-      const groups = teachingGroups(
-        readAssignment(lecturer),
-        new Map(activeBranches.map((branch) => [branch.id, branch.name])),
-        lecturer.id,
+      const groups = (
+        await tutorTeachingGroups(
+          lecturer,
+          new Map(activeBranches.map((branch) => [branch.id, branch.name])),
+        )
       ).map((group) => ({
         key: group.key,
         label: group.label,
         branchName: group.branchName,
+        batch: group.batch,
         batchRange: group.batchRange,
         roomName: group.roomName,
+        branchId: group.branchId,
+        level: group.level,
+        sessionSlot: group.sessionSlot,
       }));
 
       const open = await prisma.liveClassSession.findFirst({
@@ -103,8 +112,20 @@ export async function GET() {
       if (!open) return NextResponse.json({ live: null, role: "tutor", groups });
 
       // Which teaching group this open room belongs to, so "Open room" can
-      // reopen the SAME room rather than the primary one.
-      const liveGroup = groups.find((group) => group.roomName === open.roomName) ?? null;
+      // reopen the SAME room rather than the primary one. By room name first;
+      // a class opened before rooms carried a batch has the old name, so fall
+      // back to matching it by what it is for (branch, level, sitting, batch).
+      const openBatch = canonicalBatch(open.batch);
+      const liveGroup =
+        groups.find((group) => group.roomName === open.roomName) ??
+        groups.find(
+          (group) =>
+            group.branchId === open.branchId &&
+            group.level === String(open.level ?? "").toUpperCase() &&
+            group.sessionSlot === String(open.sessionSlot ?? "").toLowerCase() &&
+            canonicalBatch(group.batch) === openBatch,
+        ) ??
+        null;
 
       return NextResponse.json({
         role: "tutor",
@@ -119,6 +140,7 @@ export async function GET() {
           branchId: open.branchId,
           level: open.level,
           sessionSlot: open.sessionSlot,
+          batch: open.batch,
           groupKey: liveGroup?.key ?? null,
           groupLabel: liveGroup?.label ?? null,
         },

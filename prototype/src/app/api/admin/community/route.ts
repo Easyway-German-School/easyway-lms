@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
-import { slotLabel } from "@/lib/community-spaces";
+import { spaceName } from "@/lib/community-spaces";
 
 /**
  * Admin moderation for the community.
@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
     const branchId = searchParams.get("branchId");
     const level = searchParams.get("level");
     const sessionSlot = searchParams.get("sessionSlot");
+    const batch = searchParams.get("batch");
     const search = searchParams.get("search")?.trim();
     // "Show me what I have taken down" is a real moderation question and used
     // to have no answer, because hiding was a delete.
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
     if (branchId) spaceWhere.branchId = branchId;
     if (level) spaceWhere.level = level;
     if (sessionSlot) spaceWhere.sessionSlot = sessionSlot;
+    if (batch) spaceWhere.batch = batch;
 
     const messages = await prisma.message.findMany({
       where: {
@@ -62,6 +64,7 @@ export async function GET(req: NextRequest) {
                 name: true,
                 level: true,
                 sessionSlot: true,
+                batch: true,
                 branch: { select: { id: true, name: true } },
               },
             },
@@ -79,19 +82,22 @@ export async function GET(req: NextRequest) {
      * what a room is called.
      */
     const spaceRows = await prisma.space.findMany({
-      orderBy: [{ branchId: "asc" }, { level: "asc" }, { sessionSlot: "asc" }],
+      orderBy: [{ branchId: "asc" }, { level: "asc" }, { sessionSlot: "asc" }, { createdAt: "asc" }],
       select: {
         id: true,
         name: true,
         level: true,
         sessionSlot: true,
+        batch: true,
         branch: { select: { id: true, name: true } },
       },
     });
 
+    // A room is one BATCH of one sitting, so the label names the batch —
+    // "Lagos · A1 · Morning · September batch" next to "… · October batch".
     const spaces = spaceRows.map((space) => ({
       ...space,
-      label: `${space.branch?.name ?? "EasyWay"} · ${space.level} · ${slotLabel(space.sessionSlot)}`,
+      label: spaceName(space.branch?.name ?? "EasyWay", space.level, space.sessionSlot, space.batch),
     }));
 
     return NextResponse.json({ messages, spaces });

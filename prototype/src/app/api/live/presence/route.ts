@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       orderBy: { startedAt: "desc" },
       select: {
         id: true, roomName: true, joinCode: true, kind: true, title: true, branchId: true,
-        level: true, sessionSlot: true, privateClassId: true, startedAt: true, startedByUserId: true,
+        level: true, sessionSlot: true, batch: true, privateClassId: true, startedAt: true, startedByUserId: true,
         branch: { select: { name: true } },
         lecturer: { select: { id: true, user: { select: { name: true } } } },
       },
@@ -271,6 +271,7 @@ export async function POST(request: Request) {
           branchId: owned.branchId,
           level: owned.level,
           sessionSlot: owned.sessionSlot,
+          batch: owned.batch,
           privateClassId: owned.privateClassId,
           startedAt: owned.startedAt,
           lecturerName: owned.lecturer?.user?.name ?? null,

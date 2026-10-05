@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { prisma } from "@/lib/prisma";
+import { studentsInSpace } from "@/lib/community-spaces";
 
 /**
  * Web Push (VAPID) delivery.
@@ -95,14 +96,12 @@ export async function sendPushToUsers(userIds: string[], payload: PushPayload) {
 export async function spaceMemberIds(spaceId: string, exclude?: string) {
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
-    select: { branchId: true, level: true, sessionSlot: true },
+    select: { branchId: true, level: true, sessionSlot: true, batch: true },
   });
   if (!space) return [];
 
-  const students = await prisma.student.findMany({
-    where: { branchId: space.branchId, level: space.level, sessionSlot: space.sessionSlot },
-    select: { userId: true },
-  });
+  // The batch is part of the room: October's message must not buzz September.
+  const students = await studentsInSpace(space);
 
   return students.map((s) => s.userId).filter((id) => id && id !== exclude) as string[];
 }

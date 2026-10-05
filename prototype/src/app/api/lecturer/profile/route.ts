@@ -9,9 +9,11 @@ import {
   isAssigned,
   belongsToLecturer,
   readAssignment,
+  studentsInGroup,
   studentWhereForLecturer,
   teachingGroups,
 } from "@/lib/lecturer-assignment";
+import { batchOfAdmission } from "@/lib/class-batch";
 
 export const dynamic = "force-dynamic";
 
@@ -109,19 +111,14 @@ export async function GET() {
    *
    * A student's intake month lives in the `admission` JSON, so the per-group
    * count is done here in memory rather than in the query.
+   *
+   * THE CLASSES SPLIT BY BATCH. A tutor with September AND October students in
+   * one cohort gets two cards — each with its own roster, its own "go live" and
+   * its own room — not one merged class (see `teachingGroups`).
    */
-  const studentBatch = (admission: unknown): string => {
-    const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
-    return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
-  };
-  const groups = teachingGroups(assignment, branchNameMap, lecturer.id).map((group) => {
-    const members = roster.filter(
-      (student) =>
-        student.branchId === group.branchId &&
-        (student.level ?? "").toUpperCase() === group.level &&
-        (!group.sessionSlot || (student.sessionSlot ?? "").toLowerCase() === group.sessionSlot) &&
-        (!group.batch || studentBatch(student.admission) === group.batch.toLowerCase()),
-    );
+  const teaching = teachingGroups(assignment, branchNameMap, lecturer.id, roster);
+  const groups = teaching.map((group) => {
+    const members = studentsInGroup(group, roster);
     return {
       key: group.key,
       branchId: group.branchId,
@@ -145,7 +142,30 @@ export async function GET() {
     };
   });
 
+  // Students in a cohort the tutor teaches by batch who have NO batch on record.
+  // They belong to no batch class, so they would otherwise fall into "assigned
+  // individually" and read as a mistake; shown on their own, with the reason.
+  // (A student with no batch can still join any of the cohort's live classes.)
+  const inABatchCard = new Set(groups.flatMap((group) => group.roster.map((student) => student.id)));
+  const unplaced = roster
+    .filter((student) => !inABatchCard.has(student.id) && !batchOfAdmission(student.admission))
+    .filter((student) =>
+      teaching.some(
+        (group) => group.batch && studentsInGroup({ ...group, batch: null }, [student]).length > 0,
+      ),
+    )
+    .map((student) => ({
+      id: student.id,
+      name: student.user.name || student.user.email,
+      email: student.user.email,
+      studentCode: student.studentCode,
+      level: student.level,
+      branchName: student.branch?.name ?? null,
+      sessionSlot: student.sessionSlot,
+    }));
+
   return NextResponse.json({
+    unplaced,
     profile: {
       id: lecturer.id,
       name: lecturer.user.name,

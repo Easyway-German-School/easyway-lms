@@ -165,7 +165,6 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
                 className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-0.5 font-semibold text-[var(--foreground-soft)] transition hover:border-[#0D7C7E]/40 hover:text-[var(--foreground)]"
               >
                 Start {group.label}
-                {group.batchRange ? ` · ${group.batchRange}` : ""}
               </Link>
             ))}
         </div>
@@ -173,8 +172,8 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
 
       {invites.length === 0 ? (
         <p className="px-5 py-5 text-sm text-[var(--muted)]">
-          Your whole cohort has been buzzed — nobody was rung by name, so there is no guest list to track here. Anyone on
-          the roster can walk in.
+          Your whole class{live.groupLabel && groups.length > 1 ? ` (${live.groupLabel})` : ""} has been buzzed — nobody
+          was rung by name, so there is no guest list to track here. Anyone on the roster can walk in.
         </p>
       ) : (
         <div className="p-5">

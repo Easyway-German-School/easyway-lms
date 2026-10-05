@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { sendPushToUsers, spaceMemberIds } from "@/lib/push";
 import { readAssignment } from "@/lib/lecturer-assignment";
+import { canonicalBatch } from "@/lib/class-batch";
 
 /**
  * Telling the room something was said — and the one decision this file exists
@@ -111,9 +112,10 @@ export function mergeCommunityRecipientIds(
 }
 
 async function staffRecipientIdsForSpace(
-  space: { branchId: string; level: string; sessionSlot: string },
+  space: { branchId: string; level: string; sessionSlot: string; batch?: string | null },
   exclude?: string,
 ): Promise<string[]> {
+  const roomBatch = canonicalBatch(space.batch);
   const [admins, lecturers] = await Promise.all([
     prisma.user.findMany({
       where: { role: "ADMIN" },
@@ -139,18 +141,24 @@ async function staffRecipientIdsForSpace(
   for (const lecturer of lecturers) {
     const assignment = readAssignment(lecturer);
 
+    // A tutor the office pinned to the September batch is not told about
+    // October's room; one with no batch pinned teaches every intake and is.
     const inGroup = assignment.groups.some(
       (group) =>
         group.branchId === space.branchId &&
         group.level.toUpperCase() === space.level.toUpperCase() &&
-        group.sessionSlot.toLowerCase() === space.sessionSlot.toLowerCase(),
+        group.sessionSlot.toLowerCase() === space.sessionSlot.toLowerCase() &&
+        (!roomBatch || !canonicalBatch(group.batch) || canonicalBatch(group.batch) === roomBatch),
     );
 
     const inLegacyScope =
       assignment.branchIds.includes(space.branchId) &&
       assignment.levels.map((level) => level.toUpperCase()).includes(space.level.toUpperCase()) &&
       (!assignment.sessionSlots.length ||
-        assignment.sessionSlots.map((slot) => slot.toLowerCase()).includes(space.sessionSlot.toLowerCase()));
+        assignment.sessionSlots.map((slot) => slot.toLowerCase()).includes(space.sessionSlot.toLowerCase())) &&
+      (!roomBatch ||
+        !assignment.batches.length ||
+        assignment.batches.some((batch) => canonicalBatch(batch) === roomBatch));
 
     if (inGroup || inLegacyScope) ids.add(lecturer.userId);
   }
@@ -162,7 +170,7 @@ async function staffRecipientIdsForSpace(
 async function communityRecipientsForSpace(spaceId: string, exclude?: string): Promise<string[]> {
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
-    select: { branchId: true, level: true, sessionSlot: true },
+    select: { branchId: true, level: true, sessionSlot: true, batch: true },
   });
   if (!space) return [];
 
@@ -195,7 +203,7 @@ export function announceChatMessage(input: ChatAnnouncement): void {
         select: {
           kind: true,
           dmStudentId: true,
-          space: { select: { branchId: true, level: true, sessionSlot: true } },
+          space: { select: { branchId: true, level: true, sessionSlot: true, batch: true } },
         },
       });
       if (!channel) return;

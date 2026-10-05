@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveSpaceScope } from "@/lib/community-spaces";
+import { resolveSpaceScope, studentsInSpace } from "@/lib/community-spaces";
 
 export const dynamic = "force-dynamic";
 
@@ -57,24 +57,15 @@ export async function GET(request: Request) {
 
     const space = await prisma.space.findUnique({
       where: { id: spaceId },
-      select: { branchId: true, level: true, sessionSlot: true },
+      select: { branchId: true, level: true, sessionSlot: true, batch: true },
     });
     if (!space) return NextResponse.json({ wins: [] });
 
     const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000);
 
-    // The cohort: everyone active in this branch + level + sitting. Same
-    // membership rule the chat and the story roster use.
-    const classmates = await prisma.student.findMany({
-      where: {
-        branchId: space.branchId,
-        level: space.level,
-        sessionSlot: space.sessionSlot,
-        status: "active",
-      },
-      select: { id: true, user: { select: { name: true } } },
-    });
-    const studentIds = classmates.map((s) => s.id);
+    // The room's students: everyone active in this branch + level + sitting +
+    // BATCH. Same membership rule the chat and the story roster use.
+    const studentIds = (await studentsInSpace(space)).map((s) => s.id);
     const firstNameOf = (name: string | null) =>
       (name ?? "Someone").trim().split(/\s+/)[0] || "Someone";
 

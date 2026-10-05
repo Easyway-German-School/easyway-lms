@@ -127,21 +127,35 @@ export function TodayCardView({ data, className = "" }: { data: TodayState | nul
         </Link>
       </div>
 
-      {/* A tutor whose auto-picked focus is not the one they meant to start
-          switches with one more click, rather than being stuck with a
-          guess. Each pill still lands straight in that class's lobby. */}
+      {/* Every other class the tutor runs — a different level, a different
+          sitting, or the OTHER BATCH of the same sitting (September next to
+          October) — named in full with its own Go live. A tutor whose
+          auto-picked focus is not the one they meant to start is never stuck
+          with a guess, and never has to work out which batch a button is for. */}
       {others.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] px-5 pb-5 pt-4 sm:px-6">
-          <span className="text-xs font-semibold text-[var(--foreground-soft)]">Not this one?</span>
-          {others.map((group) => (
-            <Link
-              key={group.key}
-              href={`/live?group=${encodeURIComponent(group.key)}`}
-              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-[var(--foreground-soft)] transition hover:border-[#0D7C7E]/40 hover:text-[var(--foreground)]"
-            >
-              Go live · {group.label}
-            </Link>
-          ))}
+        <div className="border-t border-[var(--border)] px-5 pb-4 pt-3 sm:px-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--foreground-soft)]">
+            Your other classes
+          </p>
+          <ul className="mt-2 divide-y divide-[var(--border)]">
+            {others.map((group) => (
+              <li key={group.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[var(--foreground)]">{group.label}</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    {group.note} · {group.studentCount} student{group.studentCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <Link
+                  href={`/live?group=${encodeURIComponent(group.key)}`}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#0D7C7E]/40 bg-[#0D7C7E]/10 px-4 py-1.5 text-xs font-bold text-[#0D7C7E] transition hover:bg-[#0D7C7E]/20"
+                >
+                  <VideoIcon className="h-3.5 w-3.5" />
+                  Go live
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </motion.div>

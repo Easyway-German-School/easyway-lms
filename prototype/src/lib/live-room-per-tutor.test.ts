@@ -56,10 +56,10 @@ describe("ownOpenCohortRoom", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("only ever looks for the asking tutor's own open class", async () => {
-    findFirstSession.mockResolvedValue({ roomName: "ew-lagos-b1-morning" });
+    findManySessions.mockResolvedValue([{ roomName: "ew-lagos-b1-morning", batch: null }]);
     const room = await ownOpenCohortRoom("cmtutorA", { branchId: "b1", level: "B1", sessionSlot: "morning" });
     expect(room).toBe("ew-lagos-b1-morning");
-    expect(findFirstSession.mock.calls[0][0].where).toMatchObject({
+    expect(findManySessions.mock.calls[0][0].where).toMatchObject({
       kind: "cohort",
       lecturerId: "cmtutorA",
       branchId: "b1",
@@ -70,7 +70,7 @@ describe("ownOpenCohortRoom", () => {
   });
 
   it("returns null when the tutor has nothing open", async () => {
-    findFirstSession.mockResolvedValue(null);
+    findManySessions.mockResolvedValue([]);
     expect(await ownOpenCohortRoom("cmtutorA", { branchId: "b1" })).toBeNull();
   });
 });
@@ -90,6 +90,7 @@ describe("liveSessionForStudent with two tutors live on one cohort", () => {
     branchId: "b1",
     level: "B1",
     sessionSlot: "morning",
+    batch: null,
     privateClassId: null,
     startedAt: new Date(startedAt),
     lecturerId,
@@ -123,5 +124,134 @@ describe("liveSessionForStudent with two tutors live on one cohort", () => {
     ]);
     const live = await liveSessionForStudent({ ...student, tutorId: null });
     expect(live?.roomName).toBe("room-2");
+  });
+});
+
+/**
+ * September and October A1 morning overlap for a month, so BOTH can be live at
+ * once on the same branch + level + sitting. Each class reaches only its own
+ * batch's students.
+ */
+describe("live classes by batch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findFirstInvite.mockResolvedValue(null);
+  });
+
+  const batchRow = (id: string, batch: string | null, startedAt: string, lecturerId = "cmtutorA") => ({
+    id,
+    roomName: `room-${id}`,
+    joinCode: `CODE${id}`,
+    kind: "cohort",
+    title: "Lagos · A1 · Morning",
+    branchId: "b1",
+    level: "A1",
+    sessionSlot: "morning",
+    batch,
+    privateClassId: null,
+    startedAt: new Date(startedAt),
+    lecturerId,
+    lecturer: { user: { name: `Tutor ${lecturerId}` } },
+  });
+
+  const base = {
+    id: "s1",
+    branchId: "b1",
+    level: "A1",
+    sessionSlot: "morning",
+    classType: "group",
+    deliveryMode: "physical",
+    branch: { name: "Lagos", mode: "physical" },
+  };
+
+  // Newest first, as the query orders them: October started after September.
+  const both = () => [
+    batchRow("oct", "October", "2026-10-05T09:05:00Z"),
+    batchRow("sep", "September", "2026-10-05T09:00:00Z"),
+  ];
+
+  it("sends a September student to the September class even though October started later", async () => {
+    findManySessions.mockResolvedValueOnce(both());
+    const live = await liveSessionForStudent({ ...base, admission: { batch: "September" } });
+    expect(live?.roomName).toBe("room-sep");
+  });
+
+  it("sends an October student to the October class", async () => {
+    findManySessions.mockResolvedValueOnce(both());
+    const live = await liveSessionForStudent({ ...base, admission: { batch: "October" } });
+    expect(live?.roomName).toBe("room-oct");
+  });
+
+  it("says nothing is live for a student whose batch is not the one that is on", async () => {
+    findManySessions.mockResolvedValueOnce([batchRow("oct", "October", "2026-10-05T09:05:00Z")]);
+    const live = await liveSessionForStudent({ ...base, admission: { batch: "September" } });
+    expect(live).toBeNull();
+  });
+
+  it("still admits a student with no batch on record, and any student to a class with no batch", async () => {
+    findManySessions.mockResolvedValueOnce([batchRow("oct", "October", "2026-10-05T09:05:00Z")]);
+    expect((await liveSessionForStudent({ ...base, admission: {} }))?.roomName).toBe("room-oct");
+
+    findManySessions.mockResolvedValueOnce([batchRow("old", null, "2026-10-05T09:00:00Z")]);
+    expect((await liveSessionForStudent({ ...base, admission: { batch: "September" } }))?.roomName).toBe("room-old");
+  });
+
+  it("a student with NO batch on record is never guessed into a batch when both batches are live", async () => {
+    // September and October are both on: which one is theirs? Unknown, so neither.
+    findManySessions.mockResolvedValueOnce(both());
+    expect(await liveSessionForStudent({ ...base, admission: {} })).toBeNull();
+  });
+
+  it("...but a class with no batch is still theirs, and so is a lone batch class", async () => {
+    findManySessions.mockResolvedValueOnce([...both(), batchRow("open", null, "2026-10-05T08:00:00Z")]);
+    expect((await liveSessionForStudent({ ...base, admission: {} }))?.roomName).toBe("room-open");
+    findManySessions.mockResolvedValueOnce([batchRow("oct", "October", "2026-10-05T09:05:00Z")]);
+    expect((await liveSessionForStudent({ ...base, admission: {} }))?.roomName).toBe("room-oct");
+  });
+
+  it("a caller that never selected the admission blob gets the old behaviour, not a lockout", async () => {
+    findManySessions.mockResolvedValueOnce(both());
+    expect((await liveSessionForStudent(base))?.roomName).toBe("room-oct");
+  });
+
+  it("a student named onto a tutor is not pulled into that tutor's OTHER batch's class", async () => {
+    // Cohort query finds nothing for their own batch; the named-tutor query
+    // finds the tutor live — but only on the October class.
+    findManySessions
+      .mockResolvedValueOnce([]) // cohort
+      .mockResolvedValueOnce([batchRow("oct", "October", "2026-10-05T09:05:00Z")]); // tutor sessions
+    const live = await liveSessionForStudent({ ...base, tutorId: "cmtutorA", admission: { batch: "September" } });
+    expect(live).toBeNull();
+  });
+
+  it("a tutor's reload lands back in THEIR room for that batch, never their other batch's", async () => {
+    findManySessions.mockResolvedValue([
+      { roomName: "room-sep", batch: "September" },
+      { roomName: "room-oct", batch: "October" },
+    ]);
+    const cohort = { branchId: "b1", level: "A1", sessionSlot: "morning" };
+    expect(await ownOpenCohortRoom("cmtutorA", { ...cohort, batch: "October" })).toBe("room-oct");
+    expect(await ownOpenCohortRoom("cmtutorA", { ...cohort, batch: "September" })).toBe("room-sep");
+    // The query only ever asks for the batch's room or a pre-batch one in progress.
+    expect(findManySessions.mock.calls[0][0].where.OR).toEqual([{ batch: "October" }, { batch: null }]);
+  });
+
+  it("a class already running when batches shipped (no batch) is adopted, not split in two", async () => {
+    findManySessions.mockResolvedValue([{ roomName: "ew-lagos-a1-morning-t-cmtutora", batch: null }]);
+    expect(
+      await ownOpenCohortRoom("cmtutorA", { branchId: "b1", level: "A1", sessionSlot: "morning", batch: "October" }),
+    ).toBe("ew-lagos-a1-morning-t-cmtutora");
+  });
+
+  it("only the session's own batch is buzzed: onlyBatchStudents", async () => {
+    const { onlyBatchStudents } = await import("./live-presence");
+    const people = [
+      { id: "a", admission: { batch: "September" } },
+      { id: "b", admission: { batch: "October" } },
+      { id: "c", admission: {} },
+    ];
+    expect(onlyBatchStudents({ batch: "October" }, people).map((p) => p.id)).toEqual(["b"]);
+    // A session with no batch rings everyone, as it always did.
+    expect(onlyBatchStudents({ batch: null }, people)).toHaveLength(3);
   });
 });
