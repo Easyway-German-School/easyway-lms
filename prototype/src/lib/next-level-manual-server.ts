@@ -7,7 +7,14 @@ import { KIND, notify } from "@/lib/notify";
 import { normaliseDeliveryMode } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { buildInvite } from "@/lib/next-level-invite";
-import { cleanDetails, readIntent, type NextLevelIntent } from "@/lib/next-level-journey";
+import {
+  INVITE_KEY_PREFIX,
+  REMIND_AFTER_DAYS,
+  cleanDetails,
+  inviteKey,
+  readIntent,
+  type NextLevelIntent,
+} from "@/lib/next-level-journey";
 import { loadJourney, loadJourneyStudent, opensFor, seatAndOwed } from "@/lib/next-level-journey-server";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 
@@ -53,6 +60,87 @@ export type MoveUpPreview = {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * Record that the office has offered this student `target` — the one flag that
+ * makes them reachable (pop, bell, push, email) even while their portal is
+ * locked, which is exactly the state of a learner the Graduation desk just
+ * moved up: locked on the new level's deposit, and the person we most want to
+ * talk to. Read-modify-write from a fresh row, because promotion rewrites
+ * `admission` and a stale copy would undo it.
+ *
+ * Returns whether they had already been offered, so an automatic run can leave
+ * anyone it has already invited alone.
+ */
+export async function markOffered(
+  studentId: string,
+  target: string,
+  now = new Date(),
+): Promise<{ alreadyOffered: boolean }> {
+  const fresh = await loadJourneyStudent({ id: studentId });
+  if (!fresh) return { alreadyOffered: false };
+  const admission = asRecord(fresh.admission);
+  const existing = readIntent(admission, target);
+  if (existing?.manualOffer === true) return { alreadyOffered: true };
+
+  const intent: NextLevelIntent = {
+    ...(existing ?? { targetLevel: target }),
+    targetLevel: target,
+    manualOffer: true,
+    offeredAt: now.toISOString(),
+  };
+  await prisma.student.update({
+    where: { id: studentId },
+    data: { admission: { ...admission, nextLevel: intent } as never },
+  });
+  return { alreadyOffered: false };
+}
+
+/**
+ * Becca's one message — the bell, the push and the designed email, built from
+ * the student's own journey. The pop on their dashboard reads the same journey,
+ * so all of it lands at the same moment. Every route that tells a student they
+ * can move up (the desk, the manual dialog, the pipeline) goes through here, and
+ * the dedupe key is the pipeline's own, so "who has been messaged" stays true
+ * whichever button did it. Returns whether a NEW message went out today.
+ */
+export async function sendBeccaInvite(studentId: string, now = new Date()): Promise<boolean> {
+  const student = await loadJourneyStudent({ id: studentId });
+  const journey = student ? await loadJourney(student, now) : null;
+  if (!student || !journey) return false;
+
+  // One message, not one per route. The hourly send, the daily move-up and the
+  // office's own button can all reach the same student; if any of them spoke to
+  // them about this level in the last few days, that is the message.
+  const recent = await prisma.notification
+    .findFirst({
+      where: {
+        studentId,
+        dedupeKey: { startsWith: `${INVITE_KEY_PREFIX}${studentId}:${journey.audience.targetLevel}:` },
+        createdAt: { gte: new Date(now.getTime() - REMIND_AFTER_DAYS * 24 * 60 * 60 * 1000) },
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
+  if (recent) return false;
+
+  const invite = buildInvite(journey, student.user.name);
+  const result = await notify({
+    to: { studentIds: [studentId] },
+    kind: KIND.levelAdvance,
+    severity: "success",
+    title: invite.title,
+    message: invite.message,
+    emailBody: invite.emailBody,
+    emailHtmlFor: () => invite.html,
+    link: "/next-level",
+    push: true,
+    email: true,
+    sms: false,
+    dedupeKey: inviteKey(studentId, journey.audience.targetLevel, now.toISOString().slice(0, 10)),
+  });
+  return result.created > 0;
 }
 
 export async function previewMoveUp(studentId: string): Promise<MoveUpPreview | null> {

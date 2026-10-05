@@ -209,7 +209,7 @@ export default function NextLevelJourney() {
   const [step, setStep] = useState(0);
   const [burst, setBurst] = useState(0);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
-  const [form, setForm] = useState({ phone: "", parentPhone: "", sessionSlot: "morning", deliveryMode: "physical", note: "" });
+  const [form, setForm] = useState({ phone: "", parentPhone: "", sessionSlot: "morning", deliveryMode: "physical", batch: "", note: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [held, setHeld] = useState(false);
@@ -300,6 +300,7 @@ export default function NextLevelJourney() {
   const perks = ADVANCE_PERKS;
   const allRevealed = revealed.size >= perks.length;
   const inSeat = offer.seat !== "none";
+  const chosenBatch = offer.batchChoices.find((choice) => choice.value === form.batch) ?? null;
   const total = 4;
 
   const slide = {
@@ -358,6 +359,15 @@ export default function NextLevelJourney() {
                 I put together what you achieved and a {target} plan built around how <em>you</em> learn.{" "}
                 {audience.state === "midway" ? "Two minutes, and the office can keep your place early." : "Two minutes, and your seat can be kept."}
               </p>
+              {journey.certificateReady && (
+                <Link
+                  href="/certificates"
+                  className="mx-auto mt-4 flex w-fit items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/30 backdrop-blur"
+                >
+                  <CheckIcon className="h-3.5 w-3.5" strokeWidth={3} />
+                  Your {audience.finishedLevel} certificate is ready — view it
+                </Link>
+              )}
               <button
                 onClick={() => go(1)}
                 className="mt-6 rounded-full bg-white px-8 py-3.5 text-sm font-bold text-[#0D7C7E] shadow-lg transition hover:scale-[1.03]"
@@ -515,9 +525,9 @@ export default function NextLevelJourney() {
                 <h2 className="mt-1 text-xl font-bold text-[var(--foreground)]">
                   {held ? "Your seat is being kept" : "Confirm your details"}
                 </h2>
-                {offer.opensLabel && (
+                {(chosenBatch?.opensLabel ?? offer.opensLabel) && (
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    {target} opens <strong className="text-[var(--foreground)]">{offer.opensLabel}</strong>.
+                    {target} opens <strong className="text-[var(--foreground)]">{chosenBatch?.opensLabel ?? offer.opensLabel}</strong>.
                   </p>
                 )}
 
@@ -562,6 +572,31 @@ export default function NextLevelJourney() {
                       className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--foreground)]"
                     />
                   </label>
+                  {offer.batchChoices.length > 0 && (
+                    <div>
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Which batch do you want to join?</span>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {offer.batchChoices.map((choice) => (
+                          <button
+                            key={choice.value}
+                            type="button"
+                            onClick={() => setForm({ ...form, batch: choice.value })}
+                            aria-pressed={form.batch === choice.value}
+                            className={`rounded-2xl border px-4 py-3 text-left transition ${
+                              form.batch === choice.value
+                                ? "border-transparent bg-[var(--accent)] text-white shadow"
+                                : "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground)] hover:border-[var(--accent)]"
+                            }`}
+                          >
+                            <span className="block text-sm font-bold">{choice.label}</span>
+                            <span className={`block text-xs ${form.batch === choice.value ? "text-white/85" : "text-[var(--muted)]"}`}>
+                              Opens {choice.opensLabel}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Which sitting suits you?</span>
                     <Pills options={SLOTS} value={form.sessionSlot} onChange={(v) => setForm({ ...form, sessionSlot: v })} />
@@ -622,6 +657,23 @@ export default function NextLevelJourney() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </div>
+
+                <div className="mt-6 rounded-2xl bg-[var(--surface-alt)] p-4 text-center text-sm text-[var(--muted)]">
+                  <p>
+                    No pressure. Your results{journey.certificateReady ? " and your certificate" : ""} stay yours either way, and your portal
+                    simply stays locked until you confirm your {target} seat.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-5">
+                    {journey.certificateReady && (
+                      <Link href="/certificates" className="font-semibold text-[var(--accent)] underline">
+                        View my certificate
+                      </Link>
+                    )}
+                    <Link href="/dashboard" className="font-semibold text-[var(--foreground)] underline">
+                      Not now
+                    </Link>
+                  </div>
                 </div>
 
                 <button onClick={() => go(2)} className="mt-4 text-sm font-semibold text-[var(--muted)] underline">

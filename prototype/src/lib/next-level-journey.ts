@@ -18,7 +18,7 @@
  * written from their own habits — not in pressure.
  */
 
-import { batchFromAdmission, resolveBatchWindow } from "@/lib/batch";
+import { MONTH_NAMES, batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import type { IntakeStartDayOverrides } from "@/lib/intake";
 import { LEVELS, nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
@@ -475,6 +475,8 @@ export type NextLevelIntent = {
     sessionSlot?: string;
     /** physical | online | hybrid */
     deliveryMode?: string;
+    /** The intake the student chose for the next level — a bare month name ("November"). */
+    batch?: string;
     note?: string;
   };
 };
@@ -525,6 +527,7 @@ export function cleanDetails(raw: unknown): NonNullable<NextLevelIntent["details
     parentPhone: phone(body.parentPhone),
     sessionSlot: SLOTS.includes(slot) ? slot : undefined,
     deliveryMode: MODES.includes(mode) ? mode : undefined,
+    batch: monthNameToIndex(body.batch) !== null ? MONTH_NAMES[monthNameToIndex(body.batch) as number] : undefined,
     note: text(body.note, 500),
   };
 }

@@ -40,6 +40,7 @@ type Row = {
   phone: string | null;
   parentPhone: string | null;
   requestedSlot: string | null;
+  requestedBatch: string | null;
   requestedMode: string | null;
   note: string | null;
   seenAt: string | null;
@@ -254,16 +255,15 @@ export default function NextLevelPipelinePage() {
       <div className="mx-auto max-w-6xl p-6">
         <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]">
           <LevelUpIcon className="h-7 w-7 text-[var(--accent)]" />
-          Next level
+          Next level follow-up
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-          Becca&apos;s next-level message, already written from each student&apos;s own numbers. Read the preview, press
-          send — the bell, the push and the email go out together, and the pop shows on their dashboard. Only students
-          whose portal is open (paid at least the deposit) are messaged. Moving people up still happens on{" "}
+          Who has opened Becca&apos;s next-level invitation, held a seat or paid — and who has gone quiet, so you can call
+          them. Finishing a batch (which also sends the invitation) happens on{" "}
           <Link href="/admin/graduation" className="font-semibold text-[var(--accent)] underline">
-            Graduation
+            Finished batches
           </Link>
-          .
+          ; use the buttons here for stragglers and reminders.
         </p>
 
         {error && <p className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
@@ -526,6 +526,7 @@ export default function NextLevelPipelinePage() {
                           <>
                             {r.phone && <p>Phone: <span className="text-[var(--foreground)]">{r.phone}</span></p>}
                             {r.parentPhone && <p>Parent: <span className="text-[var(--foreground)]">{r.parentPhone}</span></p>}
+                            {r.requestedBatch && <p>Chose: <span className="text-[var(--foreground)]">{r.requestedBatch} batch</span></p>}
                             {r.requestedSlot && <p>Wants: <span className="text-[var(--foreground)]">{r.requestedSlot} sitting{r.requestedMode ? `, ${r.requestedMode}` : ""}</span></p>}
                             {r.note && <p className="mt-1 italic">&ldquo;{r.note}&rdquo;</p>}
                           </>

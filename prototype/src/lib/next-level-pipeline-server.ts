@@ -51,6 +51,8 @@ export type PipelineRow = {
   phone: string | null;
   parentPhone: string | null;
   requestedSlot: string | null;
+  /** The intake month they chose for the next level, if they have. */
+  requestedBatch: string | null;
   requestedMode: string | null;
   note: string | null;
   seenAt: string | null;
@@ -214,6 +216,7 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
         parentPhone:
           intent?.details?.parentPhone ?? (typeof admission.parentPhone === "string" ? admission.parentPhone : null),
         requestedSlot: intent?.details?.sessionSlot ?? null,
+        requestedBatch: intent?.details?.batch ?? null,
         requestedMode: intent?.details?.deliveryMode ?? null,
         note: intent?.details?.note ?? null,
         seenAt: intent?.seenAt ?? null,

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { batchFromAdmission, monthNameToIndex } from "@/lib/batch";
+import { MONTH_NAMES, batchFromAdmission, monthNameToIndex } from "@/lib/batch";
 import { nextPlacement } from "@/lib/graduation";
 import { intakeMonthKey, startDayFor, type IntakeStartDayOverrides } from "@/lib/intake";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
@@ -7,7 +7,7 @@ import { SESSION_MONTHS, sessionDurationMonths, weeksOfTeachingFor } from "@/lib
 import { DEPOSIT_RATE, isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { loadStudentLedger } from "@/lib/tuition-charges";
 import { getStudentAccess } from "@/lib/student-access";
-import { zonedTimeToInstant } from "@/lib/school-time";
+import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
 import { goalFor, isKnownGoal } from "@/lib/germany-goals";
 import { KIND, notify } from "@/lib/notify";
 import {
@@ -42,6 +42,18 @@ export type JourneyOffer = {
   opensLabel: string | null;
   /** Where the pay button goes for this state. */
   payHref: string | null;
+  /** The next intakes the student may choose between, soonest first. */
+  batchChoices: BatchChoice[];
+};
+
+export type BatchChoice = {
+  /** Bare month name — what `admission.batch` stores. */
+  value: string;
+  /** "November 2026" */
+  label: string;
+  year: number;
+  opensOn: string;
+  opensLabel: string;
 };
 
 export type JourneyPayload = {
@@ -59,6 +71,12 @@ export type JourneyPayload = {
    */
   reachable: boolean;
   recap: Recap;
+  /**
+   * Their certificate for the level they finished has been issued. It is theirs
+   * whether or not they go on to pay for the next level (/certificates is open
+   * behind the paywall).
+   */
+  certificateReady: boolean;
   offer: JourneyOffer;
   intent: NextLevelIntent | null;
   prefill: {
@@ -67,6 +85,8 @@ export type JourneyPayload = {
     parentPhone: string;
     sessionSlot: string;
     deliveryMode: string;
+    /** The intake month currently chosen (or the soonest one on offer). */
+    batch: string;
   };
 };
 
@@ -82,6 +102,7 @@ const studentSelect = {
   levelCompletedAt: true,
   admission: true,
   classesStartedAt: true,
+  startConfirmedVia: true,
   createdAt: true,
   sessionSlot: true,
   deliveryMode: true,
@@ -130,6 +151,62 @@ export function opensFor(
   const day = startDayFor(overrides, key, audience.targetLevel);
   const startsOn = zonedTimeToInstant(`${key}-${String(day).padStart(2, "0")}`, "00:00");
   return { opensOn: startsOn.toISOString(), opensLabel: dayLabel(startsOn) };
+}
+
+/**
+ * The intakes a student may choose between for the level they are moving into:
+ * three, soonest first, each with that level's real opening day (per-level
+ * overrides included).
+ *
+ *  - Someone still to be moved: where the school would place them, and the two
+ *    months after it.
+ *  - Someone already moved up: where they are placed now (which may be an intake
+ *    that has already opened, if the move was late) plus the intakes still to
+ *    open. Nobody is offered a way back into a batch that is under way.
+ */
+export function batchChoicesFor(
+  audience: JourneyAudience,
+  naturalOpensOn: string | null,
+  overrides: IntakeStartDayOverrides,
+  now: Date,
+  count = 3,
+): BatchChoice[] {
+  const level = audience.targetLevel;
+  const opening = (absolute: number) => {
+    const year = Math.floor(absolute / 12);
+    const index = absolute % 12;
+    const key = intakeMonthKey(year, index);
+    const day = startDayFor(overrides, key, level);
+    return { year, index, startsOn: zonedTimeToInstant(`${key}-${String(day).padStart(2, "0")}`, "00:00") };
+  };
+  const toChoice = (absolute: number): BatchChoice => {
+    const { year, index, startsOn } = opening(absolute);
+    return {
+      value: MONTH_NAMES[index],
+      label: `${MONTH_NAMES[index]} ${year}`,
+      year,
+      opensOn: startsOn.toISOString(),
+      opensLabel: dayLabel(startsOn),
+    };
+  };
+  const placedAt = (() => {
+    if (!naturalOpensOn) return null;
+    const parts = instantToZonedParts(new Date(naturalOpensOn));
+    return parts.year * 12 + (parts.month - 1);
+  })();
+
+  if (audience.state === "promoted") {
+    const today = instantToZonedParts(now);
+    const todayAbsolute = today.year * 12 + (today.month - 1);
+    const picks = new Set<number>(placedAt === null ? [] : [placedAt]);
+    for (let m = todayAbsolute; picks.size < count && m < todayAbsolute + 24; m += 1) {
+      if (opening(m).startsOn.getTime() > now.getTime()) picks.add(m);
+    }
+    return [...picks].sort((x, y) => x - y).slice(0, count).map(toChoice);
+  }
+
+  if (placedAt === null) return [];
+  return Array.from({ length: count }, (_, i) => toChoice(placedAt + i));
 }
 
 function dayLabel(date: Date): string {
@@ -245,15 +322,27 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
   const fee = tuitionFeeFor({ level: target, branch: branchName, pathway: student.pathway });
   const [money, access] = await Promise.all([seatAndOwed(student.id, target), getStudentAccess(student.id)]);
   const opens = opensFor(student, audience, overrides, now);
+  const batchChoices = batchChoicesFor(audience, opens.opensOn, overrides, now);
+  const certificate = await prisma.certificate
+    .findFirst({
+      where: { studentId: student.id, level: audience.finishedLevel, revokedAt: null },
+      select: { id: true },
+    })
+    .catch(() => null);
 
-  // Where "pay" goes. A signed-off student uses the next-level checkout; one the
-  // graduation desk already moved up pays the ordinary checkout (their level IS
-  // the target now); one whose batch just ended and has not been signed off
-  // cannot pay yet — the office has to finish them first, so they hold a seat.
-  // `ended` and `midway` cannot pay yet: the next-level checkout needs the
-  // office's sign-off, so they keep a seat now and pay once it opens.
+  // Where "pay" goes. One already moved up (the desk, or their own earlier
+  // payment) pays the ordinary checkout — their level IS the target now. Anyone
+  // whose level is over but who has not been moved yet — signed off, batch
+  // ended, or invited by the office — uses the next-level checkout, which signs
+  // the level off itself when they pay (see signOffForCheckout), so a student is
+  // never stuck waiting for the office to press a button before they can pay.
+  // Only `midway` cannot pay: their level is still running.
   const payHref =
-    audience.state === "signed_off" ? "/programs?forNextLevel=1" : audience.state === "promoted" ? "/programs" : null;
+    audience.state === "promoted"
+      ? "/programs"
+      : audience.state === "midway"
+        ? null
+        : "/programs?forNextLevel=1";
 
   const admission = asRecord(student.admission);
   const intent = readIntent(admission, target);
@@ -263,6 +352,7 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
     portalOpen: access?.hasAccess === true,
     reachable: access?.hasAccess === true || intent?.manualOffer === true,
     recap: await buildStudentRecap(student, audience),
+    certificateReady: certificate !== null,
     offer: {
       tuitionFee: fee,
       requiredDeposit: requiredDepositFor({ level: target, branch: branchName }),
@@ -274,6 +364,7 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
       seat: money.seat,
       ...opens,
       payHref,
+      batchChoices,
     },
     intent,
     prefill: {
@@ -283,6 +374,11 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
         intent?.details?.parentPhone ?? (typeof admission.parentPhone === "string" ? admission.parentPhone : ""),
       sessionSlot: intent?.details?.sessionSlot ?? student.sessionSlot ?? "morning",
       deliveryMode: intent?.details?.deliveryMode ?? student.deliveryMode ?? "physical",
+      batch:
+        intent?.details?.batch ??
+        (audience.state === "promoted" ? batchFromAdmission(admission) : null) ??
+        batchChoices[0]?.value ??
+        "",
     },
   };
 }
@@ -322,13 +418,36 @@ export async function markSeen(student: JourneyStudent, targetLevel: string): Pr
  */
 export async function holdSeat(
   student: JourneyStudent,
-  targetLevel: string,
+  audience: JourneyAudience,
   rawDetails: unknown,
 ): Promise<NextLevelIntent> {
+  const targetLevel = audience.targetLevel;
   const details = cleanDetails(rawDetails);
   const admission = asRecord(student.admission);
   const existing = readIntent(admission, targetLevel);
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+
+  // The batch they picked must be one actually on offer — the browser only names
+  // a month, never a date.
+  const overrides = await readIntakeStartDayOverrides(student.tenantId ?? null);
+  const opens = opensFor(student, audience, overrides, nowDate);
+  const choices = batchChoicesFor(audience, opens.opensOn, overrides, nowDate);
+  const choice = details.batch ? (choices.find((c) => c.value === details.batch) ?? null) : null;
+  if (details.batch && !choice) details.batch = undefined;
+  // Someone already moved up and not yet started can be re-placed on the spot;
+  // everyone else's choice is applied when they are moved up (promoteStudents).
+  // Only while their start date is still the placement the move gave them (not a
+  // class they have actually been attending), and only into an intake still to open.
+  const placementOnly =
+    student.classesStartedAt !== null &&
+    (student.classesStartedAt.getTime() > nowDate.getTime() || student.startConfirmedVia === "promotion");
+  const replace =
+    choice !== null &&
+    audience.state === "promoted" &&
+    placementOnly &&
+    new Date(choice.opensOn).getTime() > nowDate.getTime() &&
+    choice.value !== batchFromAdmission(admission);
 
   const intent: NextLevelIntent = {
     ...(existing ?? { targetLevel }),
@@ -345,10 +464,29 @@ export async function holdSeat(
         ...admission,
         ...(intent.details?.phone ? { phone: intent.details.phone } : {}),
         ...(intent.details?.parentPhone ? { parentPhone: intent.details.parentPhone } : {}),
+        ...(replace && choice ? { batch: choice.value } : {}),
         nextLevel: intent,
       } as never,
+      ...(replace && choice
+        ? {
+            classesStartedAt: new Date(choice.opensOn),
+            startConfirmedAt: nowDate,
+            startConfirmedVia: "next-level-choice",
+            startPromptSnoozedUntil: null,
+          }
+        : {}),
     },
   });
+
+  if (replace && choice) {
+    // Keep the level's history row in step with where they are now placed.
+    await prisma.studentEnrolment
+      .updateMany({
+        where: { studentId: student.id, outcome: "ongoing", deletedAt: null },
+        data: { batchMonth: choice.value, batchYear: choice.year, startedAt: new Date(choice.opensOn) },
+      })
+      .catch(() => undefined);
+  }
 
   await prisma.journeyEvent
     .create({
@@ -356,7 +494,7 @@ export async function holdSeat(
         studentId: student.id,
         type: "registered",
         stage: targetLevel,
-        label: `Asked to keep a seat in ${targetLevel}`,
+        label: `Asked to keep a seat in ${targetLevel}${choice ? ` — ${choice.label} batch` : ""}`,
         detail: intent.details?.note ?? null,
         source: "student",
       },
@@ -369,8 +507,8 @@ export async function holdSeat(
     kind: KIND.nextLevelHeld,
     severity: "success",
     title: `${name} wants to keep a seat in ${targetLevel}`,
-    message: `${name} confirmed their details${
-      intent.details?.sessionSlot ? ` and asked for the ${intent.details.sessionSlot} sitting` : ""
+    message: `${name} confirmed their details${choice ? ` for the ${choice.label} batch` : ""}${
+      intent.details?.sessionSlot ? `${choice ? "," : " and asked for"} the ${intent.details.sessionSlot} sitting` : ""
     }. Their contact info is updated on their record.`,
     link: "/admin/next-level",
     // One alert per student per day, however many times they re-save.

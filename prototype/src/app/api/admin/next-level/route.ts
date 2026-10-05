@@ -8,8 +8,8 @@ import {
   readNextLevelAuto,
   sendInvites,
   sendLockedNotices,
-  writeNextLevelAuto,
 } from "@/lib/next-level-pipeline-server";
+import { setBatchAutomatic } from "@/lib/graduation-server";
 
 /**
  * The next-level pipeline.
@@ -23,7 +23,8 @@ import {
  *        includeReminders?}              to those among them whose portal is open,
  *                                        who have not answered, and who have not
  *                                        been messaged yet (reminders only when asked)
- *   POST {action:"setAuto", enabled}     switch the automatic daily send on or off
+ *   POST {action:"setAuto", enabled}     the same single switch as Finished batches: move-up + invite
+ *                                        each morning, and this page's hourly send
  *   POST {action:"previewLocked"}        the status notice a locked-portal student gets
  *   POST {action:"sendLocked", studentIds, includeAgain?}
  *                                        send that notice (bell + email, no SMS) to
@@ -72,7 +73,8 @@ export async function POST(request: Request) {
   if (action === "setAuto") {
     const tenantId = gate.session.user.tenantId ?? null;
     if (!tenantId) return NextResponse.json({ error: "No school to switch this on for" }, { status: 400 });
-    return NextResponse.json({ auto: await writeNextLevelAuto(tenantId, { enabled: body?.enabled === true }) });
+    await setBatchAutomatic(tenantId, body?.enabled === true);
+    return NextResponse.json({ auto: await readNextLevelAuto(tenantId) });
   }
 
   try {

@@ -8,6 +8,7 @@ import { naira } from "@/lib/finance/receivables";
 import { closeOpenEnrolment, openEnrolment } from "@/lib/student-enrolment";
 import { nextPlacement } from "@/lib/graduation";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { issueCertificateForStudent } from "@/lib/certificates";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -191,6 +192,15 @@ export type PromotionOptions = {
   placement?: "next-intake";
 };
 
+/** The bare month the student chose on the next-level journey for `level`, or null. */
+function chosenBatch(admission: Record<string, unknown>, level: string): string | null {
+  const intent = admission.nextLevel;
+  if (!intent || typeof intent !== "object") return null;
+  const record = intent as { targetLevel?: unknown; details?: { batch?: unknown } };
+  if (String(record.targetLevel ?? "").toUpperCase() !== level.toUpperCase()) return null;
+  return typeof record.details?.batch === "string" ? record.details.batch : null;
+}
+
 /**
  * Move students up a level. The new batch month is set to the current month so
  * their calendar regenerates from now rather than replaying the old session.
@@ -304,6 +314,8 @@ export async function promoteStudents(
         now,
         startDayOverrides: overrides,
         level: next,
+        // The batch they picked on the next-level journey, if it was for this level.
+        preferredMonth: chosenBatch(admission, next),
       });
     }
     const landingMonth = place?.month ?? monthName;
@@ -350,6 +362,30 @@ export async function promoteStudents(
     // same as the tuition charge above — a missed enrolment row is repaired by
     // the backfill and nothing here blocks the promotion itself on it.
     try {
+      // The level they just finished is part of their permanent record. A student
+      // who predates the enrolment history has no row for it, and closing
+      // "nothing" would silently lose where they were — so write it first, from
+      // the values read BEFORE this promotion rewrote them.
+      const recorded = await prisma.studentEnrolment.findFirst({
+        where: { studentId, level: student.level, deletedAt: null },
+        select: { id: true },
+      });
+      if (!recorded) {
+        await openEnrolment({
+          studentId,
+          level: student.level,
+          branchId: student.branchId,
+          tutorId: student.tutorId,
+          sessionSlot: student.sessionSlot,
+          classType: student.classType,
+          deliveryMode: student.deliveryMode,
+          batch: typeof admission.batch === "string" ? admission.batch : null,
+          registeredAt: student.createdAt,
+          tenantId: student.tenantId,
+          startedAt: student.classesStartedAt,
+          now,
+        });
+      }
       await closeOpenEnrolment(studentId, { outcome: "completed", now });
       await openEnrolment({
         studentId,
@@ -441,5 +477,8 @@ export async function promoteIfNextLevelPayment(
   }
 
   // Signed off and paid: they land in the intake after the one they just finished.
+  // Certificate first — the issuer reads the CURRENT level, so promoting first
+  // would lose the one for the level they just completed. Idempotent, best-effort.
+  await issueCertificateForStudent(studentId).catch(() => undefined);
   await promoteStudents([studentId], { placement: "next-intake" });
 }

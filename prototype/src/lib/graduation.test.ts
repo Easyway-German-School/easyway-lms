@@ -83,6 +83,43 @@ describe("nextPlacement", () => {
     const place = nextPlacement({ batch: "August", sessionSlot: "weekend", registeredAt: registered, now: at("2026-10-28T10:00:00.000Z") });
     expect(place?.month).toBe("November");
   });
+
+  it("lands the learner in the intake they chose, when it is the default month or later", () => {
+    const base = { batch: "August", registeredAt: registered, now: at("2026-09-28T10:00:00.000Z") };
+    expect(nextPlacement({ ...base, preferredMonth: "October" })?.month).toBe("October");
+    expect(nextPlacement({ ...base, preferredMonth: "November" })?.label).toBe("November 2026");
+  });
+
+  it("wraps a chosen month across the year end", () => {
+    const place = nextPlacement({
+      batch: "October",
+      registeredAt: at("2026-10-02T10:00:00.000Z"),
+      now: at("2026-12-28T10:00:00.000Z"),
+      preferredMonth: "February",
+    });
+    expect(place?.label).toBe("February 2027");
+  });
+
+  it("falls back to the default when the choice is stale or closed", () => {
+    const base = { batch: "August", registeredAt: registered, now: at("2026-09-28T10:00:00.000Z") };
+    // September is already closed; January is further out than the three intakes on offer.
+    expect(nextPlacement({ ...base, preferredMonth: "September" })?.label).toBe("October 2026");
+    expect(nextPlacement({ ...base, preferredMonth: "January" })?.label).toBe("October 2026");
+    // Chose October, but the move only happened in November: November, never October 2027.
+    expect(
+      nextPlacement({ ...base, now: at("2026-11-10T10:00:00.000Z"), preferredMonth: "October" })?.label,
+    ).toBe("November 2026");
+  });
+
+  it("ignores a month name it does not know", () => {
+    const place = nextPlacement({
+      batch: "August",
+      registeredAt: registered,
+      now: at("2026-09-28T10:00:00.000Z"),
+      preferredMonth: "Smarch",
+    });
+    expect(place?.label).toBe("October 2026");
+  });
 });
 
 describe("graduationVerdict", () => {

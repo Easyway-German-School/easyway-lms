@@ -1,4 +1,4 @@
-import { MONTH_NAMES, resolveBatchWindow } from "@/lib/batch";
+import { MONTH_NAMES, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
 import { intakeMonthKey, startDayFor, type IntakeStartDayOverrides } from "@/lib/intake";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
@@ -100,6 +100,13 @@ export function nextPlacement(input: {
    * and their portal opened before their level did.
    */
   level?: string | null;
+  /**
+   * The intake month the learner chose for themselves on the next-level journey
+   * (a bare month name). Honoured only when it is the default month or one of the
+   * next two; anything else (an old choice, a closed month) falls back to the
+   * default, so nobody is placed in a batch that has already closed.
+   */
+  preferredMonth?: string | null;
 }): NextPlacement | null {
   const now = input.now ?? new Date();
   const window = resolveBatchWindow(input.batch, {
@@ -111,7 +118,15 @@ export function nextPlacement(input: {
 
   const today = instantToZonedParts(now);
   const currentAbsolute = today.year * 12 + (today.month - 1);
-  const absolute = Math.max(window.absolute + sessionDurationMonths(input.sessionSlot), currentAbsolute);
+  let absolute = Math.max(window.absolute + sessionDurationMonths(input.sessionSlot), currentAbsolute);
+  const preferred = monthNameToIndex(input.preferredMonth);
+  // Only the three intakes the journey offers (default month + the next two): a
+  // choice gone stale because the move happened late must fall back to the
+  // default, never wrap round to the same month next year.
+  if (preferred !== null) {
+    const ahead = (preferred - (absolute % 12) + 12) % 12;
+    if (ahead <= 2) absolute += ahead;
+  }
 
   const year = Math.floor(absolute / 12);
   const monthIndex = absolute % 12;

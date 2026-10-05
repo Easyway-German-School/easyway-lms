@@ -109,7 +109,7 @@ const navItems: NavItem[] = [
   { label: 'Upcoming intake', href: '/admin/upcoming-intake', icon: <CalendarIcon />, group: 'Academics' },
   // Sign-off, certificates, moving up and telling the learners — one page, one button.
   // The three older screens it replaces are still reachable from the bottom of it.
-  { label: 'Graduation', href: '/admin/graduation', icon: <LevelUpIcon />, group: 'Academics' },
+  { label: 'Finished batches', href: '/admin/graduation', icon: <LevelUpIcon />, group: 'Academics' },
   // Who has just finished, who has kept a seat in the next level, who has gone quiet.
   { label: 'Next level', href: '/admin/next-level', icon: <LevelUpIcon />, group: 'Academics' },
   { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },

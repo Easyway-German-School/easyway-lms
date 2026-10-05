@@ -13,6 +13,7 @@ import {
   tuitionFeeFor,
 } from "@/lib/payment";
 import { nextLevelAfter } from "@/lib/levels";
+import { signOffForCheckout } from "@/lib/graduation-server";
 import { loadStudentLedger } from "@/lib/tuition-charges";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
@@ -154,6 +155,15 @@ export async function POST(request: Request) {
     let priorOwedLevel: string | null = null;
 
     if (forNextLevel) {
+      // Paying is signing off: a student whose batch ended (or whom the office
+      // invited) is signed off here, so nobody waits for a button. Held-back and
+      // never-started students still get the 409 below.
+      if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
+        if (await signOffForCheckout(studentRecord.id)) {
+          studentRecord.levelCompletedFor = studentRecord.level;
+          studentRecord.levelCompletedAt = new Date();
+        }
+      }
       if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
         return NextResponse.json(
           { error: "Your level has not been signed off yet — nothing to continue to." },
