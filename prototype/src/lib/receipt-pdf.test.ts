@@ -27,6 +27,33 @@ suite("buildReceiptPdf", () => {
     expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
 
+  it("renders a fully-paid receipt, a long description and another school's name", async () => {
+    const paid = await buildReceiptPdf({
+      receiptNo: "RCPT00001",
+      studentName: "Emmanuel Anyanwu",
+      studentCode: "EW/2026/A1/SEP/L399",
+      amount: 150000,
+      method: "paystack",
+      description: "Full payment for Ausbildung & vocational route — including a deliberately long description that must wrap onto a second line",
+      paidAt: new Date("2026-09-21"),
+      balanceAfter: 0,
+    });
+    expect(paid.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+
+    const other = await buildReceiptPdf({
+      receiptNo: "RCPT00002",
+      schoolName: "Sprachhaus Berlin",
+      studentName: "Jonas Müller",
+      amount: 250.5,
+      currency: "usd",
+      method: "stripe",
+      description: "Tuition",
+      paidAt: new Date(),
+      balanceAfter: 100,
+    });
+    expect(other.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  });
+
   it("works with no balanceAfter and no studentCode", async () => {
     const pdf = await buildReceiptPdf({
       receiptNo: "RCPT99999",

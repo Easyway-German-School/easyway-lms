@@ -1,6 +1,35 @@
 export type PaymentStatus = "Pending" | "Partial" | "Completed";
 
 /**
+ * Has this student paid ANY tuition — full or part? The test for handing out
+ * the proof-of-enrolment letter: a registration fee alone is an application,
+ * not an enrolment, so it does not count, but a single part-payment toward
+ * tuition does. Deliberately not a balance check.
+ */
+export function hasPaidAnyTuition(payments: Array<{ status?: string | null; description?: string | null; amount?: number | null }>): boolean {
+  return payments.some((payment) => isTuitionPayment(payment) && (payment.amount ?? 1) > 0);
+}
+
+/**
+ * Running tuition balance right after one payment — what the receipt (PDF and
+ * email) prints as "balance remaining". Null for a registration fee, which
+ * never counts toward tuition: a balance that does not move would only
+ * confuse. One function so the emailed receipt and the downloaded PDF can
+ * never disagree about the figure.
+ */
+export function balanceAfterPayment(
+  payments: Array<{ status?: string | null; description?: string | null; amount: number; createdAt: Date }>,
+  payment: { description?: string | null; createdAt: Date },
+  tuitionFee: number,
+): number | null {
+  if (isRegistrationFeePayment(payment.description)) return null;
+  const paidByThen = payments
+    .filter((p) => isTuitionPayment(p) && p.createdAt <= payment.createdAt)
+    .reduce((sum, p) => sum + p.amount, 0);
+  return Math.max(0, tuitionFee - paidByThen);
+}
+
+/**
  * Tuition pricing.
  *
  * Two things decide a fee: the level and the BRANCH. Abuja charges more than

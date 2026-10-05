@@ -6,6 +6,7 @@ import StudentShell from "@/components/StudentShell";
 import TuitionNudge from "@/components/TuitionNudge";
 import RefundModal from "@/components/RefundModal";
 import { CheckIcon } from "@/components/icons";
+import { hasPaidAnyTuition } from "@/lib/payment";
 
 type PaymentRecord = {
   id: string;
@@ -97,6 +98,8 @@ export default function PaymentsPage() {
   const amountDue = Math.max(0, tuitionFee - totalPaid);
   const paymentProgress = Math.min(100, Math.round((totalPaid / tuitionFee) * 100));
   const isTravelPackage = pathway === "Travel Package";
+  // The enrolment letter says "enrolled", so it unlocks with the first tuition payment — full or part.
+  const canDownloadLetter = hasPaidAnyTuition(payments);
 
   return (
     <StudentShell>
@@ -142,12 +145,16 @@ export default function PaymentsPage() {
                     Make a payment
                   </Link>
                 )}
-                <a
-                  href="/api/student/enrolment-letter"
-                  className="text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
-                >
-                  Download proof-of-enrolment letter
-                </a>
+                {canDownloadLetter ? (
+                  <a
+                    href="/api/student/enrolment-letter"
+                    className="text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
+                  >
+                    Download proof-of-enrolment letter
+                  </a>
+                ) : (
+                  <span className="text-xs text-[var(--muted)]">Your enrolment letter unlocks with your first tuition payment.</span>
+                )}
                 {payments.length > 0 ? (
                   <button
                     type="button"

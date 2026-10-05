@@ -2027,8 +2027,8 @@ export default function StudentDossierPage() {
                 Proof-of-enrolment letter
               </a>
               <p className="mt-2 text-xs text-[var(--muted)]">
-                For a visa office, embassy, or employer — states their level, pathway and enrolment
-                date, and whether tuition is currently settled.
+                For a visa office, embassy, or employer — stamped and signed, with their level, pathway and
+                enrolment date. Only available once they have paid tuition, in full or in part.
               </p>
             </div>
 

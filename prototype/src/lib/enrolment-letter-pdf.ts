@@ -1,4 +1,15 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFImage } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import {
+  HAIRLINE,
+  INK,
+  MUTED,
+  RED,
+  SCHOOL_CONTACT,
+  embedBrandArt,
+  isEasywayBrand,
+  ordinalDate,
+  wrapLines,
+} from "@/lib/pdf-brand";
 
 /**
  * Proof-of-enrolment letter — the document a student hands to a visa office,
@@ -7,54 +18,20 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFIm
  * transcript-pdf.ts: no browser, no native binary, and a letter is plain text
  * on a page.
  *
+ * Laid out after the school's own printed letters: centred letterhead (globe
+ * mark + wordmark), serif body, a large faint logo watermark bleeding off the
+ * lower right, the red APPROVED stamp and the administrative officer's
+ * signature over the sign-off, and the contact line along the foot.
+ *
  * Deliberately NOT a legal attestation or a notarised document — it states
  * facts already on file (enrolment date, level, tuition status) in a format
  * an office reading it recognises, and nothing it cannot back up if asked.
+ * That is also why there is no line about attendance or progress: nothing on
+ * file lets the letter vouch for either.
  */
 
 const PAGE_SIZE: [number, number] = [595.28, 841.89]; // A4
-const MARGIN = 64;
-const ACCENT = rgb(1, 0.4, 0); // #FF6600
-
-/**
- * The logo lives at `public/logo.png` — fine for `<img src="/logo.png">`, but
- * this runs in a serverless function, not a browser, and Vercel does not
- * bundle `public/` into the function alongside its code. Fetching the file
- * over HTTP, the same way `enrolment-letter-email.ts` does for the emailed
- * copy, sidesteps that entirely. Best-effort: a slow or unreachable fetch
- * falls back to the text-only header below rather than failing the letter a
- * student may be waiting on for a visa appointment.
- */
-async function tryEmbedLogo(doc: PDFDocument): Promise<PDFImage | null> {
-  const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "").replace(/\/$/, "");
-  if (!base) return null;
-
-  try {
-    const response = await fetch(`${base}/logo.png`, { cache: "no-store" });
-    if (!response.ok) return null;
-    const bytes = await response.arrayBuffer();
-    return await doc.embedPng(bytes);
-  } catch {
-    return null;
-  }
-}
-
-function wrapLines(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (font.widthOfTextAtSize(candidate, size) > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
-    }
-  }
-  if (line) lines.push(line);
-  return lines;
-}
+const MARGIN_X = 70;
 
 export type EnrolmentLetterInput = {
   schoolName?: string;
@@ -66,7 +43,11 @@ export type EnrolmentLetterInput = {
   branchName?: string | null;
   deliveryMode?: string | null;
   enrolledAt: Date;
-  /** Whether tuition is fully settled — the letter states this plainly rather than a figure, which dates fast. */
+  /**
+   * Whether tuition is fully settled. Only a settled account gets a sentence
+   * about it — a part-paid student's letter says nothing about the balance,
+   * which is the school's business and not a visa office's.
+   */
   tuitionSettled: boolean;
   /** e.g. "6 months" — the school's own estimate, when it has one. */
   expectedDuration?: string | null;
@@ -74,106 +55,160 @@ export type EnrolmentLetterInput = {
   referenceNo: string;
 };
 
+/** "Easyway Language School" -> ["EASYWAY", "LANGUAGE SCHOOL"]; any other name -> [NAME, ""]. */
+function wordmarkParts(schoolName: string): [string, string] {
+  const words = schoolName.trim().toUpperCase().split(/\s+/);
+  if (words.length < 2) return [words[0] ?? "", ""];
+  return [words[0], words.slice(1).join(" ")];
+}
+
 export async function buildEnrolmentLetterPdf(input: EnrolmentLetterInput): Promise<Buffer> {
   const doc = await PDFDocument.create();
   doc.setTitle(`Proof of Enrolment — ${input.studentName}`);
   doc.setProducer("EasyWay LMS");
 
-  const body = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const page: PDFPage = doc.addPage(PAGE_SIZE);
-  const maxWidth = PAGE_SIZE[0] - MARGIN * 2;
-  let y = PAGE_SIZE[1] - MARGIN;
+  const serif = await doc.embedFont(StandardFonts.TimesRoman);
+  const serifBold = await doc.embedFont(StandardFonts.TimesRomanBold);
+  const sans = await doc.embedFont(StandardFonts.Helvetica);
+  const sansBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const art = await embedBrandArt(doc);
+  const page = doc.addPage(PAGE_SIZE);
+  const [pageW, pageH] = PAGE_SIZE;
+  const maxWidth = pageW - MARGIN_X * 2;
 
   const schoolName = input.schoolName ?? "Easyway Language School";
-  const logo = await tryEmbedLogo(doc);
+  const easyway = isEasywayBrand(input.schoolName);
 
-  if (logo) {
-    const logoHeight = 30;
-    const logoWidth = (logo.width / logo.height) * logoHeight;
-    page.drawImage(logo, { x: MARGIN, y: y - logoHeight + 6, width: logoWidth, height: logoHeight });
-    page.drawText(schoolName, {
-      x: MARGIN + logoWidth + 12,
-      y: y - logoHeight / 2 - 3,
-      size: 14,
-      font: bold,
-      color: rgb(0.05, 0.05, 0.05),
-    });
-    y -= logoHeight + 6;
-  } else {
-    page.drawText(schoolName, { x: MARGIN, y, size: 18, font: bold, color: rgb(0.05, 0.05, 0.05) });
-    y -= 20;
-  }
+  // Watermark first so everything else prints over it — the printed letters
+  // run the globe off the right-hand edge.
+  const markSize = 360;
+  page.drawImage(art.mark, { x: pageW - markSize * 0.72, y: 96, width: markSize, height: markSize, opacity: 0.1 });
 
-  if (input.schoolAddress) {
-    page.drawText(input.schoolAddress, { x: MARGIN, y, size: 10, font: body, color: rgb(0.45, 0.45, 0.45) });
-    y -= 16;
-  }
-  y -= 10;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_SIZE[0] - MARGIN, y }, thickness: 2, color: ACCENT });
-  y -= 30;
-
-  const issuedAt = input.issuedAt ?? new Date();
-  page.drawText(
-    issuedAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
-    { x: PAGE_SIZE[0] - MARGIN - 130, y: PAGE_SIZE[1] - MARGIN, size: 10, font: body, color: rgb(0.45, 0.45, 0.45) },
+  // ---- Letterhead -------------------------------------------------------
+  const [wordTop, wordBottom] = wordmarkParts(schoolName);
+  const topSize = 38;
+  const bottomSize = wordBottom ? 19 : 0;
+  const textW = Math.max(
+    serifBold.widthOfTextAtSize(wordTop, topSize),
+    wordBottom ? serif.widthOfTextAtSize(wordBottom, bottomSize) : 0,
   );
+  const markH = 62;
+  const groupW = markH + 14 + textW;
+  const groupX = (pageW - groupW) / 2;
+  const headTop = pageH - 52;
+  page.drawImage(art.mark, { x: groupX, y: headTop - markH, width: markH, height: markH });
+  page.drawText(wordTop, { x: groupX + markH + 14, y: headTop - 36, size: topSize, font: serifBold, color: RED });
+  if (wordBottom) {
+    page.drawText(wordBottom, { x: groupX + markH + 14, y: headTop - 36 - bottomSize - 4, size: bottomSize, font: serif, color: INK });
+  }
+  const ruleY = headTop - markH - 16;
+  page.drawLine({ start: { x: MARGIN_X, y: ruleY }, end: { x: pageW - MARGIN_X, y: ruleY }, thickness: 0.8, color: HAIRLINE });
 
-  page.drawText("TO WHOM IT MAY CONCERN", { x: MARGIN, y, size: 13, font: bold, color: ACCENT });
-  y -= 30;
+  // ---- Date, salutation, subject ---------------------------------------
+  const issuedAt = input.issuedAt ?? new Date();
+  const dateText = ordinalDate(issuedAt);
+  let y = ruleY - 46;
+  page.drawText(dateText, {
+    x: pageW - MARGIN_X - serif.widthOfTextAtSize(dateText, 12),
+    y,
+    size: 12,
+    font: serif,
+    color: INK,
+  });
+  y -= 36;
+  page.drawText("TO WHOM IT MAY CONCERN", { x: MARGIN_X, y, size: 12, font: serifBold, color: INK });
+  y -= 34;
+  page.drawText("Dear Sir/Madam,", { x: MARGIN_X, y, size: 12, font: serifBold, color: INK });
+  y -= 36;
 
-  const durationLine = input.expectedDuration
-    ? ` The course is expected to run for approximately ${input.expectedDuration}.`
-    : "";
+  const subject = `PROOF OF ENROLMENT FOR ${input.studentName.toUpperCase()}`;
+  const subjectW = serifBold.widthOfTextAtSize(subject, 12);
+  page.drawText(subject, { x: (pageW - subjectW) / 2, y, size: 12, font: serifBold, color: INK });
+  page.drawLine({
+    start: { x: (pageW - subjectW) / 2, y: y - 3 },
+    end: { x: (pageW + subjectW) / 2, y: y - 3 },
+    thickness: 0.6,
+    color: INK,
+  });
+  y -= 32;
+
+  // ---- Body ------------------------------------------------------------
+  const firstName = input.studentName.trim().split(/\s+/)[0] || "The student";
+  const enrolledOn = input.enrolledAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   const modeLine = input.deliveryMode
     ? ` Instruction is delivered ${input.deliveryMode === "online" ? "fully online" : input.deliveryMode === "hybrid" ? "in a hybrid (campus and online) format" : "on campus"}${input.branchName ? ` at our ${input.branchName} branch` : ""}.`
     : input.branchName
-      ? ` The student attends our ${input.branchName} branch.`
+      ? ` ${firstName} attends our ${input.branchName} branch.`
       : "";
+  const durationLine = input.expectedDuration
+    ? ` The course is expected to run for approximately ${input.expectedDuration}.`
+    : "";
+  const settledLine = input.tuitionSettled ? " Tuition for this level has been paid in full." : "";
 
-  const paragraph = `This letter confirms that ${input.studentName}${
-    input.studentCode ? ` (Student ID: ${input.studentCode})` : ""
-  } is a currently enrolled student at ${schoolName}, registered on the ${input.pathway} programme at level ${
-    input.level
-  }, since ${input.enrolledAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.${modeLine}${durationLine}`;
+  const paragraphs = [
+    `This is to confirm that ${input.studentName}${input.studentCode ? ` (Student ID: ${input.studentCode})` : ""} is currently enrolled as a student at ${schoolName}. ${firstName} is actively undergoing ${input.level} German language training with us on the ${input.pathway} programme, and has been enrolled since ${enrolledOn}.${modeLine}${durationLine}${settledLine}`,
+    "This letter is issued at the student's request for whatever purpose it may serve, including visa, immigration, or employment verification.",
+    "Should you require any further clarification or verification, please feel free to contact us.",
+    "Thank you for your attention.",
+  ];
 
-  for (const line of wrapLines(paragraph, body, 11, maxWidth)) {
-    page.drawText(line, { x: MARGIN, y, size: 11, font: body, color: rgb(0.1, 0.1, 0.1) });
-    y -= 17;
+  const leading = 18;
+  for (const paragraph of paragraphs) {
+    for (const line of wrapLines(paragraph, serif, 12, maxWidth)) {
+      page.drawText(line, { x: MARGIN_X, y, size: 12, font: serif, color: INK });
+      y -= leading;
+    }
+    y -= 12;
   }
-  y -= 12;
 
-  const tuitionParagraph = input.tuitionSettled
-    ? "The student's tuition for this level is fully settled as of the date of this letter."
-    : "The student is enrolled and attending classes; their tuition account carries an outstanding balance as of the date of this letter, in line with our standard payment terms.";
-  for (const line of wrapLines(tuitionParagraph, body, 11, maxWidth)) {
-    page.drawText(line, { x: MARGIN, y, size: 11, font: body, color: rgb(0.1, 0.1, 0.1) });
-    y -= 17;
+  // ---- Sign-off --------------------------------------------------------
+  y -= 6;
+  page.drawText("Yours sincerely,", { x: MARGIN_X, y, size: 12, font: serif, color: INK });
+  const signOffY = y;
+  y -= 52;
+
+  if (easyway) {
+    page.drawText(SCHOOL_CONTACT.signatory, { x: MARGIN_X, y, size: 12, font: serifBold, color: INK });
+    page.drawText(SCHOOL_CONTACT.signatoryTitle, { x: MARGIN_X, y: y - 17, size: 12, font: serif, color: INK });
+    page.drawText(schoolName, { x: MARGIN_X, y: y - 34, size: 12, font: serif, color: INK });
+    page.drawText(SCHOOL_CONTACT.email, { x: MARGIN_X, y: y - 51, size: 12, font: serif, color: INK });
+    page.drawText(`W: ${SCHOOL_CONTACT.website}`, { x: MARGIN_X, y: y - 68, size: 12, font: serif, color: INK });
+
+    // The stamp lands over the name and title, the way a real one does; its
+    // pen signature then crosses the name. Drawn last so the ink sits on top.
+    const stampW = 142;
+    const stampH = (art.stamp.height / art.stamp.width) * stampW;
+    page.drawImage(art.stamp, {
+      x: MARGIN_X - 18,
+      y: signOffY - stampH + 22,
+      width: stampW,
+      height: stampH,
+      opacity: 0.92,
+    });
+  } else {
+    // Another tenant's letter must not carry Easyway's stamp or signatory.
+    page.drawLine({ start: { x: MARGIN_X, y }, end: { x: MARGIN_X + 200, y }, thickness: 0.8, color: HAIRLINE });
+    page.drawText("Admissions Office", { x: MARGIN_X, y: y - 16, size: 12, font: serifBold, color: INK });
+    page.drawText(schoolName, { x: MARGIN_X, y: y - 33, size: 12, font: serif, color: INK });
   }
-  y -= 12;
 
-  const closing = "This letter is issued at the student's request for whatever purpose it may serve, including visa, immigration, or employment verification.";
-  for (const line of wrapLines(closing, body, 11, maxWidth)) {
-    page.drawText(line, { x: MARGIN, y, size: 11, font: body, color: rgb(0.1, 0.1, 0.1) });
-    y -= 17;
-  }
-  y -= 50;
-
-  page.drawText("Yours faithfully,", { x: MARGIN, y, size: 11, font: body, color: rgb(0.1, 0.1, 0.1) });
-  y -= 40;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + 200, y }, thickness: 1, color: rgb(0.7, 0.7, 0.7) });
-  y -= 14;
-  page.drawText("Admissions Office", { x: MARGIN, y, size: 10, font: body, color: rgb(0.45, 0.45, 0.45) });
-  page.drawText(schoolName, { x: MARGIN, y: y - 14, size: 10, font: body, color: rgb(0.45, 0.45, 0.45) });
-
-  page.drawText(`Reference: ${input.referenceNo}`, { x: MARGIN, y: 40, size: 8, font: body, color: rgb(0.6, 0.6, 0.6) });
-  page.drawText("This letter can be verified by contacting the school directly.", {
-    x: MARGIN,
-    y: 28,
-    size: 8,
-    font: body,
-    color: rgb(0.6, 0.6, 0.6),
+  // ---- Footer ----------------------------------------------------------
+  page.drawText(`Reference: ${input.referenceNo}  ·  This letter can be verified by contacting the school directly.`, {
+    x: MARGIN_X,
+    y: 62,
+    size: 7.5,
+    font: sans,
+    color: MUTED,
   });
+  if (easyway) {
+    const contact = `${SCHOOL_CONTACT.email} | ${SCHOOL_CONTACT.phoneShort} | ${SCHOOL_CONTACT.addressShort}`;
+    const contactW = sansBold.widthOfTextAtSize(contact, 8.5);
+    page.drawLine({ start: { x: MARGIN_X, y: 50 }, end: { x: pageW - MARGIN_X, y: 50 }, thickness: 0.6, color: rgb(0.8, 0.8, 0.84) });
+    page.drawText(contact, { x: (pageW - contactW) / 2, y: 36, size: 8.5, font: sansBold, color: INK });
+  } else if (input.schoolAddress) {
+    const addrW = sans.widthOfTextAtSize(input.schoolAddress, 8.5);
+    page.drawText(input.schoolAddress, { x: (pageW - addrW) / 2, y: 36, size: 8.5, font: sans, color: INK });
+  }
 
   const bytes = await doc.save();
   return Buffer.from(bytes);

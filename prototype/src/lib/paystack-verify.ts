@@ -7,6 +7,7 @@ import { setTenantScope } from "@/lib/tenant/context";
 import { revealTutorAfterPayment } from "@/lib/tutor-reveal";
 import { guardedFetch } from "@/lib/guarded-fetch";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -193,7 +194,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     invoiceId = invoice.id;
   }
 
-  await prisma.payment.create({
+  const recordedPayment = await prisma.payment.create({
     data: {
       studentId,
       invoiceId,
@@ -220,6 +221,9 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
   });
   await revealTutorAfterPayment(studentId).catch(() => null);
+  // Same receipt email the webhook sends; keyed on the payment id, so whichever
+  // of the two records the charge first sends it and the other does nothing.
+  await sendPaymentReceiptEmail(recordedPayment.id);
   await notifyEnrolmentLetterIfSettled(studentId);
 }
 

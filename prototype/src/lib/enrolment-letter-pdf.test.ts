@@ -20,6 +20,20 @@ suite("buildEnrolmentLetterPdf", () => {
     expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
 
+  it("produces a PDF for another school without Easyway's stamp or signatory", async () => {
+    const pdf = await buildEnrolmentLetterPdf({
+      schoolName: "Sprachhaus Berlin",
+      schoolAddress: "Alexanderplatz 1, Berlin",
+      studentName: "Jonas Müller",
+      level: "B2",
+      pathway: "Language training",
+      enrolledAt: new Date("2026-02-01"),
+      tuitionSettled: true,
+      referenceNo: "REF-OTHER",
+    });
+    expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  });
+
   it("produces a non-empty PDF with tuition outstanding and no optional fields", async () => {
     const pdf = await buildEnrolmentLetterPdf({
       studentName: "Chidi Okafor",

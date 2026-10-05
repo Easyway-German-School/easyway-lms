@@ -3,6 +3,7 @@ import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { buildEnrolmentLetterPdf } from "@/lib/enrolment-letter-pdf";
 import { getStudentAccess } from "@/lib/student-access";
+import { hasPaidAnyTuition } from "@/lib/payment";
 
 /** The office generating a proof-of-enrolment letter on a student's behalf — the same document the student can pull themselves, for when the request comes in by phone or in person. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -24,9 +25,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       classesStartedAt: true,
       branch: { select: { name: true } },
       user: { select: { name: true, tenant: { select: { brandName: true } } } },
+      payments: { select: { amount: true, status: true, description: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
+
+  // Same rule as the student's own download: no letter until tuition has been
+  // paid in part or in full. A registration fee alone does not count.
+  if (!hasPaidAnyTuition(student.payments)) {
+    return NextResponse.json(
+      { error: "This student has not made a tuition payment yet, so no enrolment letter can be issued." },
+      { status: 403 },
+    );
+  }
 
   // Same ledger-aware computation the portal itself uses. This used to
   // compare lifetime totalPaid against the flat current-level fee — which
