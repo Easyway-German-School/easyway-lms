@@ -45,7 +45,7 @@ const IDLE: TypingFeedSnapshot = { enabled: true, rooms: [], byChannel: {} };
 const OFF: TypingFeedSnapshot = { enabled: false, rooms: [], byChannel: {} };
 
 /** How often to ask: quicker while the community screen itself is open. */
-const SLOW_MS = 5_000;
+const SLOW_MS = 8_000;
 const FAST_MS = 2_500;
 
 let snapshot: TypingFeedSnapshot = IDLE;

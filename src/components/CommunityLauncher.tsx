@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fetchJsonShared } from "@/lib/client/shared-fetch";
+import { startPolling } from "@/lib/client/poll";
 import Link from "next/link";
 import CommunityHub from "@/components/CommunityHub";
 import { TypingDots } from "@/components/typing/TypingUI";
@@ -42,28 +44,27 @@ export default function CommunityLauncher() {
   useEffect(() => {
     let cancelled = false;
 
-    const refresh = async () => {
+    const refresh = async (force = false) => {
       try {
-        // no-store: this same URL is polled over and over, and a memory-cache
-        // hit would freeze the badge on a stale number.
-        const res = await fetch("/api/community/unread", { cache: "no-store" });
-        const data = await res.json();
+        // Shared with the student shell: same endpoint, same number, one request.
+        const data = await fetchJsonShared<{ total?: number }>("/api/community/unread", { force });
         if (!cancelled) setUnread(Number(data.total) || 0);
       } catch {
         /* Offline or signed out — leave the last known count alone. */
       }
     };
 
-    refresh();
-    const timer = setInterval(refresh, 60_000);
-    window.addEventListener("focus", refresh);
-    window.addEventListener("easyway:unread-changed", refresh);
+    const onFocus = () => void refresh();
+    const onChanged = () => void refresh(true);
+    const stopPolling = startPolling(() => refresh(), { intervalMs: 60_000 });
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("easyway:unread-changed", onChanged);
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("easyway:unread-changed", refresh);
+      stopPolling();
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("easyway:unread-changed", onChanged);
     };
   }, []);
 
