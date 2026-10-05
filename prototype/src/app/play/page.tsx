@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import StudentShell from "@/components/StudentShell";
 import PlayerGame from "@/components/live-quiz/PlayerGame";
 import { AlertIcon, QuizIcon } from "@/components/icons";

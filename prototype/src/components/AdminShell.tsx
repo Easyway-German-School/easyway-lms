@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useSession } from 'next-auth/react';
+import { useConfirmedSession as useSession } from '@/lib/useConfirmedSession';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLiveCount } from '@/lib/useLiveCount';
 import { LiveDot, LivePill, LIVE_ICON_TILE } from '@/components/LiveNavBadge';

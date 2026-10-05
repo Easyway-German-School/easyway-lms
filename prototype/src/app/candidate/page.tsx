@@ -3,7 +3,8 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { signOut, useSession } from "next-auth/react";
+import { signOut } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import { useRouter } from "next/navigation";
 import BrandLogo from "@/components/BrandLogo";
 import MyExamsPanel from "@/components/MyExamsPanel";

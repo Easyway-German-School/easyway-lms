@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import StudentShell from "@/components/StudentShell";
 import { AlertIcon, ChainIcon, ChevronLeftIcon } from "@/components/icons";
 import { MAX_SENTENCE_CHARS } from "@/lib/satzkette";

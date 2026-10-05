@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
+import { useConfirmedSession as useSession } from '@/lib/useConfirmedSession';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";

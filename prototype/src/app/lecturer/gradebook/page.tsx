@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
 import { homePathForRole } from "@/lib/portal";
