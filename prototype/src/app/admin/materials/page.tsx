@@ -357,7 +357,7 @@ function ActivityTab() {
         {reconcileMessage ? <p className="text-sm text-[var(--muted)]">{reconcileMessage}</p> : null}
       </div>
 
-      {/* Existing backlog of short (under 40 min) group recordings from before
+      {/* Existing backlog of short (under 30 min) group recordings from before
           this got handled automatically on capture. Never for a private
           one-to-one. Preview first — an admin has to see the exact titles and
           give one typed yes before anything is permanently deleted. */}
@@ -369,7 +369,7 @@ function ActivityTab() {
           className="inline-flex items-center gap-2 rounded-2xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <TrashIcon className="h-4 w-4" />
-          {shortPurgeLoading ? "Checking…" : "Delete short recordings (under 40 min)"}
+          {shortPurgeLoading ? "Checking…" : "Delete short recordings (under 30 min)"}
         </button>
         {shortPurgeError ? <p className="text-sm text-rose-700">{shortPurgeError}</p> : null}
         {shortPurgeResult ? <p className="text-sm text-[var(--muted)]">{shortPurgeResult}</p> : null}
@@ -385,10 +385,10 @@ function ActivityTab() {
                 <h2 className="text-xl font-bold text-red-600">Permanently delete these recordings?</h2>
                 <p className="text-sm text-[var(--foreground-soft)]">
                   {shortPurgeVerdicts.length === 0 ? (
-                    "No group recordings under 40 minutes are on file right now."
+                    "No group recordings under 30 minutes are on file right now."
                   ) : (
                     <>
-                      <strong>{readyNow.length}</strong> group recording{readyNow.length === 1 ? "" : "s"} under 40
+                      <strong>{readyNow.length}</strong> group recording{readyNow.length === 1 ? "" : "s"} under 30
                       minutes {readyNow.length === 1 ? "is" : "are"} ready to go, gone from storage for good — this
                       cannot be undone.
                       {stillWaiting > 0 ? (

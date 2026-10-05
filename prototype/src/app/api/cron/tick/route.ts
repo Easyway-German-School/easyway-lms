@@ -205,7 +205,7 @@ async function handleGET(request: NextRequest) {
   });
 
   /**
-   * Actually deletes the short (under 40 min) group recordings that have sat
+   * Actually deletes the short (under 30 min) group recordings that have sat
    * past their grace window (RETENTION.shortRecordingGraceHours) — see
    * src/lib/retention.ts. Never touches one still inside that window, and
    * never a private one-to-one, whatever its length.
