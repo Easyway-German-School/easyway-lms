@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import LecturerShell from "@/components/LecturerShell";
 import LessonPackagePreview from "@/components/LessonPackagePreview";
 import ContentUploadArea from "@/components/ContentUploadArea";

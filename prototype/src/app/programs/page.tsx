@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 
 import TuitionCheckout from "@/components/TuitionCheckout";
 import NextLevelCheckout from "@/components/NextLevelCheckout";

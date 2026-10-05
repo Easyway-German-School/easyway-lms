@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import StudentShell from "@/components/StudentShell";
 import ComingSoonLock from "@/components/ComingSoonLock";
 import StoryTour from "@/components/StoryTour";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import AdminShell from "@/components/AdminShell";
 import LecturerShell from "@/components/LecturerShell";
 import StudentShell from "@/components/StudentShell";

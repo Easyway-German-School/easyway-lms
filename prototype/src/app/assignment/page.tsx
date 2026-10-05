@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, Suspense, useCallback } from "react";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import { useRouter, useSearchParams } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
 import AssignmentsPanel from "@/components/AssignmentsPanel";

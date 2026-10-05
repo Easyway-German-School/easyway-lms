@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, Suspense } from "react";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftIcon, CheckCircleIcon, CheckIcon } from "@/components/icons";
 

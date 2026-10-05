@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Mascot from "@/components/Mascot";
