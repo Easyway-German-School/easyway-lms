@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildEnrolmentLetterPdf } from "@/lib/enrolment-letter-pdf";
 import { getStudentAccess } from "@/lib/student-access";
+import { hasPaidAnyTuition } from "@/lib/payment";
 
 /**
  * A student's own downloadable proof-of-enrolment letter — for a visa
@@ -27,9 +28,19 @@ export async function GET() {
       classesStartedAt: true,
       branch: { select: { name: true } },
       user: { select: { name: true, tenant: { select: { brandName: true } } } },
+      payments: { select: { amount: true, status: true, description: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
+
+  // The letter says "enrolled", so it waits for the first tuition payment —
+  // full or part. A registration fee alone is an application, not enrolment.
+  if (!hasPaidAnyTuition(student.payments)) {
+    return NextResponse.json(
+      { error: "Your enrolment letter is available once you have made a tuition payment." },
+      { status: 403 },
+    );
+  }
 
   // Same ledger-aware computation the portal itself uses. This used to
   // compare lifetime totalPaid against the flat current-level fee — which

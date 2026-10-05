@@ -1,19 +1,23 @@
 import { prisma } from "@/lib/prisma";
-import { isReceivedPayment, isRegistrationFeePayment, tuitionFeeFor } from "@/lib/payment";
+import { hasPaidAnyTuition } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 import { sendEnrolmentLetterEmail } from "@/lib/enrolment-letter-email";
 
 /**
  * Fires the automatic proof-of-enrolment letter the moment — and only the
- * moment — a student's tuition for their level is fully settled.
+ * moment — a student makes their FIRST tuition payment, in full or in part.
  *
  * WHY THIS EXISTS. The letter used to go out as part of the registration
  * confirmation, right after the ₦5,000 registration fee — before a student
  * had paid a naira of actual tuition. A document that says "enrolled" landing
  * on the day someone pays an application fee is a promise the school has not
- * made yet, so it now waits for the one signal that means the promise is
- * true: `isTuitionPayment` total >= `tuitionFeeFor` this level/branch/pathway
- * — the exact same test the on-demand PDF route already uses to decide what
- * to write about the student's balance.
+ * made yet, so it waits for the signal that means the promise is true: money
+ * toward TUITION has been received (`hasPaidAnyTuition`). It used to wait for
+ * tuition to be paid IN FULL, which left part-payers — most of the Travel
+ * Package students — without the letter their visa appointment needs; the
+ * school's rule is "after they have paid tuition, whether full or part, never
+ * before". Whether the balance is cleared only changes the wording of the
+ * email and PDF, not whether they get one.
  *
  * Called from every place money can cross that line — the Paystack webhook,
  * the Paystack client-side verify, the Stripe webhook, and a hand-entered
@@ -50,19 +54,12 @@ export async function notifyEnrolmentLetterIfSettled(studentId: string): Promise
 
     if (!student || !student.user?.email || student.enrolmentLetterSentAt) return;
 
-    const totalPaid = student.payments
-      .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
-      .reduce((sum, p) => sum + p.amount, 0);
-    const tuitionSettled =
-      totalPaid >=
-      tuitionFeeFor({
-        level: student.level,
-        branch: student.branch?.name ?? null,
-        classType: student.classType,
-        pathway: student.pathway,
-      });
+    if (!hasPaidAnyTuition(student.payments)) return;
 
-    if (!tuitionSettled) return;
+    // Wording only. Same ledger-aware verdict the portal and the PDF routes
+    // use — a flat lifetime-total-vs-fee compare misreads promoted students.
+    const access = await getStudentAccess(student.id);
+    const tuitionSettled = (access?.outstandingBalance ?? Infinity) <= 0;
 
     // Atomic claim: only the caller that actually flips `null` -> a timestamp
     // sends the email. Everyone else (a duplicate webhook, a second call site
@@ -83,6 +80,7 @@ export async function notifyEnrolmentLetterIfSettled(studentId: string): Promise
       deliveryMode: student.deliveryMode,
       enrolledAt: student.classesStartedAt ?? student.createdAt,
       schoolName: student.user.tenant?.brandName ?? undefined,
+      tuitionSettled,
     });
   } catch (error) {
     console.error("notifyEnrolmentLetterIfSettled failed:", { studentId, error });

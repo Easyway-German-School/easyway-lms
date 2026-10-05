@@ -10,6 +10,7 @@ import {
   requiredDepositFor,
   travelPackagePrice,
   travelPackageMinFirstPayment,
+  hasPaidAnyTuition,
 } from "./payment";
 
 /**
@@ -331,5 +332,37 @@ suite("resolvePartialPaymentAmount — Travel Package's ₦200k-then-flexible sh
       alreadyPaid: 900_000,
     });
     expect(result).toEqual({ ok: true, amount: 80_000, settlesAccount: true });
+  });
+});
+
+suite("hasPaidAnyTuition — gate for the enrolment letter", () => {
+  it("is false for a student with no payments", () => {
+    expect(hasPaidAnyTuition([])).toBe(false);
+  });
+
+  it("is false when only the registration fee has been paid", () => {
+    expect(hasPaidAnyTuition([{ status: "completed", description: "Registration fee for Language training", amount: 5000 }])).toBe(false);
+  });
+
+  it("is false when the only tuition payment failed or is still pending", () => {
+    expect(hasPaidAnyTuition([{ status: "failed", description: "Tuition", amount: 150000 }])).toBe(false);
+    expect(hasPaidAnyTuition([{ status: "pending", description: "Tuition", amount: 150000 }])).toBe(false);
+  });
+
+  it("is true after a part payment toward tuition", () => {
+    expect(hasPaidAnyTuition([{ status: "partial", description: "Part payment for Travel Package", amount: 405000 }])).toBe(true);
+  });
+
+  it("is true after a full payment, even alongside the registration fee", () => {
+    expect(
+      hasPaidAnyTuition([
+        { status: "completed", description: "Registration fee", amount: 5000 },
+        { status: "completed", description: "Full payment for A1", amount: 150000 },
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores a zero-value row", () => {
+    expect(hasPaidAnyTuition([{ status: "completed", description: "Tuition", amount: 0 }])).toBe(false);
   });
 });

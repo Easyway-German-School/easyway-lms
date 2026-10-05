@@ -122,6 +122,16 @@ export function isTuitionPayment(payment: { status?: string | null; description?
 }
 
 /**
+ * Has this student paid ANY tuition — full or part? The test for handing out
+ * the proof-of-enrolment letter: a registration fee alone is an application,
+ * not an enrolment, so it does not count, but a single part-payment toward
+ * tuition does. Deliberately not a balance check.
+ */
+export function hasPaidAnyTuition(payments: Array<{ status?: string | null; description?: string | null; amount?: number | null }>): boolean {
+  return payments.some((payment) => isTuitionPayment(payment) && (payment.amount ?? 1) > 0);
+}
+
+/**
  * Tuition pricing.
  *
  * Two things decide a fee: the level and the BRANCH. Abuja charges more than

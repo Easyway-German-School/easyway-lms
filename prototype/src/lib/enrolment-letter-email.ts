@@ -3,10 +3,10 @@ import { EMAIL_BRAND, absoluteUrl, escapeHtml } from "@/lib/email-brand";
 import { MAIL_IDENTITIES } from "@/lib/mail-identity";
 
 /**
- * The proof-of-enrolment letter, emailed automatically the moment tuition for
- * a level clears in full — never at registration. See
- * `lib/enrolment-letter-trigger.ts` for the "has tuition just settled" check
- * that decides WHEN this fires, and `lib/enrolment-letter-pdf.ts` for the
+ * The proof-of-enrolment letter, emailed automatically on a student's first
+ * tuition payment (full or part) — never at registration. See
+ * `lib/enrolment-letter-trigger.ts` for the check that decides WHEN this
+ * fires, and `lib/enrolment-letter-pdf.ts` for the
  * downloadable A4 document it points at.
  *
  * DELIBERATELY NOT `emailShell` from email-brand.ts. Every other transactional
@@ -31,6 +31,8 @@ export type EnrolmentLetterNotice = {
   deliveryMode: string | null;
   enrolledAt: Date;
   schoolName?: string | null;
+  /** Fully paid, or a part-payment so far — only changes the wording. Defaults to part-paid, the safer claim. */
+  tuitionSettled?: boolean;
 };
 
 function absolute(link: string): string {
@@ -69,7 +71,7 @@ export function enrolmentLetterEmailHtml(input: EnrolmentLetterNotice): string {
 <title>Your Easyway enrolment letter</title></head>
 <body style="margin:0;padding:0;background:${CANVAS};">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-  Tuition is settled — your official enrolment letter is ready to view and print.
+  ${input.tuitionSettled ? "Tuition is settled" : "Your tuition payment is in"} — your official enrolment letter is ready to view and print.
 </div>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CANVAS};padding:24px 12px;">
@@ -91,7 +93,7 @@ export function enrolmentLetterEmailHtml(input: EnrolmentLetterNotice): string {
       <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:${MUTED};text-align:right;">${escapeHtml(issued)}</p>
       <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:${INK};">Dear ${escapeHtml(firstName)},</p>
       <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:${INK};">
-        Your tuition is now fully settled and your enrolment at ${escapeHtml(schoolName)} is confirmed. This
+        ${input.tuitionSettled ? "Your tuition is now fully settled and your" : "We have received your tuition payment and your"} enrolment at ${escapeHtml(schoolName)} is confirmed. This
         letter is your official record of that — keep it for a visa application, an embassy, an employer, or
         wherever proof of enrolment is asked for.
       </p>
@@ -109,7 +111,7 @@ export function enrolmentLetterEmailHtml(input: EnrolmentLetterNotice): string {
             ${factRow("Branch", input.branchName ?? "Not selected")}
             ${factRow("Attending", deliveryLabel(input.deliveryMode))}
             ${factRow("Enrolled since", enrolledSince)}
-            ${factRow("Tuition status", "Fully settled")}
+            ${factRow("Tuition status", input.tuitionSettled ? "Fully settled" : "Payment received")}
           </table>
         </td></tr>
       </table>
