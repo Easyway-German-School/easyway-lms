@@ -10,6 +10,7 @@ import {
   belongsToLecturer,
   isAssigned,
   readAssignment,
+  studentsInGroup,
   studentWhereForLecturer,
   teachingGroups,
 } from "@/lib/lecturer-assignment";
@@ -71,14 +72,6 @@ export async function GET() {
       where: { status: "active" },
       select: { id: true, name: true },
     });
-    const groups = teachingGroups(
-      assignment,
-      new Map(activeBranches.map((branch) => [branch.id, branch.name])),
-      // Rooms are per tutor (PR #149); without this, `isLive` below compares
-      // against a room name the session route never opens.
-      lecturer.id,
-    );
-
     /**
      * A tutor with no class described by the office still gets a usable card as
      * long as students were named onto them individually — the roster, register
@@ -93,6 +86,7 @@ export async function GET() {
             where: { ...(where as Record<string, unknown>), status: "active" } as never,
             select: {
               id: true,
+              branchId: true,
               level: true,
               sessionSlot: true,
               tutorId: true,
@@ -102,6 +96,17 @@ export async function GET() {
           })
         ).filter((student) => belongsToLecturer(assignment, lecturer.id, student))
       : [];
+
+    // One class per BATCH the tutor has students in, so "Go live" on the card
+    // names the batch ("A1 · Morning · October batch") and starts only that one.
+    const groups = teachingGroups(
+      assignment,
+      new Map(activeBranches.map((branch) => [branch.id, branch.name])),
+      // Rooms are per tutor (PR #149); without this, `isLive` below compares
+      // against a room name the session route never opens.
+      lecturer.id,
+      roster,
+    );
 
     if (!roster.length && !isAssigned(assignment)) {
       return NextResponse.json({
@@ -146,12 +151,8 @@ export async function GET() {
         batchRange: group.batchRange,
         // How many of this tutor's students sit in THIS group, so the card can
         // say "14 students" rather than the tutor's whole caseload.
-        studentCount: roster.filter(
-          (student) =>
-            String(student.level ?? "").toUpperCase() === group.level &&
-            (!group.sessionSlot ||
-              String(student.sessionSlot ?? "").toLowerCase() === group.sessionSlot),
-        ).length,
+        studentCount: studentsInGroup(group, roster).length,
+        batch: group.batch,
         state: states[index],
         note: sittingNote(states[index], group.sessionSlot),
         // Reopens the room already running rather than starting a second one.

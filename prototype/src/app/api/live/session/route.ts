@@ -13,6 +13,7 @@ import {
   liveSessionByCode,
   liveSessionForStudent,
   mayJoinPrivateRoom,
+  onlyBatchStudents,
   openLiveSession,
   ownOpenCohortRoom,
   recordAttendance,
@@ -230,8 +231,9 @@ export async function GET(request: Request) {
     /**
      * WHICH OF THE TUTOR'S CLASSES.
      *
-     * A tutor who runs more than one class — A1 morning and B1 evening, say —
-     * passes `?group=branchId:LEVEL:slot` to start the one they mean. Without
+     * A tutor who runs more than one class — A1 morning and B1 evening, say, or
+     * the September and the October batch of the same sitting — passes
+     * `?group=branchId:LEVEL:slot[:Batch]` to start the one they mean. Without
      * it, or for a student, or on a private booking, the room is the legacy
      * primary class exactly as before. A group in the query is a request, not
      * a grant: it is checked against the assignment the office actually gave
@@ -266,6 +268,11 @@ export async function GET(request: Request) {
     const level = chosenGroup?.level || lecturer?.level || student?.level || "A1";
     const sessionSlot = chosenGroup?.sessionSlot || lecturer?.sessionSlot || student?.sessionSlot || "morning";
 
+    // The batch this room is FOR — only a tutor starting one of their classes
+    // by `?group=` has one. September and October of the same sitting are two
+    // rooms, each reaching only its own students.
+    const batch = chosenGroup?.batch ?? null;
+
     let roomName = privateClassId
       ? privateRoomName(privateClassId)
       : chosenGroup
@@ -287,11 +294,12 @@ export async function GET(request: Request) {
           branchId: branch?.id ?? null,
           level,
           sessionSlot,
+          batch,
         })) ?? roomName;
     }
     let displayName = privateClassId
       ? codedSession?.title ?? "Private class"
-      : roomDisplayName({ branchName: branch?.name, level, sessionSlot });
+      : roomDisplayName({ branchName: branch?.name, level, sessionSlot, batch });
 
     /**
      * A STUDENT MAY NOT WALK INTO A ROOM NOBODY IS TEACHING IN.
@@ -321,6 +329,8 @@ export async function GET(request: Request) {
         // live class even when their cohort fields never lined up with it.
         tutorId: student.tutorId,
         coTutorIds: student.coTutors.map((link) => link.lecturerId),
+        // So a class pinned to another batch is not offered as theirs.
+        admission: student.admission,
       });
 
       if (!liveSession) {
@@ -372,6 +382,7 @@ export async function GET(request: Request) {
         branchId: branch?.id ?? null,
         level,
         sessionSlot,
+        batch,
         privateClassId: privateClassId ?? null,
         lecturerId: lecturer?.id ?? null,
         startedByUserId: session.user.id,
@@ -402,12 +413,15 @@ export async function GET(request: Request) {
             deletedAt: null,
             OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
           },
-          select: { id: true },
+          select: { id: true, admission: true },
         });
         // Only the ones who could actually answer it — a locked portal (unpaid
         // deposit, or no profile photo) gets no "your class is live" push, the
-        // same way it gets no popup. See lib/live-eligibility.ts.
-        const reachable = await studentsWhoCanEnterLiveClass(named.map((s) => s.id));
+        // same way it gets no popup. See lib/live-eligibility.ts. And only this
+        // batch's: a tutor starting October must not ring their September students.
+        const reachable = await studentsWhoCanEnterLiveClass(
+          onlyBatchStudents(opened, named).map((s) => s.id),
+        );
         announceLiveToNamedStudents(opened, reachable);
 
         // And the hybrid / online students of this branch and level who sit a

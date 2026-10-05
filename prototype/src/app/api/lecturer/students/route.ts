@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { accessFromStudent } from "@/lib/student-access";
+import { batchOfAdmission } from "@/lib/class-batch";
 import {
   belongsToLecturer,
   describeAssignment,
@@ -83,6 +84,7 @@ export async function GET() {
     ]);
 
     const branchNames = new Map(branches.map((branch) => [branch.id, branch.name]));
+    const branchModes = new Map(branches.map((branch) => [branch.id, branch.mode]));
 
     const rows = students
       // Batch lives inside the admission JSON, which cannot be filtered on in
@@ -120,7 +122,10 @@ export async function GET() {
           email: student.user.email,
           studentCode: student.studentCode,
           level: student.level,
+          branchId: student.branchId,
           branchName: student.branch?.name ?? null,
+          // So the roster can offer "Go live" on a class that has a video room.
+          branchMode: student.branchId ? branchModes.get(student.branchId) ?? null : null,
           sessionSlot: student.sessionSlot,
           classType: student.classType,
           deliveryMode: student.deliveryMode,
@@ -136,7 +141,11 @@ export async function GET() {
           phone: typeof admission.phone === "string" ? admission.phone : null,
           city: typeof admission.city === "string" ? admission.city : null,
           country: typeof admission.country === "string" ? admission.country : null,
-          batch: typeof admission.batch === "string" ? admission.batch : null,
+          // "September", whatever case it was typed in — the roster splits on
+          // this, and "september" / "September" must not become two classes.
+          batch:
+            batchOfAdmission(admission) ||
+            (typeof admission.batch === "string" && admission.batch.trim() ? admission.batch.trim() : null),
           photoUrl: typeof admission.photoUrl === "string" ? admission.photoUrl : null,
           paymentStatus: access.batchLocked
             ? "Awaiting intake"

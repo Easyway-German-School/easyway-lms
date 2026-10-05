@@ -2764,6 +2764,10 @@ model Space {
   branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
   level       String
   sessionSlot String   @default("morning")
+  /// The intake month ("September") — "" for the students with no batch. A room
+  /// is one batch of one sitting: September and October A1 morning overlap for
+  /// a month and must not share a chat. Never null so it can sit in the unique key.
+  batch       String   @default("")
   name        String
   description String?
   createdAt   DateTime @default(now())
@@ -2776,7 +2780,7 @@ model Space {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([branchId, level, sessionSlot])
+  @@unique([branchId, level, sessionSlot, batch])
   @@index([tenantId])
 }
 
@@ -3939,6 +3943,14 @@ model LiveClassSession {
   branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
   level       String?
   sessionSlot String?
+
+  /**
+   * The intake month this class is for ("September"), or null for a class that
+   * is not pinned to one (older rows, a private class). A cohort session with a
+   * batch reaches ONLY that batch's students — September and October A1 morning
+   * overlap for a month and are separate classes.
+   */
+  batch String?
 
   /**
    * Set on a one-to-one session, pointing back at the booking.

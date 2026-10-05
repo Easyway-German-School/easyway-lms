@@ -21,6 +21,7 @@
 
 import { cohortRoomName } from "@/lib/live-classroom";
 import { batchRangeLabel } from "@/lib/levels";
+import { batchOfAdmission, batchTitle, canonicalBatch, compareBatches } from "@/lib/class-batch";
 
 export const COURSE_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 
@@ -235,20 +236,36 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
 /**
  * Turn an assignment into the Prisma `where` that finds the community rooms it
  * covers. A `Space` only carries branch + level + session, so this is a
- * narrower cousin of `studentWhereForAssignment` — no classType/batch clauses,
+ * narrower cousin of `studentWhereForAssignment` — no classType clause,
  * because a room is not one of those things. Same "empty list = no
  * restriction, empty branch/level = unassigned" rule, for the same reason: a
  * tutor left with no sitting chosen still only teaches Lagos A1, all sittings.
+ *
+ * A room is one BATCH of one sitting, so a tutor the office pinned to the
+ * September batch sees September's room and not October's. A tutor with no
+ * batch pinned teaches every intake of the cohort and sees all of its rooms.
  */
 export function spaceWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
   if (!isAssigned(assignment)) return null;
 
   const where: Record<string, unknown> = assignment.groups.length
-    ? { OR: assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot })) }
+    ? {
+        OR: assignment.groups.map((group) => ({
+          branchId: group.branchId,
+          level: group.level,
+          sessionSlot: group.sessionSlot,
+          ...(canonicalBatch(group.batch) ? { batch: canonicalBatch(group.batch) } : {}),
+        })),
+      }
     : { branchId: { in: assignment.branchIds }, level: { in: assignment.levels } };
 
   if (!assignment.groups.length && assignment.sessionSlots.length) {
     where.sessionSlot = { in: assignment.sessionSlots };
+  }
+
+  if (!assignment.groups.length) {
+    const months = assignment.batches.map((batch) => canonicalBatch(batch)).filter(Boolean);
+    if (months.length) where.batch = { in: months };
   }
 
   return where;
@@ -636,7 +653,11 @@ export function describeAssignment(
  * the right cohort and nobody else.
  */
 export type TeachingGroup = {
-  /** `branchId:LEVEL:slot` — safe in a URL and a segmented-control value. */
+  /**
+   * `branchId:LEVEL:slot:Batch` — safe in a URL and a segmented-control value.
+   * The batch segment is left off for a group that is not tied to one intake
+   * (`branchId:LEVEL:slot`), which is also every key that was ever bookmarked.
+   */
   key: string;
   branchId: string;
   branchName: string;
@@ -644,15 +665,69 @@ export type TeachingGroup = {
   level: string;
   /** Lower-case sitting, or "" when the tutor takes every sitting of the level. */
   sessionSlot: string;
-  /** Intake month pinned to this group, or null for "every intake". */
+  /** The intake this class is — "September" — or null for a class not tied to one. */
   batch: string | null;
-  /** This tutor's live room for the cohort (the tutor is part of the name). */
+  /** This tutor's live room for the class (the batch and the tutor are part of the name). */
   roomName: string;
-  /** "B1 · Evening", or just "B1" for an all-sittings group. */
+  /**
+   * What the tutor reads on every screen that names a class: "A1 · Morning ·
+   * September batch", or "B1 · Evening" for a group not tied to one intake.
+   */
   label: string;
-  /** "September – October" — "" when the group has no pinned batch. */
+  /** "September – October" — "" when the group has no batch. */
   batchRange: string;
 };
+
+/** The columns of a student that decide which of a tutor's classes they sit in. */
+export type GroupRosterStudent = {
+  branchId?: string | null;
+  level?: string | null;
+  sessionSlot?: string | null;
+  admission?: unknown;
+};
+
+type GroupRow = { branchId: string; level: string; sessionSlot: string; batch: string | null };
+
+function buildTeachingGroup(
+  row: GroupRow,
+  branchNames: Map<string, string>,
+  lecturerId?: string | null,
+): TeachingGroup {
+  const batch = canonicalBatch(row.batch) || null;
+  const branchName = branchNames.get(row.branchId) ?? "Your branch";
+  const slotLabel = row.sessionSlot
+    ? row.sessionSlot.charAt(0).toUpperCase() + row.sessionSlot.slice(1)
+    : "";
+  const base = `${row.branchId}:${row.level}:${row.sessionSlot}`;
+  const label = [row.level, slotLabel, batch ? batchTitle(batch) : ""].filter(Boolean).join(" · ");
+
+  return {
+    key: batch ? `${base}:${batch}` : base,
+    branchId: row.branchId,
+    branchName,
+    level: row.level,
+    sessionSlot: row.sessionSlot,
+    batch,
+    roomName: cohortRoomName({
+      branchName,
+      level: row.level,
+      sessionSlot: row.sessionSlot || undefined,
+      batch,
+      lecturerId,
+    }),
+    label,
+    batchRange: batchRangeLabel(batch, row.sessionSlot),
+  };
+}
+
+/** Does this student sit in the cohort (branch + level + sitting) a group row describes? */
+function studentInGroupCohort(row: GroupRow, student: GroupRosterStudent): boolean {
+  return (
+    student.branchId === row.branchId &&
+    (student.level ?? "").toUpperCase() === row.level &&
+    (!row.sessionSlot || (student.sessionSlot ?? "").toLowerCase() === row.sessionSlot)
+  );
+}
 
 /**
  * Every distinct class this tutor runs.
@@ -674,10 +749,26 @@ export function teachingGroups(
    * pass it, or the room it shows will not be the room the session opens.
    */
   lecturerId?: string | null,
+  /**
+   * The tutor's students. THIS is what splits a class by batch.
+   *
+   * A tutor who takes "Lagos A1 morning, every intake" usually has September
+   * AND October students in it — two batches that overlap for a month and run
+   * on different timetables. Without the roster they were one card, one live
+   * room and one chat, and "go live" reached both. With it, every batch the
+   * tutor really has students in becomes its own class: its own label ("A1 ·
+   * Morning · October batch"), its own Go-live, its own room.
+   *
+   * Only groups NOT already pinned to a month are split — a pinned group is the
+   * office having said which batch it is. A cohort with no students, or whose
+   * students have no batch on record, stays as one class so a tutor can still
+   * open it.
+   */
+  roster?: GroupRosterStudent[] | null,
 ): TeachingGroup[] {
   if (!isAssigned(assignment)) return [];
 
-  const rows = assignment.groups.length
+  const baseRows: GroupRow[] = assignment.groups.length
     ? assignment.groups.map((group) => ({
         branchId: group.branchId,
         level: group.level.toUpperCase(),
@@ -686,61 +777,86 @@ export function teachingGroups(
       }))
     : assignment.branchIds.flatMap((branchId) =>
         assignment.levels.flatMap((level) =>
-          (assignment.sessionSlots.length ? assignment.sessionSlots : [""]).map((sessionSlot) => ({
-            branchId,
-            level: level.toUpperCase(),
-            sessionSlot: sessionSlot.toLowerCase(),
-            // A flat-list tutor's one standalone batch applies to every group.
-            batch: assignment.batches[0] ?? null,
-          })),
+          (assignment.sessionSlots.length ? assignment.sessionSlots : [""]).flatMap((sessionSlot): GroupRow[] => {
+            const row = {
+              branchId,
+              level: level.toUpperCase(),
+              sessionSlot: sessionSlot.toLowerCase(),
+            };
+            // A flat-list tutor restricted to intake months teaches each of them
+            // as its own class. (This used to keep only the first.)
+            return assignment.batches.length
+              ? assignment.batches.map((batch) => ({ ...row, batch }))
+              : [{ ...row, batch: null }];
+          }),
         ),
       );
+
+  // Split every group that is not pinned to a month by the batches it really has.
+  const rows = baseRows.flatMap((row): GroupRow[] => {
+    if (row.batch || !roster?.length) return [row];
+    const found = new Set<string>();
+    for (const student of roster) {
+      if (!studentInGroupCohort(row, student)) continue;
+      const batch = batchOfAdmission(student.admission);
+      if (batch) found.add(batch);
+    }
+    if (found.size === 0) return [row];
+    return [...found].sort((a, b) => compareBatches(a, b)).map((batch) => ({ ...row, batch }));
+  });
 
   const seen = new Set<string>();
   const out: TeachingGroup[] = [];
   for (const row of rows) {
-    const key = `${row.branchId}:${row.level}:${row.sessionSlot}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const branchName = branchNames.get(row.branchId) ?? "Your branch";
-    const slotLabel = row.sessionSlot
-      ? row.sessionSlot.charAt(0).toUpperCase() + row.sessionSlot.slice(1)
-      : "";
-
-    out.push({
-      key,
-      branchId: row.branchId,
-      branchName,
-      level: row.level,
-      sessionSlot: row.sessionSlot,
-      batch: row.batch,
-      roomName: cohortRoomName({
-        branchName,
-        level: row.level,
-        sessionSlot: row.sessionSlot || undefined,
-        lecturerId,
-      }),
-      label: slotLabel ? `${row.level} · ${slotLabel}` : row.level,
-      batchRange: batchRangeLabel(row.batch, row.sessionSlot),
-    });
+    const group = buildTeachingGroup(row, branchNames, lecturerId);
+    if (seen.has(group.key)) continue;
+    seen.add(group.key);
+    out.push(group);
   }
   return out;
 }
 
 /**
- * Split a `branchId:LEVEL:slot` key back into its parts. Returns null for
- * anything that is not exactly three non-empty-enough segments — a caller
- * handed a bad key should fall back to the tutor's primary class, not 500.
+ * The students of one class — same branch, level, sitting AND batch. The one
+ * definition every tutor screen counts a class's students with, so the card, the
+ * roster and the register can never disagree about who is in it.
+ *
+ * A class with no batch takes the whole cohort. A batch class takes only that
+ * batch's students: someone with no batch on record belongs to no batch class,
+ * and is shown separately as "not placed in a batch yet".
+ */
+export function studentsInGroup<T extends GroupRosterStudent>(
+  group: Pick<TeachingGroup, "branchId" | "level" | "sessionSlot" | "batch">,
+  students: T[],
+): T[] {
+  const want = canonicalBatch(group.batch);
+  return students.filter(
+    (student) =>
+      studentInGroupCohort(
+        { branchId: group.branchId, level: group.level.toUpperCase(), sessionSlot: group.sessionSlot.toLowerCase(), batch: null },
+        student,
+      ) &&
+      (!want || batchOfAdmission(student.admission) === want),
+  );
+}
+
+/**
+ * Split a `branchId:LEVEL:slot[:Batch]` key back into its parts. Returns null
+ * for anything that is not three or four segments, or whose fourth is not a
+ * month — a caller handed a bad key should fall back to the tutor's primary
+ * class, not 500. `batch` is "" when the key names no batch (every key that was
+ * bookmarked before classes split by batch).
  */
 export function parseGroupKey(
   key: string | null | undefined,
-): { branchId: string; level: string; sessionSlot: string } | null {
+): { branchId: string; level: string; sessionSlot: string; batch: string } | null {
   const parts = String(key ?? "").split(":");
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3 && parts.length !== 4) return null;
   const [branchId, level, sessionSlot] = parts;
   if (!branchId || !level) return null;
-  return { branchId, level: level.toUpperCase(), sessionSlot: sessionSlot.toLowerCase() };
+  const batch = parts.length === 4 ? canonicalBatch(parts[3]) : "";
+  if (parts.length === 4 && !batch) return null;
+  return { branchId, level: level.toUpperCase(), sessionSlot: sessionSlot.toLowerCase(), batch };
 }
 
 /**
@@ -748,13 +864,41 @@ export function parseGroupKey(
  * "go live with THIS class" — a key in a query string is a request, not a
  * grant, and a tutor must not be able to open a room for a cohort the office
  * never put them on.
+ *
+ * The batch is checked against the assignment too, without needing the roster:
+ * a group the office pinned to September can only be opened as September, while
+ * an every-intake group can be opened as any month (the tutor's classes list
+ * only offers the months they really have students in, and that is a
+ * convenience, not a gate — the room is theirs either way).
  */
 export function assignmentHasGroup(
   assignment: LecturerAssignment,
   branchNames: Map<string, string>,
-  target: { branchId: string; level: string; sessionSlot: string },
+  target: { branchId: string; level: string; sessionSlot: string; batch?: string | null },
   lecturerId?: string | null,
 ): TeachingGroup | null {
-  const want = `${target.branchId}:${target.level.toUpperCase()}:${target.sessionSlot.toLowerCase()}`;
-  return teachingGroups(assignment, branchNames, lecturerId).find((group) => group.key === want) ?? null;
+  const cohort = `${target.branchId}:${target.level.toUpperCase()}:${target.sessionSlot.toLowerCase()}`;
+  const candidates = teachingGroups(assignment, branchNames, lecturerId).filter(
+    (group) => `${group.branchId}:${group.level}:${group.sessionSlot}` === cohort,
+  );
+  if (candidates.length === 0) return null;
+
+  const wanted = canonicalBatch(target.batch);
+  if (!wanted) return candidates.find((group) => !group.batch) ?? candidates[0];
+
+  const pinned = candidates.find((group) => group.batch === wanted);
+  if (pinned) return pinned;
+
+  const everyIntake = candidates.find((group) => !group.batch);
+  if (!everyIntake) return null;
+  return buildTeachingGroup(
+    {
+      branchId: everyIntake.branchId,
+      level: everyIntake.level,
+      sessionSlot: everyIntake.sessionSlot,
+      batch: wanted,
+    },
+    branchNames,
+    lecturerId,
+  );
 }

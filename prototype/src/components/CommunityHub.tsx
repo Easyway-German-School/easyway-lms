@@ -84,6 +84,8 @@ type Space = {
   name: string;
   level: string;
   sessionSlot: string;
+  /** The intake month ("September"), "" for a room with no batch. */
+  batch?: string;
   description: string | null;
   branch: { id: string; name: string };
   channels: Channel[];
@@ -1336,6 +1338,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   {!isDmGroup ? (
                     <p className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
                       {space.level} · {SLOT_LABEL[space.sessionSlot] ?? space.sessionSlot}
+                      {space.batch ? ` · ${space.batch} batch` : ""}
                     </p>
                   ) : null}
                 </div>
@@ -1463,7 +1466,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   : activeSpace
                     ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
                         SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
-                      }`
+                      }${activeSpace.batch ? ` · ${activeSpace.batch} batch` : ""}`
                     : active?.description}
               </p>
             )}

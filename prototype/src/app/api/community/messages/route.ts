@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { authorizeChannel, canPostInChannel, isStaffRole } from "@/lib/community-spaces";
+import { authorizeChannel, canPostInChannel, isStaffRole, studentsInSpace } from "@/lib/community-spaces";
 import { activeMuteFor, muteMessage } from "@/lib/community-moderation";
 import { isStickerId, stickerById } from "@/lib/community-stickers";
 import { markChannelRead } from "@/lib/community-unread";
@@ -410,14 +410,10 @@ export async function POST(request: Request) {
     // A game only ever starts in a cohort room, so `channel.space` is always
     // set when `gameMatch` is — this guard is for TypeScript, not runtime.
     if (gameMatch && channel.space) {
+      // The room's own students — its batch, not every batch of the sitting.
+      const roomStudents = await studentsInSpace(channel.space);
       notify({
-        to: {
-          students: {
-            branchId: channel.space.branchId,
-            level: channel.space.level,
-            sessionSlot: channel.space.sessionSlot,
-          },
-        },
+        to: { studentIds: roomStudents.map((student) => student.id) },
         kind: KIND.gameInvite,
         severity: "info",
         title: "A game started",

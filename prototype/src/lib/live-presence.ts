@@ -4,6 +4,7 @@ import { cohortRoomName, roomDisplayName } from "@/lib/live-classroom";
 import { canAttendLive } from "@/lib/access";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
+import { batchOfAdmission, canonicalBatch, studentMayJoinBatch } from "@/lib/class-batch";
 
 /**
  * Whether a class is happening RIGHT NOW, and who has been told.
@@ -100,6 +101,8 @@ export type LiveSessionRow = {
   branchId: string | null;
   level: string | null;
   sessionSlot: string | null;
+  /** The intake this class is for ("September"), or null when it is not pinned to one. */
+  batch: string | null;
   privateClassId: string | null;
   startedAt: Date;
   lecturerName: string | null;
@@ -112,6 +115,8 @@ export type OpenLiveSessionInput = {
   branchId?: string | null;
   level?: string | null;
   sessionSlot?: string | null;
+  /** Which batch the tutor is teaching. Omit for a class that is not batch-specific. */
+  batch?: string | null;
   privateClassId?: string | null;
   lecturerId?: string | null;
   startedByUserId: string;
@@ -167,6 +172,7 @@ export async function openLiveSession(input: OpenLiveSessionInput): Promise<Live
       branchId: input.branchId ?? null,
       level: input.level ?? null,
       sessionSlot: input.sessionSlot ?? null,
+      batch: canonicalBatch(input.batch) || null,
       privateClassId: input.privateClassId ?? null,
       lecturerId: input.lecturerId ?? null,
       startedByUserId: input.startedByUserId,
@@ -193,6 +199,7 @@ function toRow(
     branchId: string | null;
     level: string | null;
     sessionSlot: string | null;
+    batch: string | null;
     privateClassId: string | null;
     startedAt: Date;
   },
@@ -207,6 +214,7 @@ function toRow(
     branchId: row.branchId,
     level: row.level,
     sessionSlot: row.sessionSlot,
+    batch: row.batch,
     privateClassId: row.privateClassId,
     startedAt: row.startedAt,
     lecturerName,
@@ -370,6 +378,13 @@ export async function liveSessionForStudent(student: {
   /** `Student.coTutors` lecturer ids — extra tutors on an online / hybrid
    *  student, each with the same claim on the room as the primary tutor. */
   coTutorIds?: string[] | null;
+  /**
+   * The student's admission JSON, where their batch lives. A class pinned to
+   * one batch is only theirs when it is their batch — the September and the
+   * October A1 morning groups are different classes. Omit it and every batch
+   * matches, which is what a caller that never selected it always got.
+   */
+  admission?: unknown;
 }): Promise<(LiveSessionRow & { invited: boolean; inviteStatus: string | null }) | null> {
   const now = new Date();
 
@@ -414,17 +429,28 @@ export async function liveSessionForStudent(student: {
     isOnlineBranch(student.branch ?? null);
   const mayJoinAnyCohortFlag = mayJoinAnyLiveCohort(student.deliveryMode);
 
-  const liveCohorts = await prisma.liveClassSession.findMany({
-    where: {
-      kind: "cohort",
-      branchId: student.branchId,
-      level: student.level,
-      ...(attendsOverVideo && mayJoinAnyCohortFlag ? {} : { sessionSlot: student.sessionSlot }),
-      ...liveWhere(now),
-    },
-    include: { lecturer: { select: { user: { select: { name: true } } } } },
-    orderBy: { startedAt: "desc" },
-  });
+  // THE BATCH IS PART OF THE CLASS. A room pinned to the October batch is not
+  // the September student's class even when branch, level and sitting all
+  // match — October starts while September is still mid-course, so for a month
+  // both are live at once. Batch lives in the admission JSON, so this runs in
+  // memory after the query. (A room with no batch, or a student with none on
+  // record, still matches — see `studentMayJoinBatch`.)
+  const fitsBatch = (room: { batch?: string | null }) =>
+    student.admission === undefined || studentMayJoinBatch(room.batch, student.admission);
+
+  const liveCohorts = (
+    await prisma.liveClassSession.findMany({
+      where: {
+        kind: "cohort",
+        branchId: student.branchId,
+        level: student.level,
+        ...(attendsOverVideo && mayJoinAnyCohortFlag ? {} : { sessionSlot: student.sessionSlot }),
+        ...liveWhere(now),
+      },
+      include: { lecturer: { select: { user: { select: { name: true } } } } },
+      orderBy: { startedAt: "desc" },
+    })
+  ).filter(fitsBatch);
 
   // When more than one is live at once — two tutors on the same cohort, or a
   // hybrid student's several sittings — the student's OWN tutor comes first,
@@ -451,11 +477,13 @@ export async function liveSessionForStudent(student: {
     (id): id is string => Boolean(id),
   );
   if (teacherIds.length) {
-    const tutorSessions = await prisma.liveClassSession.findMany({
-      where: { kind: "cohort", lecturerId: { in: teacherIds }, ...liveWhere(now) },
-      include: { lecturer: { select: { user: { select: { name: true } } } } },
-      orderBy: { startedAt: "desc" },
-    });
+    const tutorSessions = (
+      await prisma.liveClassSession.findMany({
+        where: { kind: "cohort", lecturerId: { in: teacherIds }, ...liveWhere(now) },
+        include: { lecturer: { select: { user: { select: { name: true } } } } },
+        orderBy: { startedAt: "desc" },
+      })
+    ).filter(fitsBatch);
     const pick =
       tutorSessions.find(
         (s) => (s.level ?? "").toUpperCase() === (student.level ?? "").toUpperCase(),
@@ -538,10 +566,11 @@ export function announceLiveSession(session: LiveSessionRow, opts: { studentIds?
   const link = `/live?code=${session.joinCode}`;
 
   notifyInBackground({
-    // Pinned to branch AND level AND sitting. A branch runs the same level
-    // morning, afternoon and evening as three separate classes; telling the
-    // evening students that the morning class has started is exactly how a
-    // school trains everyone to ignore the bell.
+    // Pinned to branch AND level AND sitting AND batch. A branch runs the same
+    // level morning, afternoon and evening as three separate classes; telling
+    // the evening students that the morning class has started is exactly how a
+    // school trains everyone to ignore the bell. The same goes for batches: the
+    // October class going live must not buzz the September students.
     to: opts.studentIds?.length
       ? { studentIds: opts.studentIds }
       : {
@@ -549,6 +578,7 @@ export function announceLiveSession(session: LiveSessionRow, opts: { studentIds?
             branchId: session.branchId,
             level: session.level,
             sessionSlot: session.sessionSlot,
+            batch: session.batch,
           },
         },
     kind: KIND.classStarting,
@@ -620,7 +650,7 @@ export function announceLiveToNamedStudents(session: LiveSessionRow, studentIds:
 export async function announceLiveToVideoStudents(session: LiveSessionRow): Promise<void> {
   if (session.kind !== "cohort" || !session.branchId || !session.level || !session.sessionSlot) return;
 
-  const candidates = await prisma.student.findMany({
+  const found = await prisma.student.findMany({
     where: {
       deletedAt: null,
       branchId: session.branchId,
@@ -636,12 +666,31 @@ export async function announceLiveToVideoStudents(session: LiveSessionRow): Prom
         { branch: { is: { mode: "online" } } },
       ],
     },
-    select: { id: true },
+    select: { id: true, admission: true },
   });
+  // Only this batch's students — the other batch's class is not theirs.
+  const candidates = onlyBatchStudents(session, found);
   if (!candidates.length) return;
 
   const reachable = await studentsWhoCanEnterLiveClass(candidates.map((s) => s.id));
   if (reachable.length) announceLiveToNamedStudents(session, reachable);
+}
+
+/**
+ * Keep only the students who belong to the session's batch. A session with no
+ * batch (a class that is not batch-specific) keeps everyone.
+ *
+ * Strict, unlike `studentMayJoinBatch`: this decides who gets BUZZED, and a
+ * student with no batch on record should not be rung for every batch's class.
+ * They can still walk in if they open the portal.
+ */
+export function onlyBatchStudents<T extends { admission?: unknown }>(
+  session: { batch?: string | null },
+  students: T[],
+): T[] {
+  const batch = canonicalBatch(session.batch);
+  if (!batch) return students;
+  return students.filter((student) => batchOfAdmission(student.admission) === batch);
 }
 
 /** Ring named students again. Separate key per round, so a second ring really rings. */
@@ -670,24 +719,39 @@ export function ringStudents(session: LiveSessionRow, studentIds: string[], roun
  * tutor's reload spinning up a second room while their students sit in the
  * first. Scoped to the tutor's own `lecturerId`, so it can never return
  * somebody else's class.
+ *
+ * With a `batch`, the tutor's room for THAT batch wins. A class that was opened
+ * before rooms carried a batch (batch null) is still adopted, so a lesson in
+ * progress when this shipped does not split in two — but a room pinned to a
+ * DIFFERENT batch is never returned: starting October must not drop the tutor
+ * into their September class.
  */
 export async function ownOpenCohortRoom(
   lecturerId: string,
-  cohort: { branchId?: string | null; level?: string | null; sessionSlot?: string | null },
+  cohort: {
+    branchId?: string | null;
+    level?: string | null;
+    sessionSlot?: string | null;
+    batch?: string | null;
+  },
 ): Promise<string | null> {
-  const open = await prisma.liveClassSession.findFirst({
+  const batch = canonicalBatch(cohort.batch);
+  const open = await prisma.liveClassSession.findMany({
     where: {
       kind: "cohort",
       lecturerId,
       branchId: cohort.branchId ?? null,
       level: cohort.level ?? null,
       sessionSlot: cohort.sessionSlot ?? null,
+      ...(batch ? { OR: [{ batch }, { batch: null }] } : {}),
       ...liveWhere(),
     },
     orderBy: { startedAt: "desc" },
-    select: { roomName: true },
+    select: { roomName: true, batch: true },
+    take: 5,
   });
-  return open?.roomName ?? null;
+  const own = batch ? open.find((row) => canonicalBatch(row.batch) === batch) : null;
+  return (own ?? open[0])?.roomName ?? null;
 }
 
 /**
@@ -699,6 +763,7 @@ export function cohortRoomFor(args: {
   level?: string | null;
   sessionSlot?: string | null;
   lecturerId?: string | null;
+  batch?: string | null;
 }): { roomName: string; title: string } {
   return {
     roomName: cohortRoomName(args),

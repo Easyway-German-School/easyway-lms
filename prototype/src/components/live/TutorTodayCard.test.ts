@@ -30,7 +30,7 @@ describe("TodayCardView", () => {
     expect(liveLinks(html)).toEqual(["/live?group=a1-morning"]);
     expect(html).toContain("Go live");
     expect(html).toContain("A1 · Morning");
-    expect(html).not.toContain("Not this one?");
+    expect(html).not.toContain("Your other classes");
   });
 
   it("several classes: the button opens the auto-picked class, the rest are one click away", () => {
@@ -40,9 +40,28 @@ describe("TodayCardView", () => {
         focusKey: "b1-evening",
       }),
     );
-    // Focus first (the big button), then the switcher pill for the other class.
+    // Focus first (the big button), then the other class as its own named row.
     expect(liveLinks(html)).toEqual(["/live?group=b1-evening", "/live?group=a1-morning"]);
-    expect(html).toContain("Not this one?");
+    expect(html).toContain("Your other classes");
+  });
+
+  it("two batches of the same sitting each get their own named Go live", () => {
+    const html = render(
+      today({
+        groups: [
+          group("b1:A1:morning:September", "A1 · Morning · September batch", "now", 14),
+          group("b1:A1:morning:October", "A1 · Morning · October batch", "now", 9),
+        ],
+        focusKey: "b1:A1:morning:September",
+      }),
+    );
+    expect(liveLinks(html)).toEqual([
+      "/live?group=b1%3AA1%3Amorning%3ASeptember",
+      "/live?group=b1%3AA1%3Amorning%3AOctober",
+    ]);
+    expect(html).toContain("A1 · Morning · September batch");
+    expect(html).toContain("A1 · Morning · October batch");
+    expect(html).toContain("9 students");
   });
 
   it("falls back to the first class when the server names no focus", () => {

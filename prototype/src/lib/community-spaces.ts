@@ -3,17 +3,26 @@ import { OFFERED_LEVELS } from "@/lib/levels";
 import { readAssignment, spaceWhereForAssignment } from "@/lib/lecturer-assignment";
 import { isSessionEnabled } from "@/lib/school-settings";
 import { readSessionSettings } from "@/lib/school-settings-server";
+import { batchOfAdmission, batchTitle, canonicalBatch, compareBatches, studentIsInBatch } from "@/lib/class-batch";
 
 /**
  * Who may read and write in which cohort's chat.
  *
- * A Space is scoped to one branch, one level AND one sitting. That last part is
- * the change that matters, and it is not a refinement — it is a correction.
- * Branch + level was never a class. Lagos runs A1 in the morning, the afternoon
- * and the evening as three separate cohorts, with three different tutors and
- * three sets of students who never meet each other. Putting them in one room
- * meant a morning student read questions about a lesson they had not sat, and
- * answers from a tutor who is not theirs.
+ * A Space is scoped to one branch, one level, one sitting AND one batch.
+ *
+ * The sitting is a correction, not a refinement. Branch + level was never a
+ * class. Lagos runs A1 in the morning, the afternoon and the evening as three
+ * separate cohorts, with three different tutors and three sets of students who
+ * never meet each other. Putting them in one room meant a morning student read
+ * questions about a lesson they had not sat, and answers from a tutor who is
+ * not theirs.
+ *
+ * The batch is the same correction, one level down. The September and the
+ * October A1 morning groups overlap for a month (October starts while September
+ * is mid-course), are two different sets of people, and used to share one room —
+ * so October students read September's questions, and a tutor's answer to one
+ * batch went to both. A student with no batch on record resolves to the
+ * batch-less room ("") until the office places them.
  *
  * So a student resolves to exactly one space: theirs. Not "theirs plus the
  * other sittings, filtered in the UI" — resolved here, once, and every
@@ -133,7 +142,83 @@ export type CohortKey = {
   branchName?: string | null;
   level: string;
   sessionSlot: string;
+  /** The intake month ("September"); empty / omitted = the students with no batch. */
+  batch?: string | null;
 };
+
+/** "Lagos · A1 · Morning · September batch" — the batch is left off a batch-less room. */
+export function spaceName(branchName: string, level: string, sessionSlot: string, batch: string): string {
+  const intake = batchTitle(batch);
+  return `${branchName} · ${level} · ${slotLabel(sessionSlot)}${intake ? ` · ${intake}` : ""}`;
+}
+
+/**
+ * Move a cohort's EXISTING chat onto its longest-running batch, the first time a
+ * batch room is asked for.
+ *
+ * Before rooms carried a batch, every student of a branch + level + sitting wrote
+ * into one room — that room holds the cohort's whole history. Starting every
+ * batch with an empty room would make the chat vanish for the students already
+ * in it, on the day this ships. So the batch-less room is adopted — renamed and
+ * pinned — by the OLDEST batch that has students in the cohort, the one that has
+ * been talking the longest. Later batches get fresh rooms.
+ *
+ * Two rules keep it from ever taking a room from people still in it:
+ *  - only the OLDEST batch adopts, whichever batch happens to ask first (a newer
+ *    batch asking first just gets a fresh room, and the oldest still adopts
+ *    afterwards);
+ *  - never while students with NO batch on record still sit in the cohort — they
+ *    are the ones the batch-less room belongs to until the office places them,
+ *    and handing it to one batch would strand the rest in an empty room.
+ *
+ * Returns the adopted room, or null when there was nothing to adopt.
+ */
+async function adoptLegacySpace(cohort: {
+  branchId: string;
+  level: string;
+  sessionSlot: string;
+  batch: string;
+  branchName: string;
+}) {
+  const legacy = await prisma.space.findUnique({
+    where: {
+      branchId_level_sessionSlot_batch: {
+        branchId: cohort.branchId,
+        level: cohort.level,
+        sessionSlot: cohort.sessionSlot,
+        batch: "",
+      },
+    },
+    select: { id: true },
+  });
+  if (!legacy) return null;
+
+  const students = await prisma.student.findMany({
+    where: {
+      branchId: cohort.branchId,
+      level: cohort.level,
+      sessionSlot: cohort.sessionSlot,
+      status: "active",
+    },
+    select: { admission: true },
+  });
+  const batches = students.map((s) => batchOfAdmission(s.admission));
+  if (batches.some((batch) => !batch)) return null;
+  const oldest = [...new Set(batches)].sort((a, b) => compareBatches(a, b))[0];
+  if (oldest !== cohort.batch) return null;
+
+  // `updateMany` pinned to the room still being batch-less: two students of the
+  // oldest batch arriving together both try this, and only one write lands.
+  await prisma.space.updateMany({
+    where: { id: legacy.id, batch: "" },
+    data: {
+      batch: cohort.batch,
+      name: spaceName(cohort.branchName, cohort.level, cohort.sessionSlot, cohort.batch),
+      description: `${slotLabel(cohort.sessionSlot)} ${cohort.level} class at ${cohort.branchName}, ${batchTitle(cohort.batch)}.`,
+    },
+  });
+  return prisma.space.findUnique({ where: { id: legacy.id } });
+}
 
 /**
  * Make sure this cohort has a room, and hand it back.
@@ -153,6 +238,7 @@ export type CohortKey = {
 export async function ensureSpaceForCohort(cohort: CohortKey) {
   const sessionSlot = normalizeSlot(cohort.sessionSlot);
   const level = cohort.level;
+  const batch = canonicalBatch(cohort.batch);
 
   // Never conjure a room for a level the school does not teach. Returning null
   // rather than throwing because the callers all treat "no room" as an empty
@@ -179,20 +265,37 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
     return null;
   }
 
-  const space = await prisma.space.upsert({
-    where: {
-      branchId_level_sessionSlot: { branchId: cohort.branchId, level, sessionSlot },
-    },
-    update: {},
-    create: {
-      branchId: cohort.branchId,
-      level,
-      sessionSlot,
-      name: `${branchName} · ${level} · ${slotLabel(sessionSlot)}`,
-      description: `${slotLabel(sessionSlot)} ${level} class at ${branchName}.`,
-      tenantId: branch?.tenantId ?? null,
-    },
-  });
+  // A batch's first visit: take over the cohort's existing chat if this is its
+  // longest-running batch, so the conversation does not vanish for the students
+  // already in it. Skipped (one cheap lookup) once the batch room exists.
+  const adopted =
+    batch &&
+    !(await prisma.space.findUnique({
+      where: {
+        branchId_level_sessionSlot_batch: { branchId: cohort.branchId, level, sessionSlot, batch },
+      },
+      select: { id: true },
+    }))
+      ? await adoptLegacySpace({ branchId: cohort.branchId, level, sessionSlot, batch, branchName })
+      : null;
+
+  const space =
+    adopted ??
+    (await prisma.space.upsert({
+      where: {
+        branchId_level_sessionSlot_batch: { branchId: cohort.branchId, level, sessionSlot, batch },
+      },
+      update: {},
+      create: {
+        branchId: cohort.branchId,
+        level,
+        sessionSlot,
+        batch,
+        name: spaceName(branchName, level, sessionSlot, batch),
+        description: `${slotLabel(sessionSlot)} ${level} class at ${branchName}${batch ? `, ${batchTitle(batch)}` : ""}.`,
+        tenantId: branch?.tenantId ?? null,
+      },
+    }));
 
   // Channels are upserted too, so a room created before a channel was added to
   // the default set gains it on the next visit instead of staying incomplete.
@@ -261,6 +364,10 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
         branchIds: true,
         levels: true,
         sessionSlots: true,
+        // The teaching groups and intake months — without these a tutor the
+        // office pinned to the September batch would also see October's room.
+        assignmentGroups: true,
+        batches: true,
       },
     });
 
@@ -291,6 +398,8 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
       classType: true,
       deliveryMode: true,
       hybridOnlineSlot: true,
+      // Their batch lives here, and decides which room is theirs.
+      admission: true,
       branch: { select: { name: true } },
     },
   });
@@ -319,14 +428,18 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
   }
 
   const sessionSlot = normalizeSlot(student.sessionSlot);
+  // One student, one room: THEIR batch's. September and October students of the
+  // same sitting sit in different rooms.
+  const batch = batchOfAdmission(student.admission);
 
-  // Creates the room if this is the first student of the sitting to arrive,
+  // Creates the room if this is the first student of the batch to arrive,
   // and returns null for a level the school no longer runs.
   const space = await ensureSpaceForCohort({
     branchId: student.branchId,
     branchName: student.branch?.name,
     level: student.level,
     sessionSlot,
+    batch,
   });
 
   const spaceIds = space ? [space.id] : [];
@@ -352,6 +465,7 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
         branchName: onlineBranch.name,
         level: student.level,
         sessionSlot: onlineSlot,
+        batch,
       });
       if (onlineSpace) spaceIds.push(onlineSpace.id);
     }
@@ -389,10 +503,38 @@ export async function listVisibleSpaces(viewer: Viewer) {
     },
     // Staff see every room in the school, so the order has to be the one a
     // person scanning a list expects: branch, then level, then time of day.
-    orderBy: [{ branchId: "asc" }, { level: "asc" }, { sessionSlot: "asc" }],
+    orderBy: [{ branchId: "asc" }, { level: "asc" }, { sessionSlot: "asc" }, { createdAt: "asc" }],
   });
 
   return { spaces, scope };
+}
+
+/**
+ * The students who are IN a room — same branch, level, sitting AND batch.
+ *
+ * Every "tell the room" fan-out (the chat push, a game invite, a pin notice, the
+ * wins feed, the Satzkette roster) used to find a room's people by branch + level
+ * + sitting, which now reaches the OTHER batch's students too: they cannot open
+ * a room that is not theirs, and a push to a room you cannot read is the worst
+ * kind. This is the one definition they all use. A batch-less room ("") holds
+ * exactly the students with no batch on record.
+ */
+export async function studentsInSpace(space: {
+  branchId: string;
+  level: string;
+  sessionSlot: string;
+  batch?: string | null;
+}) {
+  const rows = await prisma.student.findMany({
+    where: {
+      branchId: space.branchId,
+      level: space.level,
+      sessionSlot: space.sessionSlot,
+      status: "active",
+    },
+    select: { id: true, userId: true, admission: true },
+  });
+  return rows.filter((student) => studentIsInBatch(space.batch, student.admission));
 }
 
 /**

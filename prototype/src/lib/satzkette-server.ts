@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notify";
+import { studentsInSpace } from "@/lib/community-spaces";
 import {
   MATCH_ABANDONED_AFTER_MS,
   TURN_EXCLUSIVE_MS,
@@ -44,19 +45,13 @@ export async function rosterFor(
 
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
-    select: { branchId: true, level: true, sessionSlot: true },
+    select: { branchId: true, level: true, sessionSlot: true, batch: true },
   });
   if (!space) return [];
 
-  const students = await prisma.student.findMany({
-    where: {
-      branchId: space.branchId,
-      level: space.level,
-      sessionSlot: space.sessionSlot,
-      status: "active",
-    },
-    select: { userId: true },
-  });
+  // The room's own students — its batch, so a story in the October room never
+  // offers a turn to a September student who cannot open it.
+  const students = await studentsInSpace(space);
 
   const userIds = students.map((student) => student.userId).filter(Boolean) as string[];
   if (userIds.length === 0) return [];
