@@ -14,8 +14,10 @@ import CommunityHub from "@/components/CommunityHub";
 export default function CommunityPage() {
   return (
     <PortalShell>
-      <div className="px-6 py-8">
-        <div className="mb-6">
+      {/* On a phone the chat IS the page: no title block, no side padding, no card chrome
+          — WhatsApp does not put a heading above your messages. */}
+      <div className="px-0 py-0 sm:px-6 sm:py-8">
+        <div className="mb-6 hidden sm:block">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">
             Easyway social hub
           </p>

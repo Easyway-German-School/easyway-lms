@@ -1053,3 +1053,24 @@ html.theme-custom ::selection {
     bottom: calc(5.75rem + env(safe-area-inset-bottom));
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Phone chrome
+
+   `--bottom-chrome` is how much of the bottom of the screen the app's own
+   navigation takes (the youth look's tab bar), so a full-height screen like the
+   chat can size itself to what is actually left. Zero everywhere else.
+
+   The floating "Need help?" pill is hidden on phones while a chat is open: it
+   sat on top of the messages. Help is still one tap away from every other page.
+   --------------------------------------------------------------------------- */
+@media (max-width: 1023px) {
+  .look-youth {
+    --bottom-chrome: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 639px) {
+  body:has([data-community-open]) [data-hide-in-chat] {
+    display: none;
+  }
+}

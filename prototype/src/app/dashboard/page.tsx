@@ -619,7 +619,7 @@ function DashboardContent() {
    * over.
    */
   const eliteSurface = "border-[#D4AF37]/25 bg-[radial-gradient(circle_at_15%_0%,_#1c1917_0%,_#0b0a09_60%,_#000000_100%)]";
-  const cardClass = isPrivateStudent ? `relative overflow-hidden rounded-[32px] border p-8 ${eliteSurface}` : "cinematic-card rounded-[32px] p-8";
+  const cardClass = isPrivateStudent ? `relative overflow-hidden rounded-[28px] border p-5 sm:rounded-[32px] sm:p-8 ${eliteSurface}` : "cinematic-card rounded-[28px] p-5 sm:rounded-[32px] sm:p-8";
   const eyebrowClass = isPrivateStudent ? "text-[#E8C766]" : "text-[var(--muted)]";
   const headingClass = isPrivateStudent ? "text-white" : "text-[var(--foreground)]";
   const mutedClass = isPrivateStudent ? "text-white/50" : "text-[var(--muted)]";
@@ -805,7 +805,7 @@ function DashboardContent() {
               the app's scene layer already uses, just concentrated here where
               the student actually lands. */}
           <section
-            className={`relative overflow-hidden rounded-[36px] border p-8 ${
+            className={`relative overflow-hidden rounded-[28px] border p-5 sm:rounded-[36px] sm:p-8 ${
               isPrivateStudent
                 ? "border-[#D4AF37]/25 bg-[radial-gradient(circle_at_15%_0%,_#1c1917_0%,_#0b0a09_55%,_#000000_100%)] shadow-[0_30px_90px_-30px_rgba(212,175,55,0.35)]"
                 : "border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"
@@ -1067,7 +1067,7 @@ function DashboardContent() {
                       <Link
                         key={quest.id || quest.title}
                         href={href}
-                        className={`group flex w-full items-start gap-4 rounded-[28px] border p-5 text-left transition-all duration-200 ${
+                        className={`group flex w-full items-start gap-3 rounded-[22px] border p-4 text-left transition-all duration-200 sm:gap-4 sm:rounded-[28px] sm:p-5 ${
                           done
                             ? "border-[var(--success)]/25 bg-[var(--success-soft)]/40"
                             : isPrivateStudent
@@ -1096,13 +1096,13 @@ function DashboardContent() {
                             />
                           )}
                         </span>
-                        <div className="flex flex-1 items-start justify-between gap-4">
-                          <div>
+                        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                          <div className="min-w-0">
                             <p className={`font-semibold ${done ? `${mutedClass} line-through decoration-[var(--success)]/60` : headingClass}`}>{quest.title}</p>
                             <p className={`mt-2 text-sm ${mutedClass}`}>{quest.description}</p>
                           </div>
                           <span
-                            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                            className={`flex shrink-0 items-center gap-1.5 self-start rounded-full px-3.5 py-1.5 text-xs font-semibold sm:px-3 sm:py-1 ${
                               done ? 'bg-[var(--success-soft)] text-[var(--success)]' : isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : 'bg-[var(--accent-soft)] text-[var(--accent)]'
                             }`}
                           >
@@ -1240,7 +1240,7 @@ function DashboardContent() {
                   their branch/level/sitting is meaningless — they have no real
                   cohort. Group students only. */}
               {!isPrivateStudent && (
-                <div className="cinematic-card rounded-[32px] p-8">
+                <div className="cinematic-card rounded-[28px] p-5 sm:rounded-[32px] sm:p-8">
                   <Leaderboard />
                 </div>
               )}

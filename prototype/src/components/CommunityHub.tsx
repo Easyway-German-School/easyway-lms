@@ -1307,8 +1307,14 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
 
   return (
     <div
-      className={`flex overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] ${
-        compact ? "h-[30rem]" : "h-[calc(100vh-16rem)] min-h-[32rem]"
+      // Phones: edge to edge, as tall as the visible screen (`dvh`, not `vh` — on an
+      // iPhone `vh` includes the address bar, which pushed the message box below the fold),
+      // minus the header and, on the new look, the tab bar. From `sm` up it is the card it was.
+      data-community-open={compact ? undefined : ""}
+      className={`flex overflow-hidden bg-[var(--surface)] sm:rounded-2xl sm:border sm:border-[var(--border)] ${
+        compact
+          ? "h-[30rem] rounded-2xl border border-[var(--border)]"
+          : "h-[calc(100dvh-3.5rem-var(--bottom-chrome,0px))] border-y border-[var(--border)] sm:h-[calc(100vh-16rem)] sm:min-h-[32rem]"
       }`}
     >
       {/* ------------------------------------------------------- channel rail */}
