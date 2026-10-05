@@ -124,6 +124,13 @@ export type NotifyInput = {
   /** Also buzz their phone. Defaults on for warning and critical. */
   push?: boolean;
   /**
+   * What replaces what on the lock screen. Pushes sharing a tag collapse into
+   * one entry. Defaults to the kind, which is right for "your streak ends
+   * today" but wrong for "Ada challenged you" followed by "Bola challenged
+   * you" — those must not overwrite each other, so Campus gives each its own.
+   */
+  pushTag?: string;
+  /**
    * Also text it, as an SMS, to whichever recipients are students with a
    * phone number on file. Left undefined the admin settings decide (see
    * notification-routing.ts); pass a boolean to force the issue for one send.
@@ -386,7 +393,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
         title: input.title,
         body: input.message,
         url: input.link,
-        tag: kind,
+        tag: input.pushTag ?? kind,
       });
       pushed = result.sent;
     } catch (error) {

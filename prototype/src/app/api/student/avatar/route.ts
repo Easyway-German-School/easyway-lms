@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sanitizeAvatar } from "@/lib/avatar";
+import { awardCapped } from "@/lib/campus-server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,14 @@ export async function PUT(request: Request) {
   const avatar = sanitizeAvatar(body?.avatar);
   if (!avatar) return NextResponse.json({ error: "That is not an avatar" }, { status: 400 });
 
-  const student = await prisma.student.findUnique({ where: { userId: session.user.id as string }, select: { id: true } });
+  const student = await prisma.student.findUnique({ where: { userId: session.user.id as string }, select: { id: true, tenantId: true } });
   if (!student) return NextResponse.json({ error: "Not a student account" }, { status: 403 });
 
   await prisma.student.update({ where: { id: student.id }, data: { avatar } });
-  return NextResponse.json({ avatar });
+
+  // Making an avatar is the first thing Campus rewards, once per student ever.
+  // Best-effort: a hiccup in the coin ledger must never fail the save itself.
+  const coins = await awardCapped({ studentId: student.id, tenantId: student.tenantId, reason: "avatar" }).catch(() => ({ awarded: false, amount: 0 }));
+
+  return NextResponse.json({ avatar, coins: coins.amount });
 }
