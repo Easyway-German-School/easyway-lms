@@ -196,6 +196,19 @@ describe("live classes by batch", () => {
     expect((await liveSessionForStudent({ ...base, admission: { batch: "September" } }))?.roomName).toBe("room-old");
   });
 
+  it("a student with NO batch on record is never guessed into a batch when both batches are live", async () => {
+    // September and October are both on: which one is theirs? Unknown, so neither.
+    findManySessions.mockResolvedValueOnce(both());
+    expect(await liveSessionForStudent({ ...base, admission: {} })).toBeNull();
+  });
+
+  it("...but a class with no batch is still theirs, and so is a lone batch class", async () => {
+    findManySessions.mockResolvedValueOnce([...both(), batchRow("open", null, "2026-10-05T08:00:00Z")]);
+    expect((await liveSessionForStudent({ ...base, admission: {} }))?.roomName).toBe("room-open");
+    findManySessions.mockResolvedValueOnce([batchRow("oct", "October", "2026-10-05T09:05:00Z")]);
+    expect((await liveSessionForStudent({ ...base, admission: {} }))?.roomName).toBe("room-oct");
+  });
+
   it("a caller that never selected the admission blob gets the old behaviour, not a lockout", async () => {
     findManySessions.mockResolvedValueOnce(both());
     expect((await liveSessionForStudent(base))?.roomName).toBe("room-oct");

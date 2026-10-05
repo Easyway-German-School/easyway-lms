@@ -438,7 +438,19 @@ export async function liveSessionForStudent(student: {
   const fitsBatch = (room: { batch?: string | null }) =>
     student.admission === undefined || studentMayJoinBatch(room.batch, student.admission);
 
-  const liveCohorts = (
+  // A student with NO batch on record is let into a batch's class (that is our
+  // data gap, not a reason to lock them out) — but ONLY when there is no doubt
+  // which class is theirs. If two batches of their cohort are live at once, we
+  // cannot tell, and guessing is how a September student ends up in the October
+  // class. Then they get no batch-pinned class (a class with no batch is still
+  // theirs) and see "not live" until the office places them.
+  const unambiguous = <T extends { batch?: string | null }>(rooms: T[]): T[] => {
+    if (student.admission === undefined || batchOfAdmission(student.admission)) return rooms;
+    const pinned = new Set(rooms.map((room) => canonicalBatch(room.batch)).filter(Boolean));
+    return pinned.size > 1 ? rooms.filter((room) => !canonicalBatch(room.batch)) : rooms;
+  };
+
+  const liveCohorts = unambiguous(
     await prisma.liveClassSession.findMany({
       where: {
         kind: "cohort",
@@ -477,12 +489,12 @@ export async function liveSessionForStudent(student: {
     (id): id is string => Boolean(id),
   );
   if (teacherIds.length) {
-    const tutorSessions = (
+    const tutorSessions = unambiguous(
       await prisma.liveClassSession.findMany({
         where: { kind: "cohort", lecturerId: { in: teacherIds }, ...liveWhere(now) },
         include: { lecturer: { select: { user: { select: { name: true } } } } },
         orderBy: { startedAt: "desc" },
-      })
+      }),
     ).filter(fitsBatch);
     const pick =
       tutorSessions.find(
