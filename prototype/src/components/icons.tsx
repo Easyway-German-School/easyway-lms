@@ -1063,3 +1063,12 @@ export const ShuffleIcon = icon("ShuffleIcon", (
     <path d="M4 4l5 5" />
   </>
 ));
+
+/** A coin — Campus rewards. */
+export const CoinIcon = icon("CoinIcon", (
+  <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M14.8 9.2A3.6 3.6 0 0 0 12 8c-1.7 0-3 1.3-3 4s1.3 4 3 4a3.6 3.6 0 0 0 2.8-1.2" />
+    <path d="M7 11h5M7 13h5" />
+  </>
+));

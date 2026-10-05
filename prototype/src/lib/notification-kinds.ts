@@ -111,6 +111,18 @@ export const KIND = {
   assignmentsAvailable: "assignments.available",
   /** A tutor has office-uploaded materials matching their class sitting in the shelf, waiting to be pushed to their students. Becca nudges weekly. See src/lib/material-send-nudge.ts. */
   materialsWaitingToSend: "materials.waiting_to_send",
+  /**
+   * Campus — somebody waved at you, challenged you to a Wortduell, took your
+   * challenge, or a duel you were waiting on finished. PHONE-FIRST on purpose:
+   * these are about right now, which is the one thing email is slowest at, so
+   * they are not in EMAILS_BY_DEFAULT (mail-identity.ts) and notify callers
+   * pass `email: false` so a settings change can never turn them into mail.
+   * Rules for when they may buzz a phone live in lib/campus-notify-policy.ts.
+   */
+  campusWave: "campus.wave",
+  campusChallenge: "campus.challenge",
+  campusAccepted: "campus.accepted",
+  campusDuelResult: "campus.duel_result",
   general: "general",
 } as const;
 
