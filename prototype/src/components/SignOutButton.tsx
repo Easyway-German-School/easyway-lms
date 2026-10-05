@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { signOut, useSession } from "next-auth/react";
 import { ExitIcon } from "@/components/icons";
+import { markIntentionalSignOut } from "@/lib/useConfirmedSession";
 
 /**
  * The way out of a portal. Sits in the sidebar footer of all three shells.
@@ -88,6 +89,8 @@ export default function SignOutButton({
     if (leaving) return;
     setLeaving(true);
     clearPersonalState();
+    // So the session check does not file this as an unexpected logout.
+    markIntentionalSignOut();
     signOut({ callbackUrl });
   };
 

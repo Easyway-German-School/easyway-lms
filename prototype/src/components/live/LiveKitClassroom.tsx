@@ -1087,23 +1087,55 @@ export default function LiveKitClassroom({
   useEffect(() => {
     if (role !== "student") return;
     let cancelled = false;
+    let timer: number | undefined;
+    let failures = 0;
 
+    /**
+     * Every student in every live class runs this, so its cost is multiplied by
+     * the whole school. Three things keep that multiplication polite:
+     *   - a hidden tab does not ask at all (it asks the moment it is shown);
+     *   - the interval is jittered, so forty students who joined together do not
+     *     all knock in the same second;
+     *   - a failing endpoint is asked LESS often, never more — retrying harder
+     *     into a server that is struggling is how a slow minute becomes an outage.
+     */
     async function poll() {
+      if (document.hidden) return;
       try {
         const res = await fetch("/api/live-quiz/join", { cache: "no-store" });
-        if (cancelled || !res.ok) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          failures += 1;
+          return;
+        }
+        failures = 0;
         const data = await res.json().catch(() => ({}) as { game?: typeof quizGame });
         setQuizGame(data.game ?? null);
       } catch {
         // A missed poll just means the banner waits for the next one.
+        failures += 1;
       }
     }
 
-    poll();
-    const timer = window.setInterval(poll, 6_000);
+    function schedule() {
+      const base = Math.min(8_000 * 2 ** Math.min(failures, 2), 32_000);
+      timer = window.setTimeout(async () => {
+        await poll();
+        if (!cancelled) schedule();
+      }, base + Math.random() * 2_000);
+    }
+
+    const onVisible = () => {
+      if (!document.hidden) void poll();
+    };
+
+    void poll();
+    schedule();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [role]);
 

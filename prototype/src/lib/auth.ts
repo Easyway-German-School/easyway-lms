@@ -7,6 +7,28 @@ import { lecturerCanSignIn } from "@/lib/lecturer-status";
 import { checkRateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
 import { setTenantScope, beginRequestScope, runWithTenant, runUnscoped } from "@/lib/tenant/context";
 import { NextResponse } from "next/server";
+import { createTtlCache } from "@/lib/ttl-cache";
+
+/**
+ * The session callbacks below ask the database three things that almost never
+ * change, on every `getServerSession` and every `/api/auth/session` — which in
+ * a live class is every poll from every student, a dozen at once per page load.
+ * The token's own "checked at" stamps were meant to bound that to once per five
+ * minutes, but a request that cannot write the cookie back (a server component,
+ * a parallel burst from one browser) never sees the updated stamp, so the
+ * question was re-asked each time.
+ *
+ * These caches bound it for real: one database read per user per window per
+ * warm instance, and concurrent callers share the read in flight. Failures are
+ * never cached, so the fail-open handling around each call is unchanged.
+ *
+ * The windows are the slack added to each revocation. Reset and delete were
+ * already allowed to lag by five minutes; one more minute does not change what
+ * the check is for. An admin lock is the sharper one, so its window is short.
+ */
+const resetCheckCache = createTtlCache<Date | null>({ ttlMs: 60_000 });
+const existsCheckCache = createTtlCache<{ id: string } | null>({ ttlMs: 60_000 });
+const adminLockCheckCache = createTtlCache<{ adminLockedAt: Date | null } | null>({ ttlMs: 15_000 });
 
 /**
  * Run one query with whatever scope we have.
@@ -283,7 +305,9 @@ export const authOptions: AuthOptions = {
       if (token.id && Date.now() - lastChecked > CHECK_EVERY_MS) {
         try {
           const { lastPasswordResetAt } = await import("@/lib/password-reset");
-          const resetAt = await lastPasswordResetAt(token.id as string);
+          const resetAt = await resetCheckCache.run(token.id as string, () =>
+            lastPasswordResetAt(token.id as string),
+          );
           const issuedAt = Number(token.issuedAt ?? 0);
 
           if (resetAt && issuedAt && resetAt.getTime() > issuedAt) {
@@ -318,10 +342,12 @@ export const authOptions: AuthOptions = {
       const userCheckedAt = Number(token.userCheckedAt ?? 0);
       if (token.id && Date.now() - userCheckedAt > CHECK_EVERY_MS) {
         try {
-          const stillHere = await prisma.user.findUnique({
-            where: { id: token.id as string },
-            select: { id: true },
-          });
+          const stillHere = await existsCheckCache.run(token.id as string, () =>
+            prisma.user.findUnique({
+              where: { id: token.id as string },
+              select: { id: true },
+            }),
+          );
           // findUnique on a soft-delete model returns null once the row carries
           // a deletedAt — see src/lib/prisma-guard.ts. No row, no session.
           if (!stillHere) token.revoked = true;
@@ -333,10 +359,12 @@ export const authOptions: AuthOptions = {
 
       if (token.id && normalizeRole(token.role) === "admin") {
         try {
-          const admin = await prisma.user.findUnique({
-            where: { id: token.id as string },
-            select: { adminLockedAt: true },
-          });
+          const admin = await adminLockCheckCache.run(token.id as string, () =>
+            prisma.user.findUnique({
+              where: { id: token.id as string },
+              select: { adminLockedAt: true },
+            }),
+          );
           token.adminLocked = Boolean(admin?.adminLockedAt);
         } catch {
           // Keep the last known state during a transient database failure.

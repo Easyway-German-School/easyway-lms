@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useSession } from 'next-auth/react';
+import { useConfirmedSession as useSession } from '@/lib/useConfirmedSession';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import { AttendanceIcon, BookOpenIcon, GradebookIcon } from '@/components/icons';

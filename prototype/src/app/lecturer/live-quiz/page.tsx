@@ -10,7 +10,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import LecturerShell from "@/components/LecturerShell";
 import HostGame from "@/components/live-quiz/HostGame";
 import GameReport from "@/components/live-quiz/GameReport";
