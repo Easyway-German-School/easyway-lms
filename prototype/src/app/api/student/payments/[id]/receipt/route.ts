@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildReceiptPdf } from "@/lib/receipt-pdf";
-import { isReceivedPayment, isRegistrationFeePayment, tuitionFeeFor } from "@/lib/payment";
+import { balanceAfterPayment, isReceivedPayment, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * A student's own downloadable receipt for one payment.
@@ -38,19 +38,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Only received payments have a receipt" }, { status: 400 });
   }
 
-  // A running balance is meaningless for the registration fee (it never
-  // counts toward tuition) — omit it there rather than show a confusing
-  // figure that does not move.
-  let balanceAfter: number | null = null;
-  if (!isRegistrationFeePayment(payment.description)) {
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-    const tuitionFee = tuitionFeeFor(feeLookup);
-    const paidByThen = student.payments
-      .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
-      .filter((p) => p.createdAt <= payment.createdAt)
-      .reduce((sum, p) => sum + p.amount, 0);
-    balanceAfter = Math.max(0, tuitionFee - paidByThen);
-  }
+  // Null for the registration fee (it never counts toward tuition) — omitted
+  // there rather than show a figure that does not move.
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
+  const balanceAfter = balanceAfterPayment(student.payments, payment, tuitionFeeFor(feeLookup));
 
   const pdf = await buildReceiptPdf({
     receiptNo: payment.id.slice(-10).toUpperCase(),

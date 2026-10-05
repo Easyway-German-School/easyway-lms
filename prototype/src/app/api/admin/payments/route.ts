@@ -12,6 +12,7 @@ import {
 } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -145,6 +146,11 @@ export async function POST(request: Request) {
       }
     }
 
+    // A transfer or cash payment entered at the desk is a real payment the
+    // student is waiting to hear about, so they get the same designed receipt
+    // a gateway payment does. `sendReceipt: false` is the opt-out for the rare
+    // back-dated entry that should not email anyone.
+    if (body.sendReceipt !== false) await sendPaymentReceiptEmail(payment.id);
     await notifyEnrolmentLetterIfSettled(studentId);
 
     return NextResponse.json({ payment, warning, notice }, { status: 201 });

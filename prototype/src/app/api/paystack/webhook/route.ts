@@ -7,6 +7,7 @@ import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped, setTenantScope } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
@@ -455,13 +456,10 @@ async function handlePOST(request: Request) {
       },
     });
 
-    if (student.user?.email) {
-      await sendEmail({
-        to: student.user.email,
-        subject: effectivePaymentType === "deposit" ? "Your deposit payment was received" : "Your Easyway payment was received",
-        html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
-      });
-    }
+    // The designed receipt replaces the bare "Hello … Thank you" confirmation:
+    // amount, date, receipt number and running balance, inline. Idempotent per
+    // payment and unable to throw — see payment-receipt-email.ts.
+    await sendPaymentReceiptEmail(payment.id);
 
     // The rows above are email records — channel "email", which the bell
     // deliberately excludes. The student also needs to see this in the portal,

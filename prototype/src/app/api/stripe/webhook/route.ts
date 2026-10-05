@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { withUnscoped } from "@/lib/tenant/context";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
 
@@ -88,7 +89,7 @@ async function handlePOST(request: NextRequest) {
           },
         });
 
-        await prisma.payment.create({
+        const recordedPayment = await prisma.payment.create({
           data: {
             studentId,
             invoiceId: invoice.id,
@@ -137,7 +138,7 @@ async function handlePOST(request: NextRequest) {
           }
         }
 
-        const confirmation = await prisma.notification.create({
+        await prisma.notification.create({
           data: {
             studentId,
             title: paymentType === "deposit" ? "Part-payment received" : "Payment received",
@@ -147,18 +148,9 @@ async function handlePOST(request: NextRequest) {
           },
         });
 
-        const student = await prisma.student.findUnique({
-          where: { id: studentId },
-          include: { user: true },
-        });
-
-        if (student?.user?.email) {
-          await sendEmail({
-            to: student.user.email,
-            subject: paymentType === "deposit" ? "Your deposit payment was received" : "Your Easyway payment was received",
-            html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
-          });
-        }
+        // Designed receipt instead of the bare confirmation line — see
+        // lib/payment-receipt-email.ts. Idempotent and unable to throw.
+        await sendPaymentReceiptEmail(recordedPayment.id);
 
         await notifyEnrolmentLetterIfSettled(studentId);
       }

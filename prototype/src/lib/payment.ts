@@ -132,6 +132,25 @@ export function hasPaidAnyTuition(payments: Array<{ status?: string | null; desc
 }
 
 /**
+ * Running tuition balance right after one payment — what the receipt (PDF and
+ * email) prints as "balance remaining". Null for a registration fee, which
+ * never counts toward tuition: a balance that does not move would only
+ * confuse. One function so the emailed receipt and the downloaded PDF can
+ * never disagree about the figure.
+ */
+export function balanceAfterPayment(
+  payments: Array<{ status?: string | null; description?: string | null; amount: number; createdAt: Date }>,
+  payment: { description?: string | null; createdAt: Date },
+  tuitionFee: number,
+): number | null {
+  if (isRegistrationFeePayment(payment.description)) return null;
+  const paidByThen = payments
+    .filter((p) => isTuitionPayment(p) && p.createdAt <= payment.createdAt)
+    .reduce((sum, p) => sum + p.amount, 0);
+  return Math.max(0, tuitionFee - paidByThen);
+}
+
+/**
  * Tuition pricing.
  *
  * Two things decide a fee: the level and the BRANCH. Abuja charges more than
