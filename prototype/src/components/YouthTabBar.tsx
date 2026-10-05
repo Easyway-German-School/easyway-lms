@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import Avatar from "@/components/Avatar";
-import { BookOpenIcon, BroadcastIcon, CommunityIcon, HomeIcon } from "@/components/icons";
+import { BookOpenIcon, BroadcastIcon, CommunityIcon, HomeIcon, MapIcon } from "@/components/icons";
 import type { AvatarConfig } from "@/lib/avatar";
 
 /**
@@ -48,11 +48,14 @@ const under = (path: string, bases: string[]) => bases.some((b) => path === b ||
 
 export default function YouthTabBar({
   unreadChats,
+  campusIncoming = 0,
   liveNow,
   avatar,
   name,
 }: {
   unreadChats: number;
+  /** Waves and challenges waiting on Campus. */
+  campusIncoming?: number;
   liveNow: boolean;
   avatar: AvatarConfig | null;
   name: string | null;
@@ -61,6 +64,7 @@ export default function YouthTabBar({
 
   const tabs: Tab[] = [
     { href: "/dashboard", label: "Home", match: (p) => under(p, HOME_PATHS), icon: <HomeIcon className="h-6 w-6" /> },
+    { href: "/campus", label: "Campus", match: (p) => under(p, ["/campus"]), icon: <MapIcon className="h-6 w-6" /> },
     { href: "/community", label: "Chats", match: (p) => under(p, ["/community"]), icon: <CommunityIcon className="h-6 w-6" /> },
     { href: "/learn", label: "Learn", match: (p) => under(p, LEARN_PATHS), icon: <BookOpenIcon className="h-6 w-6" /> },
   ];
@@ -88,6 +92,11 @@ export default function YouthTabBar({
               {unreadChats > 99 ? "99+" : unreadChats}
             </span>
           )}
+          {tab.href === "/campus" && campusIncoming > 0 && !active && (
+            <span className="absolute right-2 top-0 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white ring-2 ring-[var(--surface)]">
+              {campusIncoming > 9 ? "9+" : campusIncoming}
+            </span>
+          )}
         </span>
         <span className={active ? "text-[var(--foreground)]" : "text-[var(--muted)]"}>{tab.label}</span>
       </Link>
@@ -102,6 +111,7 @@ export default function YouthTabBar({
       <div className="mx-auto flex max-w-xl items-end px-2">
         {renderTab(tabs[0])}
         {renderTab(tabs[1])}
+        {renderTab(tabs[2])}
 
         {liveNow && (
           <Link
@@ -117,7 +127,7 @@ export default function YouthTabBar({
           </Link>
         )}
 
-        {renderTab(tabs[2])}
+        {renderTab(tabs[3])}
 
         <Link
           href="/profile"

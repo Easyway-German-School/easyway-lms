@@ -566,6 +566,14 @@ model Student {
    */
   lookPromptedAt DateTime?
 
+  /**
+   * Campus coins, denormalised from CoinTransaction so showing a balance never
+   * means summing a ledger. Only ever changed by `awardCoins` in
+   * src/lib/campus-server.ts, in the same transaction that writes the ledger
+   * row — the ledger is the truth, this is its cached total.
+   */
+  coinBalance    Int @default(0)
+
   // Graduation tracking
   graduationDate DateTime?
 
@@ -6245,4 +6253,112 @@ model AccessSnapshot {
 
   @@index([open, changedAt])
   @@index([tenantId])
+}
+
+
+/**
+ * CAMPUS — the student-facing "who is here" world. See src/lib/campus.ts for
+ * what it is, why it is room-based rather than free-roaming, and the rules.
+ *
+ * ONE ROW PER STUDENT, upserted by a heartbeat. "Online" is not a stored fact,
+ * it is `lastSeenAt` within the last couple of minutes — so there is nothing to
+ * clean up when a phone is simply put in a pocket. `band` is the age band the
+ * student is kept in (minor | adult | unknown) and is the safety boundary: every
+ * read and every request is scoped to one band, enforced on the server.
+ * `hidden` is "appear offline".
+ */
+model CampusPresence {
+  userId     String   @id
+  tenantId   String?
+  /// minor | adult | unknown — see bandOf() in src/lib/campus.ts. Recomputed from the birth date, never trusted from the client.
+  band       String
+  /// library | arena | cafe | exam | lobby — where on the campus they are.
+  room       String   @default("lobby")
+  hidden     Boolean  @default(false)
+  /// False for a student whose portal is locked (unpaid): they are never shown.
+  eligible   Boolean  @default(true)
+  lastSeenAt DateTime @default(now())
+  /// When band/eligible were last worked out, so a heartbeat does not redo it every time.
+  checkedAt  DateTime @default(now())
+
+  @@index([tenantId, band, lastSeenAt])
+}
+
+/**
+ * A wave, or a challenge — from one student to another, or to anyone in the
+ * same band ("open"). Short-lived by design: it expires in minutes, because a
+ * request nobody answered in an hour is just clutter.
+ */
+model CampusRequest {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  band       String
+  /// wave | duel
+  kind       String
+  fromUserId String
+  /// Null = an open call that any online student in the band may take.
+  toUserId   String?
+  /// open | accepted | declined | cancelled | expired
+  status     String   @default("open")
+  expiresAt  DateTime
+  /// Set when a duel request is accepted.
+  duelId     String?
+  createdAt  DateTime @default(now())
+
+  @@index([toUserId, status, expiresAt])
+  @@index([tenantId, band, kind, status, expiresAt])
+  @@index([fromUserId, createdAt])
+}
+
+/**
+ * Wortduell — a two-player der/die/das race. Both players get the SAME frozen
+ * question list (stored here, so it cannot drift), answer on their own phones,
+ * and the server scores each answer as it arrives. Nothing here needs a live
+ * connection: the only polling is one screen waiting for the other player.
+ */
+model CampusDuel {
+  id         String    @id @default(cuid())
+  tenantId   String?
+  band       String
+  /// A1 | A2 | B1 | B2 — the lower of the two players' levels.
+  level      String
+  playerAId  String
+  playerBId  String
+  /// The frozen question list: [{ noun, gloss, article }]. Articles are never sent to a client before it answers.
+  questions  Json
+  /// Per player: [{ i, choice, correct, ms, points }]
+  answersA   Json?
+  answersB   Json?
+  /// active | done | expired
+  status     String    @default("active")
+  /// The winner's userId, or null for a draw / not finished.
+  winnerId   String?
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([playerAId, createdAt])
+  @@index([playerBId, createdAt])
+  @@index([tenantId, status, createdAt])
+}
+
+/**
+ * The coin ledger. Append-only, and IDEMPOTENT: `refKey` is unique per student,
+ * so awarding the same thing twice (a retried request, a double tap, a refresh)
+ * is a no-op rather than a duplicate payout. That one constraint is what makes
+ * coins safe to hand out from many places.
+ */
+model CoinTransaction {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  studentId String
+  amount    Int
+  /// daily | avatar | duel_play | duel_win | focus | wave — see COIN_RULES in src/lib/campus.ts.
+  reason    String
+  /// e.g. "daily:2026-10-06". Unique per student.
+  refKey    String
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, refKey])
+  @@index([studentId, createdAt])
+  @@index([tenantId, createdAt])
 }

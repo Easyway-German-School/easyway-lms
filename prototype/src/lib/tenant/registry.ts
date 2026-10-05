@@ -116,6 +116,15 @@ export const TENANT_OWNED_MODELS = [
   "LearnerUsageEvent",
   "LearnerBehaviourProfile",
   /**
+   * Campus: who is online, who asked whom to play, duel results and the coin ledger.
+   * Every one of these names a student, and presence in particular is a live "who is
+   * where right now" feed — one school's students only ever see their own school's.
+   */
+  "CampusPresence",
+  "CampusRequest",
+  "CampusDuel",
+  "CoinTransaction",
+  /**
    * The live quiz game. A game carries a PIN that admits somebody to it, a
    * frozen copy of one school's question paper, and a leaderboard of one
    * school's students by name. All three are the same category of leak as a

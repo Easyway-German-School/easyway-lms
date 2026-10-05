@@ -47,6 +47,7 @@ import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
 import { LiveDot, LivePill, LIVE_ICON_TILE } from "@/components/LiveNavBadge";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import { useLook } from "@/lib/useLook";
+import { useCampusBeat } from "@/lib/useCampus";
 import YouthTabBar from "@/components/YouthTabBar";
 import { homePathForRole } from "@/lib/portal";
 import {
@@ -177,6 +178,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const { look, avatar, name: lookName } = useLook();
   const youth = look === "youth";
   const inClassroom = pathname?.startsWith("/live") ?? false;
+  // Campus presence: a tiny heartbeat every ~90s while the app is visible, so the
+  // student shows as online and the Campus tab can badge a wave or a challenge.
+  // Only for the new look, only when the portal is open to them, never in the
+  // classroom, and not on a Campus screen (those send their own, fuller one).
+  const onCampus = pathname?.startsWith("/campus") ?? false;
 
   /**
    * The account was deleted (or the whole roster reset) while this person was
@@ -226,6 +232,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   // showing a sliver of itself off the side of the screen.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { access, hasAccess } = useStudentAccess();
+  const campus = useCampusBeat(youth && hasAccess && access !== null && !inClassroom && !onCampus && !accountRevoked);
 
   /**
    * Unread class-group chat, on the sidebar's Community entry — the same number
@@ -667,7 +674,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* The phone's bottom bar — the new look's navigation. Not inside the
           live classroom, which is full-screen and has its own controls. */}
       {youth && !inClassroom && !accountRevoked && (
-        <YouthTabBar unreadChats={unreadCommunity} liveNow={Boolean(live)} avatar={avatar} name={lookName} />
+        <YouthTabBar unreadChats={unreadCommunity} campusIncoming={campus.incoming} liveNow={Boolean(live)} avatar={avatar} name={lookName} />
       )}
 
       {/*

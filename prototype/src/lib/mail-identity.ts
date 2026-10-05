@@ -214,6 +214,10 @@ export const KIND_LABELS: Record<string, string> = {
   [KIND.studentAtRisk]: "A tutor's student may be going quiet",
   [KIND.profilePhotoMissing]: "Reminder to add a profile photo",
   [KIND.profileBranchMissing]: "Reminder to set your branch",
+  [KIND.campusWave]: "Someone waves at you on Campus",
+  [KIND.campusChallenge]: "Someone challenges you to a Wortduell",
+  [KIND.campusAccepted]: "Someone takes your challenge",
+  [KIND.campusDuelResult]: "A duel you were waiting on finishes",
   [KIND.general]: "General",
 };
 
@@ -236,6 +240,12 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
       KIND.examPretest,
       KIND.levelAdvance,
     ],
+  },
+  {
+    // Phone-first and never emailed — see KIND.campusWave. A student who finds
+    // these too chatty can switch the lot off here without touching anything that matters.
+    group: "Campus",
+    kinds: [KIND.campusWave, KIND.campusChallenge, KIND.campusAccepted, KIND.campusDuelResult],
   },
   {
     group: "Office",
