@@ -8,6 +8,7 @@ import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 import { canDownloadOffline } from "@/lib/delivery";
 import { notExpiredForStudents } from "@/lib/retention";
+import { studentSeesBatch } from "@/lib/class-batch";
 
 export const dynamic = "force-dynamic";
 
@@ -73,13 +74,24 @@ export async function GET() {
     // deliberately carries NO level (see class-recorder.ts) — it was booked
     // for them specifically via the `privateClasses` relation.
     const now = new Date();
-    const records = await prisma.material.findMany({
+    const candidates = await prisma.material.findMany({
       where: {
         kind: { in: ["video", "recording"] },
-        OR: [
-          { level: student.level },
-          { course: { level: student.level } },
-          { privateClasses: { some: { studentId: student.id } } },
+        AND: [
+          {
+            OR: [
+              { level: student.level },
+              { course: { level: student.level } },
+              { privateClasses: { some: { studentId: student.id } } },
+            ],
+          },
+          // Office targeting NARROWS, same as the Materials page: an upload may
+          // name one branch and/or one sitting (null = every one), and may be
+          // kept staff-only. This shelf ignored all of that, so a video the
+          // office had NOT released to students still showed up here.
+          { OR: [{ branchId: null }, { branchId: student.branchId }] },
+          { OR: [{ sessionSlot: null }, { sessionSlot: student.sessionSlot }] },
+          { visibleToStudents: true },
         ],
         // The 2-week student window (staff keep it forever — see retention.ts).
         ...notExpiredForStudents(now),
@@ -91,6 +103,11 @@ export async function GET() {
       },
       orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
     });
+
+    // THE BATCH: a class recording or a video aimed at the October batch is not
+    // on the September batch's shelf. (Batch lives in the admission JSON, so it
+    // is applied here, after the query. A private recording has no batch.)
+    const records = candidates.filter((record) => studentSeesBatch(record.batch, student.admission));
 
     const progressRows = await prisma.videoProgress.findMany({
       where: { studentId: student.id, materialId: { in: records.map((record) => record.id) } },

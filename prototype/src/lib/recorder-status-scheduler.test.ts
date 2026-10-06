@@ -44,7 +44,7 @@ describe("the scheduler and the office's controls, in the status", () => {
   });
 
   it("paused: a visible warning that says who and why", () => {
-    const control = { version: 1 as const, updatedAt: now.toISOString(), updatedBy: "Mary", paused: true, pauseNote: "checking the bill", skipDates: [], boost: null, spareClasses: null, maxServers: null };
+    const control = { version: 1 as const, updatedAt: now.toISOString(), updatedBy: "Mary", paused: true, pauseNote: "checking the bill", skipDates: [], boost: null, spareClasses: null, maxServers: null, stopAllAt: null };
     const s = buildRecorderStatus({ ...ok, beats: { primary: beat(60), standby: null }, control });
     expect(s.health).toBe("warning");
     expect(s.warnings.join(" ")).toMatch(/PAUSED \(by Mary\): checking the bill/);

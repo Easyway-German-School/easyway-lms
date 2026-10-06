@@ -105,3 +105,34 @@ describe("rooms carry the batch", () => {
     expect(roomDisplayName(cohort)).toBe("Lagos · A1 · Morning");
   });
 });
+
+describe("batch from a live room's name", () => {
+  it("reads the batch a room was opened for, and nothing for a room without one", async () => {
+    const { batchOfRoomName } = await import("./class-batch");
+    expect(batchOfRoomName("ew-lagos-a1-morning-b-september-t-cmtutora")).toBe("September");
+    expect(batchOfRoomName("ew-lagos-a1-morning-b-october")).toBe("October");
+    expect(batchOfRoomName("ew-lagos-a1-morning-t-cmtutora")).toBe("");
+    expect(batchOfRoomName("ew-lagos-a1-morning")).toBe("");
+    expect(batchOfRoomName("ew-private-abc")).toBe("");
+    expect(batchOfRoomName(null)).toBe("");
+  });
+
+  it("round-trips with cohortRoomName", async () => {
+    const { batchOfRoomName } = await import("./class-batch");
+    for (const batch of ["January", "September", "October", "December"]) {
+      expect(batchOfRoomName(cohortRoomName({ branchName: "Port Harcourt", level: "B1", sessionSlot: "evening", batch, lecturerId: "cmx1" }))).toBe(batch);
+    }
+  });
+});
+
+describe("what a student may see of batch-targeted content", () => {
+  it("something with no batch is for everyone; one batch is for that batch only", async () => {
+    const { studentSeesBatch } = await import("./class-batch");
+    expect(studentSeesBatch(null, { batch: "September" })).toBe(true);
+    expect(studentSeesBatch("", {})).toBe(true);
+    expect(studentSeesBatch("October", { batch: "october" })).toBe(true);
+    expect(studentSeesBatch("October", { batch: "September" })).toBe(false);
+    // A student with no batch on record is never guessed into a batch's content.
+    expect(studentSeesBatch("October", {})).toBe(false);
+  });
+});

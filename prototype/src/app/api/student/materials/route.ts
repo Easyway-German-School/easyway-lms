@@ -6,6 +6,7 @@ import { getStudentAccess } from "@/lib/student-access";
 import { toPlayableUrl } from "@/lib/video-library";
 import { notExpiredForStudents } from "@/lib/retention";
 import { driveDownloadUrl, DRIVE_LINK_FILE_TYPE } from "@/lib/drive-import";
+import { studentSeesBatch } from "@/lib/class-batch";
 
 export async function GET() {
   try {
@@ -105,13 +106,9 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    const studentBatch =
-      student.admission && typeof student.admission === "object"
-        ? String((student.admission as Record<string, unknown>).batch ?? "").toLowerCase()
-        : "";
-    const visible = records.filter(
-      (material) => !material.batch || material.batch.toLowerCase() === studentBatch,
-    );
+    // Same rule as the Watch shelf (lib/class-batch.ts): something aimed at one
+    // batch is for that batch's students only.
+    const visible = records.filter((material) => studentSeesBatch(material.batch, student.admission));
 
     /**
      * The client reads `fileUrl`; the column is `filePath`. Expose both so the

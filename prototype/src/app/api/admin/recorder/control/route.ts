@@ -6,9 +6,10 @@ import { applyControlRequest, readControl, writeControl } from "@/lib/recorder-c
 export const dynamic = "force-dynamic";
 
 /**
- * Steer the recorder fleet: pause, days off, start room for a class now.
- * Writes a small file the scheduler reads every five minutes (so a change takes effect within about five minutes).
- * There is deliberately no way here to delete a server: that could lose a recording that is in progress.
+ * Steer the recorder fleet: pause, power off, days off, start room for a class now.
+ * Writes a small file the scheduler reads every minute (so a change takes effect within about a minute).
+ * Pause switches off every server that is not recording; power off (`stopAllNow`) is the one deliberate way to cut a
+ * recording in progress. See lib/recorder-control.ts.
  */
 export async function POST(request: Request) {
   const gate = await requireCapability("materials");

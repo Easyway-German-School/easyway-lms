@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveLecturerId } from "@/lib/lecturer";
 import { KIND, notify } from "@/lib/notify";
 import { belongsToLecturer, readAssignment, studentWhereForLecturer } from "@/lib/lecturer-assignment";
+import { studentSeesBatch } from "@/lib/class-batch";
 import {
   MATERIAL_AUDIENCE_SELECT,
   cohortMatchesAssignment,
@@ -82,6 +83,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .filter((row) => !materialLevel || row.level.toUpperCase() === materialLevel.toUpperCase())
     .filter((row) => !material.branchId || row.branchId === material.branchId)
     .filter((row) => !material.sessionSlot || row.sessionSlot === material.sessionSlot)
+    // A material aimed at one batch goes to that batch only. Without this a
+    // tutor re-sending October's handout "to my class" buzzed September too.
+    .filter((row) => studentSeesBatch(material.batch, row.admission))
     .map((row) => row.id);
 
   if (!studentIds.length) {

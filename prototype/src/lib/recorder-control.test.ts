@@ -13,6 +13,28 @@ describe("changing the controls", () => {
     expect(resumed).toMatchObject({ ok: true, control: { paused: false, pauseNote: "" } });
   });
 
+  it("POWER OFF pauses and stamps the moment it was pressed; Resume clears it so it can never be re-read", () => {
+    const off = apply(NO_CONTROL, { stopAllNow: true });
+    expect(off).toMatchObject({ ok: true, control: { paused: true, stopAllAt: NOW.toISOString(), pauseNote: "Powered off by Mary", updatedBy: "Mary" } });
+    if (!off.ok) throw new Error();
+    const resumed = apply(off.control, { paused: false });
+    expect(resumed).toMatchObject({ ok: true, control: { paused: false, stopAllAt: null, pauseNote: "" } });
+  });
+
+  it("power off keeps the reason the office typed", () => {
+    const off = apply(NO_CONTROL, { stopAllNow: true, pauseNote: "  billing check  " });
+    expect(off).toMatchObject({ ok: true, control: { pauseNote: "billing check" } });
+  });
+
+  it("only an explicit true powers off; anything else is refused and changes nothing", () => {
+    for (const bad of [false, "yes", 1, null]) expect(apply(NO_CONTROL, { stopAllNow: bad }).ok).toBe(false);
+  });
+
+  it("a plain pause never sets the power-off stamp (it must not delete a recording)", () => {
+    const paused = apply(NO_CONTROL, { paused: true, pauseNote: "x" });
+    expect(paused).toMatchObject({ ok: true, control: { paused: true, stopAllAt: null } });
+  });
+
   it("days off: add (sorted, no duplicates) and remove", () => {
     let c = NO_CONTROL;
     for (const d of ["2026-12-25", "2026-12-24", "2026-12-25"]) {
@@ -68,7 +90,7 @@ describe("reading what is stored", () => {
     // EduPrime-Recorder/test/fleet-control.test.ts asserts the scheduler reads this exact text the same way.
     const shared = '{"version":1,"updatedAt":"2026-10-05T08:45:00.000Z","updatedBy":"Mary","paused":true,"pauseNote":"checking the bill","skipDates":["2026-12-24","2026-12-25"],"boost":{"classes":2,"until":"2026-10-05T11:45:00.000Z"},"spareClasses":null,"maxServers":4}';
     const c = parseStoredControl(JSON.parse(shared));
-    expect(c).toEqual({ version: 1, updatedAt: "2026-10-05T08:45:00.000Z", updatedBy: "Mary", paused: true, pauseNote: "checking the bill", skipDates: ["2026-12-24", "2026-12-25"], boost: { classes: 2, until: "2026-10-05T11:45:00.000Z" }, spareClasses: null, maxServers: 4 });
+    expect(c).toEqual({ version: 1, updatedAt: "2026-10-05T08:45:00.000Z", updatedBy: "Mary", paused: true, pauseNote: "checking the bill", skipDates: ["2026-12-24", "2026-12-25"], boost: { classes: 2, until: "2026-10-05T11:45:00.000Z" }, spareClasses: null, maxServers: 4, stopAllAt: null });
   });
 });
 

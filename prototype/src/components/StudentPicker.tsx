@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { compareBatches } from "@/lib/class-batch";
 
 /**
  * Who gets this assignment.
@@ -18,6 +19,8 @@ type Student = {
   name: string;
   studentCode: string | null;
   sessionSlot: string;
+  /** The intake month ("September"), or "" when none is on record. */
+  batch?: string;
   branchName: string | null;
 };
 
@@ -80,6 +83,16 @@ export default function StudentPicker({
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
 
+  // THE BATCHES IN THIS LIST. September and October of one level are two classes:
+  // one tap selects (or clears) a whole batch instead of ticking names one by one.
+  const batches = [...new Set(students.map((s) => s.batch || "").filter(Boolean))].sort((a, b) => compareBatches(a, b));
+  const batchIds = (name: string) => students.filter((s) => s.batch === name).map((s) => s.id);
+  const batchFullySelected = (name: string) => batchIds(name).every((id) => selected.includes(id));
+  const toggleBatch = (name: string) => {
+    const ids = batchIds(name);
+    onChange(batchFullySelected(name) ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])]);
+  };
+
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -107,6 +120,22 @@ export default function StudentPicker({
         </p>
       ) : (
         <>
+          {batches.length > 1 && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-[var(--foreground-soft)]">Pick a whole batch:</span>
+              {batches.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => toggleBatch(name)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${batchFullySelected(name) ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]"}`}
+                >
+                  {name} batch · {batchIds(name).length}
+                </button>
+              ))}
+            </div>
+          )}
+
           {students.length > 8 && (
             <input
               value={query}
@@ -130,7 +159,7 @@ export default function StudentPicker({
                 />
                 <span className="flex-1 truncate">{student.name}</span>
                 <span className="shrink-0 text-[11px] text-[var(--muted)]">
-                  {student.studentCode ?? student.sessionSlot}
+                  {student.batch ? `${student.batch} · ` : ""}{student.studentCode ?? student.sessionSlot}
                 </span>
               </label>
             ))}

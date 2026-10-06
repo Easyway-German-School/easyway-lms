@@ -24,6 +24,17 @@ interface Material {
   aiState: string;
   mine: boolean;
   fromOffice: boolean;
+  /** The batch this is for ("September"), or null = every batch. */
+  batch?: string | null;
+}
+
+/** One of the tutor's own classes, one per batch they teach. */
+interface TeachingClass {
+  key: string;
+  label: string;
+  level: string;
+  batch: string | null;
+  branchName: string;
 }
 
 export default function LecturerMaterials() {
@@ -37,6 +48,11 @@ export default function LecturerMaterials() {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sendResults, setSendResults] = useState<Record<string, string>>({});
   const [assignedLevel, setAssignedLevel] = useState<string | null>(null);
+  // Who an upload is FOR. September and October of one sitting are two classes,
+  // so a tutor picks one (or "all my classes") instead of every upload reaching
+  // the whole level. A tutor with a single class has it chosen for them.
+  const [classes, setClasses] = useState<TeachingClass[]>([]);
+  const [classKey, setClassKey] = useState('');
 
   /**
    * Upload a file, or point at one somebody else is already hosting.
@@ -123,6 +139,9 @@ export default function LecturerMaterials() {
       // Pre-fill the level with this tutor's own assigned level — the
       // dropdown then only needs touching for an upload aimed at a different
       // level. Only when the tutor hasn't already picked one themselves.
+      const mine: TeachingClass[] = data.classes ?? [];
+      setClasses(mine);
+      if (mine.length === 1) setClassKey((current) => current || mine[0].key);
       if (data.assignedLevel) {
         setAssignedLevel(data.assignedLevel);
         setFormData((current) => (current.level ? current : { ...current, level: data.assignedLevel }));
@@ -148,7 +167,12 @@ export default function LecturerMaterials() {
       setError('Paste a video link (YouTube, Vimeo, Loom, Drive) or an audio link (SoundCloud, Spotify, or a direct .mp4 / .mp3 URL).');
       return;
     }
-    if (!formData.level) {
+    const chosenClass = classes.find((item) => item.key === classKey) ?? null;
+    if (classes.length > 1 && !classKey) {
+      setError('Choose which class this material is for, or "All my classes".');
+      return;
+    }
+    if (!chosenClass && !formData.level) {
       setError('Please choose the level this material is for');
       return;
     }
@@ -179,7 +203,9 @@ export default function LecturerMaterials() {
               }
             : { sourceUrl: formData.sourceUrl.trim() }),
           isRecording: String(formData.isRecording),
-          level: formData.level,
+          // A class chosen -> its level and batch; "all" -> the level picked below.
+          level: chosenClass ? chosenClass.level : formData.level,
+          classKey: classKey || (classes.length === 0 ? '' : 'all'),
           series: formData.series,
           episodeNumber: formData.episodeNumber,
           recordedAt: formData.recordedAt,
@@ -320,6 +346,36 @@ export default function LecturerMaterials() {
                   />
                 </div>
 
+                {classes.length > 0 ? (
+                  <div className="rounded-xl border-2 border-[var(--accent)]/40 bg-[var(--accent-soft)] p-4">
+                    <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
+                      Who is this for?
+                    </label>
+                    <select
+                      value={classKey}
+                      onChange={(e) => setClassKey(e.target.value)}
+                      className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
+                      required
+                    >
+                      {classes.length > 1 ? <option value="">Choose a class...</option> : null}
+                      {classes.map((item) => (
+                        <option key={item.key} value={item.key}>{item.label}{item.branchName ? ` — ${item.branchName}` : ''}</option>
+                      ))}
+                      {classes.length > 1 ? <option value="all">All my classes (every batch)</option> : null}
+                    </select>
+                    <p className="mt-2 text-xs text-[var(--foreground-soft)]">
+                      {classKey && classKey !== 'all'
+                        ? (classes.find((item) => item.key === classKey)?.batch
+                            ? `Only the ${classes.find((item) => item.key === classKey)?.batch} batch is told and sees it. The other batches do not.`
+                            : 'Everyone in this class at this level is told and sees it.')
+                        : classKey === 'all'
+                          ? 'Every student you teach at the level below sees it.'
+                          : 'Pick the class so the right students are told.'}
+                    </p>
+                  </div>
+                ) : null}
+
+                {(classes.length === 0 || classKey === 'all') ? (
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
                     Level
@@ -336,6 +392,7 @@ export default function LecturerMaterials() {
                     ))}
                   </select>
                 </div>
+                ) : null}
 
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
@@ -531,6 +588,11 @@ export default function LecturerMaterials() {
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
+                            {material.batch ? (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                                {material.batch} batch
+                              </span>
+                            ) : null}
                             {material.fromOffice && (
                               <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">
                                 From the office

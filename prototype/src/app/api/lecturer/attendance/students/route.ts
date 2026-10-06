@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { dayKey } from "@/lib/class-sessions";
 import { classesHaveBegun } from "@/lib/attendance-guard";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { batchOfAdmission, canonicalBatch } from "@/lib/class-batch";
 import {
   belongsToLecturer,
   readAssignment,
@@ -90,7 +91,14 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "asc" },
     });
 
-    const roster = students.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
+    // A batch's register is its own: September and October of one sitting keep
+    // separate calendars, so a tutor takes the register for one batch at a time.
+    // `?batch=` narrows to that batch; without it every batch comes back, each row
+    // carrying its `batch` so the page can offer the picker.
+    const wantedBatch = canonicalBatch(req.nextUrl.searchParams.get("batch"));
+    const roster = students
+      .filter((student) => belongsToLecturer(assignment, lecturer.id, student))
+      .filter((student) => !wantedBatch || batchOfAdmission(student.admission) === wantedBatch);
 
     // Attendance is keyed on (studentId, date) — one mark per student per day,
     // whichever class recorded it — so today's state is read that way too.
@@ -110,6 +118,8 @@ export async function GET(req: NextRequest) {
           studentCode: student.studentCode,
           level: student.level,
           sessionSlot: student.sessionSlot,
+          // "September", or "" when the student has no batch on record.
+          batch: batchOfAdmission(student.admission),
           branch: student.branch?.name || "N/A",
           // UNMARKED unless a tutor or admin recorded something. No default of
           // either kind: "present" by default wrote a mark nobody made, and

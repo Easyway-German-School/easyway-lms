@@ -201,6 +201,29 @@ export default function AdminCoursesPage() {
   /** The level the material actually lands at — the course's, or the picked one. */
   const effectiveLevel = selectedCourse?.level || upload.level;
 
+  /**
+   * WHO THIS UPLOAD WOULD REACH, counted live from the real students — so an admin
+   * sees "9 students" (or a red "nobody") before pressing upload, and the batch list
+   * offers only the batches that exist in the chosen level / branch / sitting.
+   */
+  const [reach, setReach] = useState<{ students: number; inCohort: number; batches: Array<{ batch: string; students: number }>; unplaced: number } | null>(null);
+  useEffect(() => {
+    if (upload.audience !== 'cohort' || !effectiveLevel) {
+      setReach(null);
+      return;
+    }
+    let cancelled = false;
+    const query = new URLSearchParams({ level: effectiveLevel });
+    if (upload.branchId) query.set('branchId', upload.branchId);
+    if (upload.sessionSlot) query.set('sessionSlot', upload.sessionSlot);
+    if (upload.batch) query.set('batch', upload.batch);
+    fetch(`/api/admin/materials/reach?${query.toString()}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled) setReach(data); })
+      .catch(() => { if (!cancelled) setReach(null); });
+    return () => { cancelled = true; };
+  }, [upload.audience, effectiveLevel, upload.branchId, upload.sessionSlot, upload.batch]);
+
   /** Set when the pasted link is a Drive *folder* — every file inside gets imported. */
   const driveFolderId = useMemo(
     () => (upload.source === "link" ? parseDriveFolderId(upload.sourceUrl) : null),
@@ -689,10 +712,12 @@ export default function AdminCoursesPage() {
                     onChange={(event) => setUpload((c) => ({ ...c, batch: event.target.value }))}
                     className={inputClass}
                   >
-                    <option value="">All batches</option>
-                    {(targets?.batches || []).map((batch) => (
-                      <option key={batch} value={batch}>
-                        {batch}
+                    <option value="">All batches{reach ? ` (${reach.inCohort} students)` : ''}</option>
+                    {/* Only the batches that really have students here, with their sizes;
+                        the full list while the count is still loading. */}
+                    {(reach ? reach.batches.map((b) => ({ name: b.batch, students: b.students as number | null })) : (targets?.batches || []).map((name) => ({ name, students: null as number | null }))).map((b) => (
+                      <option key={b.name} value={b.name}>
+                        {b.name}{b.students !== null ? ` (${b.students} student${b.students === 1 ? '' : 's'})` : ''}
                       </option>
                     ))}
                   </select>
@@ -746,6 +771,19 @@ export default function AdminCoursesPage() {
                 " · one tutor"
               )}
             </p>
+            {upload.audience === "cohort" && reach ? (
+              reach.students === 0 ? (
+                <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                  This reaches nobody{upload.batch ? ` — there are no ${upload.batch}-batch students here` : ""}. Check the branch, sitting and batch.
+                </p>
+              ) : (
+                <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                  Reaches {reach.students} student{reach.students === 1 ? "" : "s"}
+                  {upload.batch ? ` in the ${upload.batch} batch` : reach.batches.length > 1 ? ` across ${reach.batches.length} batches` : ""}.
+                  {!upload.batch && reach.batches.length > 1 ? " Choose a batch to reach just one." : ""}
+                </p>
+              )
+            ) : null}
           </div>
 
           <button
