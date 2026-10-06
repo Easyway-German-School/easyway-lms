@@ -5,6 +5,7 @@ import { Providers } from "./providers";
 import PageContainer from "@/components/PageContainer";
 import { LiveCallProvider } from "@/components/live/LiveCallContext";
 import LiveCallDock from "@/components/live/LiveCallDock";
+import LiveSessionRecovery from "@/components/live/LiveSessionRecovery";
 import { brandingCss } from "@/lib/tenant/branding";
 import { brandingForHost } from "@/lib/tenant/branding-server";
 import { hostOf } from "@/lib/tenant/resolve";
@@ -147,6 +148,7 @@ export default async function RootLayout({
           <LiveCallProvider>
             <PageContainer>{children}</PageContainer>
             <LiveCallDock />
+            <LiveSessionRecovery />
           </LiveCallProvider>
         </Providers>
       </body>

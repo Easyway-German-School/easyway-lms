@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
 import QuestionBuilder, { emptyQuestion, draftToQuestion, type QuestionDraft } from "@/components/QuestionBuilder";
 import StudentPicker from "@/components/StudentPicker";
@@ -39,6 +39,16 @@ export default function LecturerAssignmentsPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
+  const formRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * The form used to open BELOW the marking queue, so with a few papers waiting
+   * the button appeared to do nothing — the form was there, off the bottom of
+   * the screen. It now sits above the queue and is scrolled to on open.
+   */
+  useEffect(() => {
+    if (open) formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [open]);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -113,17 +123,11 @@ export default function LecturerAssignmentsPage() {
           </button>
         </div>
 
-        {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
-
-        {/* Marking sits above the list on purpose: it is the thing with a
-            student waiting at the other end of it. */}
-        <div className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold">To mark</h2>
-          <MarkingQueue />
-        </div>
+        {error && !open && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
 
         {open && (
-          <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+          <div ref={formRef} className="mb-8 scroll-mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="sm:col-span-2">
                 <span className="text-xs font-medium text-[var(--foreground-soft)]">Title</span>
@@ -197,6 +201,13 @@ export default function LecturerAssignmentsPage() {
             </button>
           </div>
         )}
+
+        {/* Marking sits above the list on purpose: it is the thing with a
+            student waiting at the other end of it. */}
+        <div className="mb-8">
+          <h2 className="mb-3 text-lg font-semibold">To mark</h2>
+          <MarkingQueue />
+        </div>
 
         {loading ? (
           <div className="py-12 text-center text-[var(--muted)]">Loading…</div>

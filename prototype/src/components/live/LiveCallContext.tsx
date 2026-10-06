@@ -29,7 +29,51 @@ import type { LeaveOutcome } from "./LiveKitClassroom";
 import type { LiveSession } from "@/lib/live-call-session";
 import type { QualityMode } from "@/lib/live-classroom";
 
+import { setLiveActive } from "@/lib/session-resilience";
+
 export type DockState = "full" | "minimized";
+
+/**
+ * A note left in the browser while a class is open and removed when the person
+ * leaves on purpose. If it is still there with no call running, they were
+ * bounced out (hard sign-out redirect, refresh, crash) and
+ * `LiveSessionRecovery` offers a one-tap way back in.
+ */
+export const LIVE_REJOIN_KEY = "ew.live.rejoin";
+const REJOIN_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+
+export type RejoinNote = { at: number; role: "lecturer" | "student" };
+
+export function writeRejoinNote(role: "lecturer" | "student") {
+  try {
+    localStorage.setItem(LIVE_REJOIN_KEY, JSON.stringify({ at: Date.now(), role } satisfies RejoinNote));
+  } catch {
+    /* private mode — the banner is a courtesy, never a requirement */
+  }
+}
+
+export function clearRejoinNote() {
+  try {
+    localStorage.removeItem(LIVE_REJOIN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readRejoinNote(): RejoinNote | null {
+  try {
+    const raw = localStorage.getItem(LIVE_REJOIN_KEY);
+    if (!raw) return null;
+    const note = JSON.parse(raw) as RejoinNote;
+    if (!note?.at || Date.now() - note.at > REJOIN_MAX_AGE_MS) {
+      clearRejoinNote();
+      return null;
+    }
+    return note;
+  } catch {
+    return null;
+  }
+}
 
 type ActiveCall = {
   session: LiveSession;
@@ -65,6 +109,7 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
   const startCall = useCallback((session: LiveSession, mode: QualityMode) => {
     endedRef.current = false;
     pendingOutcomeRef.current = null;
+    writeRejoinNote(session.role === "tutor" ? "lecturer" : "student");
     setActiveCall({ session, mode });
     setDockState("full");
   }, []);
@@ -91,6 +136,9 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
           endClassOnServer();
         }
         pendingOutcomeRef.current = { roomName: current.session.roomName, outcome };
+        // They left (or the class ended) through the app, so there is nothing
+        // to "rejoin" — only a hard bounce leaves the note behind.
+        clearRejoinNote();
         return null;
       });
     },
@@ -113,6 +161,14 @@ export function LiveCallProvider({ children }: { children: React.ReactNode }) {
   const liveSessionId = activeCall?.session.liveSessionId ?? null;
   const heartbeatMs = activeCall?.session.heartbeatMs ?? 45_000;
   const beating = Boolean(isTutor && liveSessionId);
+
+  // Tell the session guard a class is open, so a sign-in blip cannot throw the
+  // person out of it. See src/lib/session-resilience.ts.
+  const callOpen = activeCall !== null;
+  useEffect(() => {
+    setLiveActive(callOpen);
+    return () => setLiveActive(false);
+  }, [callOpen]);
 
   useEffect(() => {
     if (!beating) return;
