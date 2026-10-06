@@ -79,11 +79,11 @@ export function useLook() {
   const state = query.data ?? cached;
 
   const setLook = useCallback(
-    async (choice: Look | null) => {
+    async (choice: Look | null, via?: "announce" | "invite") => {
       const response = await fetch("/api/student/look", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ look: choice }),
+        body: JSON.stringify({ look: choice, ...(via ? { via } : {}) }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -116,6 +116,19 @@ export function useLook() {
       /* Worst case it shows once more next visit; never an error in the portal. */
     }
   }, [queryClient]);
+
+  /** "No thanks" on Becca's popup — only for the record; it was already marked seen. */
+  const declinePrompt = useCallback(async (kind: "announce" | "invite") => {
+    try {
+      await fetch("/api/student/look", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promptDeclined: kind }),
+      });
+    } catch {
+      /* A missed count is fine; an error in the portal is not. */
+    }
+  }, []);
 
   const saveAvatar = useCallback(
     async (avatar: AvatarConfig) => {
@@ -152,9 +165,10 @@ export function useLook() {
     ready: state !== null,
     /** Only ever the server's answer — a cached copy must not be able to re-open the popup. */
     prompt: (query.data?.prompt ?? null) as "announce" | "invite" | null,
-    cohort: (state?.cohort ?? "classic") as Cohort,
+    cohort: (state?.cohort ?? "invited") as Cohort,
     setLook,
     markPromptSeen,
+    declinePrompt,
     saveAvatar,
   };
 }

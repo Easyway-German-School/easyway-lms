@@ -2,36 +2,37 @@
  * WHO GETS THE NEW LOOK — decided in one place.
  *
  * The student portal is being reshaped for the young learner: a phone tab bar,
- * avatars, a profile that reads like a feed. That is a real change to how the
- * product feels, so it goes out by cohort rather than to everybody at once —
- * the older learners the age report tells us struggle most with the portal are
- * the last people who should have the layout move under them.
+ * avatars, a profile that reads like a feed, and a livelier community. That is
+ * a real change to how the product feels, so the school sets a default by age
+ * and the student always has the last word.
  *
- * Three cohorts, and a student belongs to exactly one:
+ * Two cohorts, and a student belongs to exactly one:
  *
  *   WAVE     Under 25 (configurable). Gets the new look BY DEFAULT, and Becca
  *            tells them once — "we gave the app a fresh look, keep it or go
  *            back".
  *
- *   INVITED  A little older (25–34) AND demonstrably living on their phone —
- *            most of their recent portal activity is on a mobile. Nothing
- *            changes for them; Becca asks once whether they would like to try
- *            it. The phone-share test is the data doing the work: a bottom tab
- *            bar is built for a thumb, so it is offered to the people who are
- *            already using the portal with one.
- *
- *   CLASSIC  Everyone else, including anybody whose age we cannot work out. They
- *            are never prompted. The switch on their profile is always there.
+ *   INVITED  Everyone else — including anybody whose age we cannot work out.
+ *            Nothing changes for them, but Becca offers the choice once: try
+ *            the new look, or stay exactly where you are. (This used to be
+ *            only 25–34s who were demonstrably phone-heavy. That quietly hid
+ *            the offer from most of the roster — a laptop user, a student with
+ *            no birth date on file, anyone over 34 — so nobody who tested the
+ *            portal as one of them ever saw it. The choice is now everyone's.)
  *
  * On top of that, the student's own choice wins over all of it, in both
- * directions, forever. The school sets the default; the student decides.
+ * directions, forever.
+ *
+ * What each look means for the community is decided from the same answer — see
+ * lib/community-skin.ts: the new look gets the lively, avatar-first chat; the
+ * classic look gets the familiar WhatsApp/Facebook-style one.
  *
  * Pure on purpose, like age-bands.ts: no I/O, unit-tested without a database,
  * and safe to import from client components.
  */
 
 export type Look = "youth" | "classic";
-export type Cohort = "wave" | "invited" | "classic";
+export type Cohort = "wave" | "invited";
 
 /** SchoolSetting key the wave is stored under. */
 export const LOOK_WAVE_KEY = "ui.look-wave";
@@ -41,21 +42,12 @@ export type LookWave = {
   maxAge: number;
   /** Whether a student whose age we cannot work out is in the wave. */
   includeUnknownAge: boolean;
-  /** Oldest age, inclusive, that is INVITED to try it. Equal to maxAge switches invitations off. */
-  inviteMaxAge: number;
-  /** Share (0–1) of recent portal activity that must be on a phone to be invited. */
-  invitePhoneShare: number;
-  /** Fewest recent activity events before the phone share is believed. */
-  inviteMinEvents: number;
 };
 
-/** Wave one: under 25 get it, 25–34 who live on their phone are invited. */
+/** Wave one: under 25 get it; everybody else is offered it. */
 export const DEFAULT_LOOK_WAVE: LookWave = {
   maxAge: 24,
   includeUnknownAge: false,
-  inviteMaxAge: 34,
-  invitePhoneShare: 0.6,
-  inviteMinEvents: 10,
 };
 
 const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
@@ -63,26 +55,17 @@ const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
 
 /**
  * Reads a stored wave. Never throws: a malformed or missing row means "wave
- * one", exactly as if nobody had ever touched the setting.
+ * one", exactly as if nobody had ever touched the setting. Fields an older
+ * version stored (the phone-usage invitation rules) are simply ignored.
  */
 export function parseLookWave(raw: unknown): LookWave {
   if (!raw || typeof raw !== "object") return DEFAULT_LOOK_WAVE;
   const value = raw as Record<string, unknown>;
 
-  const maxAge = clampInt(value.maxAge, 0, 120, DEFAULT_LOOK_WAVE.maxAge);
-  // Invitations can never reach DOWN into the wave: the oldest invited age is at least the wave's.
-  const inviteMaxAge = Math.max(maxAge, clampInt(value.inviteMaxAge, 0, 120, DEFAULT_LOOK_WAVE.inviteMaxAge));
-
   return {
-    maxAge,
+    maxAge: clampInt(value.maxAge, 0, 120, DEFAULT_LOOK_WAVE.maxAge),
     includeUnknownAge:
       typeof value.includeUnknownAge === "boolean" ? value.includeUnknownAge : DEFAULT_LOOK_WAVE.includeUnknownAge,
-    inviteMaxAge,
-    invitePhoneShare:
-      typeof value.invitePhoneShare === "number" && Number.isFinite(value.invitePhoneShare)
-        ? Math.min(1, Math.max(0, value.invitePhoneShare))
-        : DEFAULT_LOOK_WAVE.invitePhoneShare,
-    inviteMinEvents: clampInt(value.inviteMinEvents, 1, 10_000, DEFAULT_LOOK_WAVE.inviteMinEvents),
   };
 }
 
@@ -90,14 +73,6 @@ export function parseLookWave(raw: unknown): LookWave {
 export function parseLookChoice(raw: unknown): Look | null {
   return raw === "youth" || raw === "classic" ? raw : null;
 }
-
-/** How a student has been using the portal lately — the invitation's evidence. */
-export type PhoneUsage = {
-  /** Activity events in the recent window. */
-  events: number;
-  /** Of those, how many came from a phone. */
-  mobileEvents: number;
-};
 
 export type LookDecision = {
   look: Look;
@@ -109,35 +84,15 @@ export type LookDecision = {
   inWave: boolean;
 };
 
-/** Whether this student's age is one where phone usage is worth looking at. */
-export function isInviteAge(age: number | null | undefined, wave: LookWave = DEFAULT_LOOK_WAVE): boolean {
-  return typeof age === "number" && Number.isFinite(age) && age > wave.maxAge && age <= wave.inviteMaxAge;
-}
-
-export function phoneShareOf(usage: PhoneUsage | null | undefined): number | null {
-  if (!usage || usage.events <= 0) return null;
-  return usage.mobileEvents / usage.events;
-}
-
 export function resolveLook(input: {
   age: number | null | undefined;
   choice: Look | null | undefined;
   wave?: LookWave;
-  usage?: PhoneUsage | null;
 }): LookDecision {
   const wave = input.wave ?? DEFAULT_LOOK_WAVE;
   const age = typeof input.age === "number" && Number.isFinite(input.age) ? input.age : null;
   const inWave = age === null ? wave.includeUnknownAge : age <= wave.maxAge;
-
-  let cohort: Cohort = "classic";
-  if (inWave) {
-    cohort = "wave";
-  } else if (isInviteAge(age, wave)) {
-    const share = phoneShareOf(input.usage);
-    if (share !== null && (input.usage?.events ?? 0) >= wave.inviteMinEvents && share >= wave.invitePhoneShare) {
-      cohort = "invited";
-    }
-  }
+  const cohort: Cohort = inWave ? "wave" : "invited";
 
   if (input.choice) return { look: input.choice, reason: "chosen", cohort, inWave };
   if (cohort === "wave") return { look: "youth", reason: "wave", cohort, inWave };
@@ -153,14 +108,17 @@ export function resolveLook(input: {
  */
 export const NEW_LOOK_LAUNCH_AT = new Date("2026-10-05T00:00:00Z");
 
-/** An invitation waits until a student has found their feet. */
-export const INVITE_MIN_ACCOUNT_DAYS = 7;
+/**
+ * An invitation waits until a student has found their feet — but only a day or
+ * two. It used to be a week, which meant anyone signing in with a recent
+ * account (a test login, a new joiner) never got to see it.
+ */
+export const INVITE_MIN_ACCOUNT_DAYS = 2;
 
 /**
  * Whether Becca should say something, and what. Only ever for a student who has
- * not been told before, and only for the cohorts it is about — a classic-cohort
- * student is never interrupted, and anyone who already picked a look themselves
- * has already answered the question.
+ * not been told before, and anyone who already picked a look themselves has
+ * already answered the question.
  *
  * It is a gentle banner, never a modal (see components/moment/NewLookMoment.tsx),
  * and these rules are the other half of keeping it out of the way: nobody on
@@ -181,8 +139,5 @@ export function promptFor(
     // Joined after launch → never knew the old look. Unknown join date → say nothing rather than guess.
     return created && created < NEW_LOOK_LAUNCH_AT ? "announce" : null;
   }
-  if (decision.cohort === "invited") {
-    return accountDays !== null && accountDays >= INVITE_MIN_ACCOUNT_DAYS ? "invite" : null;
-  }
-  return null;
+  return accountDays !== null && accountDays >= INVITE_MIN_ACCOUNT_DAYS ? "invite" : null;
 }

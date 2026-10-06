@@ -57,7 +57,25 @@ type QueuedEvent = {
   weekday: number;
   sessionKey: string;
   durationSeconds: number;
+  /** The portal look the learner was on — see lib/useLook.ts. Null until the shell has read it. */
+  look: "youth" | "classic" | null;
 };
+
+/**
+ * The look this browser last saw (useLook keeps it in localStorage). Read at the
+ * moment an event is queued so a student who switches mid-visit has their
+ * later events counted on the look they switched to.
+ */
+function currentLook(): "youth" | "classic" | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem("easyway-look");
+    const look = raw ? (JSON.parse(raw) as { look?: unknown }).look : null;
+    return look === "youth" || look === "classic" ? look : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Coarse bucket for aggregates. The full route travels separately in `path`. */
 function areaFor(pathname: string): string {
@@ -122,10 +140,11 @@ export default function StudentUsageTracker() {
     }
   });
 
-  const push = useRef((event: Omit<QueuedEvent, "deviceKind" | "hourLocal" | "weekday" | "sessionKey">) => {
+  const push = useRef((event: Omit<QueuedEvent, "deviceKind" | "hourLocal" | "weekday" | "sessionKey" | "look">) => {
     const now = new Date();
     queue.current.push({
       ...event,
+      look: currentLook(),
       deviceKind: deviceKind(),
       hourLocal: now.getHours(),
       weekday: now.getDay(),

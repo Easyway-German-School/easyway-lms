@@ -12,6 +12,7 @@ import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import StoryTour from "@/components/StoryTour";
 import Avatar from "@/components/Avatar";
 import { useLook } from "@/lib/useLook";
+import { CHAT_GREEN, CHAT_GREEN_AVATAR, SKIN_DEFAULT_THEME, communitySkin } from "@/lib/community-skin";
 import {
   CHAT_THEMES,
   CHAT_THEME_STORAGE_KEY,
@@ -386,7 +387,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const searchParams = useSearchParams();
   const deepLinkChannel = searchParams?.get("channel") ?? null;
   // Classmates' cartoon avatars replace initials for students on the new look.
-  const youthLook = useLook().look === "youth";
+  const lookState = useLook();
+  const youthLook = lookState.look === "youth";
 
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [isStaff, setIsStaff] = useState(false);
@@ -413,8 +415,16 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!compact);
   /** This device's chat wallpaper/bubble colour. Defaults to the brand look until read from storage. */
-  const [chatTheme, setChatTheme] = useState<ChatTheme>(chatThemeById(null));
+  const [pickedTheme, setPickedTheme] = useState<ChatTheme | null>(null);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  /**
+   * The classic look's room wears the WhatsApp/Facebook-style face (see
+   * lib/community-skin.ts). Staff status is learned from the first room load,
+   * so until then — and until the look itself is known — the room stays neutral.
+   */
+  const isChat = communitySkin({ look: lookState.look, ready: lookState.ready, isStaff }) === "chat";
+  /** The student's own pick wins; otherwise the skin's own theme. */
+  const chatTheme = pickedTheme ?? chatThemeById(null, SKIN_DEFAULT_THEME[isChat ? "chat" : "plain"]);
   /**
    * Voice-note recording. `null` when idle; the elapsed millisecond count while
    * a recording is running, so the composer can show a timer.
@@ -482,14 +492,16 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   // hydrate-mismatch on.
   useEffect(() => {
     try {
-      setChatTheme(chatThemeById(window.localStorage.getItem(CHAT_THEME_STORAGE_KEY)));
+      const stored = window.localStorage.getItem(CHAT_THEME_STORAGE_KEY);
+      // Only a theme that still exists counts as a pick; anything else lets the skin's own theme show.
+      if (stored && CHAT_THEMES.some((theme) => theme.id === stored)) setPickedTheme(chatThemeById(stored));
     } catch {
       // Private browsing. The brand default stays in effect for this visit.
     }
   }, []);
 
   const pickChatTheme = useCallback((theme: ChatTheme) => {
-    setChatTheme(theme);
+    setPickedTheme(theme);
     setThemePickerOpen(false);
     try {
       window.localStorage.setItem(CHAT_THEME_STORAGE_KEY, theme.id);
@@ -1323,9 +1335,21 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       <aside
         className={`${
           showRail ? "flex" : "hidden"
-        } w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface-alt)] sm:flex sm:w-64`}
+        } w-full shrink-0 flex-col border-r border-[var(--border)] ${
+          isChat ? "bg-[var(--surface)] sm:w-80" : "bg-[var(--surface-alt)] sm:w-64"
+        } sm:flex`}
       >
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {isChat ? (
+          // The WhatsApp list header: a plain title in the brand green. Familiar, and tells an
+          // older reader at a glance that this is "my chats", not a forum.
+          <div className="flex items-center justify-between px-4 pb-2 pt-3">
+            <p className="text-xl font-bold" style={{ color: CHAT_GREEN }}>
+              Chats
+            </p>
+            <span className="text-xs font-semibold text-[var(--muted)]">Your class groups</span>
+          </div>
+        ) : null}
+        <div className={`min-h-0 flex-1 overflow-y-auto ${isChat ? "p-0" : "p-2"}`}>
           {spaces.map((space) => {
             const isDmGroup = space.id === "__dm__";
             return (
@@ -1367,33 +1391,47 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         // at the list.
                         setShowRail(false);
                       }}
-                      className={`flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition active:scale-[0.99] ${
-                        selected ? "bg-[var(--accent)] text-white" : "text-[var(--foreground)] hover:bg-[var(--surface)]"
+                      data-track="community.room-open"
+                      className={`flex w-full items-center gap-3 text-left transition active:scale-[0.99] ${
+                        isChat
+                          ? `border-b border-[var(--border)]/60 px-4 py-3 ${
+                              selected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--surface-alt)]"
+                            }`
+                          : `rounded-2xl px-2.5 py-2.5 ${
+                              selected ? "bg-[var(--accent)] text-white" : "text-[var(--foreground)] hover:bg-[var(--surface)]"
+                            }`
                       }`}
                     >
                       <span
-                        className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-base font-bold ${
-                          selected ? "bg-white/20 text-white" : "bg-[var(--accent-soft)] text-[var(--accent)]"
+                        className={`grid shrink-0 place-items-center font-bold ${
+                          isChat
+                            ? "h-12 w-12 rounded-full text-lg text-white"
+                            : `h-10 w-10 rounded-2xl text-base ${
+                                selected ? "bg-white/20 text-white" : "bg-[var(--accent-soft)] text-[var(--accent)]"
+                              }`
                         } ${typingHere ? "ew-typing-ring" : ""}`}
+                        style={isChat ? { background: CHAT_GREEN_AVATAR } : undefined}
                         aria-hidden
                       >
                         {isDmGroup ? "@" : channel.kind === "announcement" ? "!" : "#"}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span
-                          className={`block truncate text-sm ${
+                          className={`block truncate ${isChat ? "text-base" : "text-sm"} ${
                             selected || channel.unreadCount > 0 ? "font-bold" : "font-semibold"
                           }`}
                         >
                           {channel.name}
                         </span>
                         <span
-                          className={`mt-0.5 flex items-center gap-1.5 truncate text-xs ${
+                          className={`mt-0.5 flex items-center gap-1.5 truncate ${isChat ? "text-[13px]" : "text-xs"} ${
                             typingHere
-                              ? selected
-                                ? "font-semibold text-white"
-                                : "font-semibold text-[var(--accent)]"
-                              : selected
+                              ? isChat
+                                ? "font-semibold text-[#128C7E]"
+                                : selected
+                                  ? "font-semibold text-white"
+                                  : "font-semibold text-[var(--accent)]"
+                              : selected && !isChat
                                 ? "text-white/75"
                                 : "text-[var(--muted)]"
                           }`}
@@ -1409,7 +1447,10 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         </span>
                       </span>
                       {channel.unreadCount > 0 && !selected ? (
-                        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white shadow-sm">
+                        <span
+                          className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white shadow-sm"
+                          style={isChat ? { background: CHAT_GREEN, height: "1.375rem", minWidth: "1.375rem", fontSize: 11 } : undefined}
+                        >
                           {channel.unreadCount > 99 ? "99+" : channel.unreadCount}
                         </span>
                       ) : null}
@@ -1445,7 +1486,10 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           phone, which is where most of this school reads it.
       */}
       <section className={`${showRail ? "hidden" : "flex"} min-w-0 flex-1 flex-col sm:flex`}>
-        <header className="relative flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+        <header
+          className={`relative flex items-center gap-2 border-b border-[var(--border)] px-4 ${isChat ? "py-3.5" : "py-3"}`}
+          style={isChat ? { background: "color-mix(in srgb, #128C7E 10%, var(--surface))" } : undefined}
+        >
           <button
             onClick={() => setShowRail(true)}
             aria-label="All channels"
@@ -1453,9 +1497,19 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           >
             <ArrowLeftIcon className="h-4 w-4" />
           </button>
+          {isChat ? (
+            <span
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-base font-bold text-white"
+              style={{ background: CHAT_GREEN_AVATAR }}
+              aria-hidden
+            >
+              {isDm ? "@" : "#"}
+            </span>
+          ) : null}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-[var(--foreground)]">
-              {isDm ? "@" : "#"} {active?.name ?? "Community"}
+            <p className={`truncate font-semibold text-[var(--foreground)] ${isChat ? "text-base" : "text-sm"}`}>
+              {isChat ? "" : isDm ? "@ " : "# "}
+              {active?.name ?? "Community"}
             </p>
             {/* Who is typing takes over the subtitle, the way a chat app's header
                 does — visible even when the transcript is scrolled up. */}
@@ -1490,6 +1544,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
             <button
               onClick={() => setThemePickerOpen((open) => !open)}
               aria-label="Chat theme"
+              data-track="community.theme"
               aria-expanded={themePickerOpen}
               title="Chat theme"
               className="rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
@@ -1601,13 +1656,22 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               return (
                 <div key={message.id}>
                   {newDay ? (
-                    <div className="my-4 flex items-center gap-3">
-                      <span className="h-px flex-1 bg-[var(--border)]" />
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
-                        {dayLabel(message.createdAt)}
-                      </span>
-                      <span className="h-px flex-1 bg-[var(--border)]" />
-                    </div>
+                    isChat ? (
+                      // WhatsApp's "TODAY" chip.
+                      <div className="my-3 flex justify-center">
+                        <span className="rounded-lg bg-[var(--surface)] px-3 py-1 text-[11.5px] font-semibold uppercase tracking-wide text-[var(--muted)] shadow-sm">
+                          {dayLabel(message.createdAt)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="my-4 flex items-center gap-3">
+                        <span className="h-px flex-1 bg-[var(--border)]" />
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+                          {dayLabel(message.createdAt)}
+                        </span>
+                        <span className="h-px flex-1 bg-[var(--border)]" />
+                      </div>
+                    )
                   ) : null}
 
                   {/* Incoming messages and a message being sent rise in; a message of
@@ -1682,14 +1746,25 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                             ? "p-0"
                             : isSticker && !message.hidden
                             ? "bg-transparent p-0"
-                            : `rounded-2xl px-3.5 py-2 ${
-                                lastInRun ? (message.mine ? "rounded-br-md" : "rounded-bl-md") : ""
+                            : `${
+                                isChat
+                                  ? // A WhatsApp bubble: smaller radius, a pointed corner on the first of a run, larger type.
+                                    `rounded-xl px-3 py-1.5 text-[15px] ${
+                                      !grouped ? (message.mine ? "rounded-tr-none" : "rounded-tl-none") : ""
+                                    }`
+                                  : `rounded-2xl px-3.5 py-2 ${
+                                      lastInRun ? (message.mine ? "rounded-br-md" : "rounded-bl-md") : ""
+                                    }`
                               } ${
                                 message.hidden
                                   ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
                                   : message.mine
-                                    ? "text-white"
-                                    : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                                    ? chatTheme.ink
+                                      ? ""
+                                      : "text-white"
+                                    : isChat
+                                      ? "bg-[var(--surface)] text-[var(--foreground)] shadow-[0_1px_1px_rgba(0,0,0,0.12)]"
+                                      : "bg-[var(--surface-alt)] text-[var(--foreground)]"
                               }`
                         } ${message.failed ? "ring-1 ring-rose-400" : ""} ${message.pending ? "opacity-60" : ""}`}
                         // This device's chosen bubble colour/gradient — see
@@ -1698,7 +1773,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         // purpose, see below).
                         style={
                           message.mine && !message.hidden && !isSticker && !isGameInvite
-                            ? { background: chatTheme.bubble }
+                            ? { background: chatTheme.bubble, ...(chatTheme.ink ? { color: chatTheme.ink } : {}) }
                             : undefined
                         }
                       >
@@ -1789,7 +1864,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                               <VoiceNote
                                 url={message.attachment.url}
                                 durationSec={message.attachment.durationSec}
-                                mine={message.mine && !message.hidden}
+                                mine={message.mine && !message.hidden && !chatTheme.ink}
                               />
                             </div>
                           ) : (
@@ -1803,14 +1878,20 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         ) : null}
 
                         <p
-                          className={`mt-1 text-[10px] ${
-                            message.mine && !message.hidden ? "text-white/70" : "text-[var(--muted)]"
+                          className={`mt-1 text-[10px] ${isChat ? "text-right" : ""} ${
+                            message.mine && !message.hidden
+                              ? chatTheme.ink
+                                ? "opacity-60"
+                                : "text-white/70"
+                              : "text-[var(--muted)]"
                           }`}
                         >
                           {timeOf(message.createdAt)}
                           {message.editedAt ? " · edited" : ""}
                           {message.pending ? " · sending…" : ""}
                           {message.failed ? " · not sent" : ""}
+                          {/* One tick: it reached the room. We do not show a "read" tick, because we cannot know it. */}
+                          {isChat && message.mine && !message.hidden && !message.pending && !message.failed ? " ✓" : ""}
                         </p>
                       </div>
                         );
@@ -1876,14 +1957,30 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                             reactingTo === message.id ? "sm:opacity-100" : ""
                           } ${message.mine ? "justify-end" : ""}`}
                         >
+                          {/* Facebook's "Like · Reply": one tap on the thumbs-up, no picker. */}
+                          {isChat ? (
+                            <button
+                              data-track="community.like"
+                              onClick={() => void toggleReaction(message.id, ALLOWED_REACTIONS[0])}
+                              className={`text-xs font-semibold hover:text-[#1877F2] ${
+                                message.reactions?.some((r) => r.emoji === ALLOWED_REACTIONS[0] && r.mine)
+                                  ? "text-[#1877F2]"
+                                  : "text-[var(--muted)]"
+                              }`}
+                            >
+                              Like
+                            </button>
+                          ) : null}
                           <button
+                            data-track="community.react"
                             onClick={() => setReactingTo((current) => (current === message.id ? null : message.id))}
                             aria-expanded={reactingTo === message.id}
-                            className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                            className={`${isChat ? "text-xs" : "text-[11px]"} font-semibold text-[var(--muted)] hover:text-[var(--accent)]`}
                           >
-                            React
+                            {isChat ? "More" : "React"}
                           </button>
                           <button
+                            data-track="community.reply"
                             onClick={() => {
                               setReplyTo(message);
                               composerRef.current?.focus();
@@ -1965,7 +2062,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
 
         {/* ------------------------------------------------------- composer */}
         {canPost ? (
-          <div className="border-t border-[var(--border)] p-3">
+          <div className={`border-t border-[var(--border)] p-3 ${isChat ? "bg-[var(--surface-alt)]" : ""}`}>
             {replyTo ? (
               <div className="mb-2 flex items-start gap-2 rounded-xl border-l-2 border-[var(--accent)] bg-[var(--surface-alt)] px-3 py-2">
                 <div className="min-w-0 flex-1">
@@ -2131,6 +2228,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 onClick={() => fileRef.current?.click()}
                 disabled={uploading}
                 aria-label="Attach a picture"
+                data-track="community.attach"
                 title="Attach a picture"
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] disabled:opacity-40"
               >
@@ -2142,6 +2240,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   setGamesTrayOpen(false);
                 }}
                 aria-label="Send a sticker"
+                data-track="community.sticker"
                 aria-expanded={stickerTrayOpen}
                 title="Send a sticker"
                 className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-lg transition hover:bg-[var(--surface-alt)] ${
@@ -2155,6 +2254,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 <button
                   onClick={openGamesTray}
                   aria-label="Play a game"
+                  data-track="community.games"
                   aria-expanded={gamesTrayOpen}
                   title="Play a game"
                   className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition hover:bg-[var(--surface-alt)] ${
@@ -2181,7 +2281,9 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 // Short on purpose: at 16px on a 375px phone, "Message #Homework & help" wraps.
                 placeholder={uploading ? "Uploading…" : "Message…"}
                 // 16px on a phone: anything smaller makes iOS zoom the page on focus.
-                className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-base text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] sm:text-sm"
+                className={`max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-3xl border border-[var(--border)] px-4 py-2.5 text-base text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] ${
+                  isChat ? "bg-[var(--surface)] sm:text-base" : "bg-[var(--surface-alt)] sm:text-sm"
+                }`}
               />
               {draft.trim() || attachment ? (
                 <button
@@ -2193,6 +2295,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   // without the photograph it was written about.
                   disabled={uploading}
                   aria-label="Send"
+                  data-track="community.send"
+                  style={isChat ? { background: CHAT_GREEN } : undefined}
                   className="ew-pop grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white shadow-md transition hover:brightness-110 active:scale-90 disabled:opacity-30"
                 >
                   <SendIcon className="h-4 w-4" />
@@ -2205,6 +2309,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   disabled={uploading}
                   aria-label="Record a voice message"
                   title="Record a voice message"
+                  data-track="community.voice"
+                  style={isChat ? { background: CHAT_GREEN } : undefined}
                   className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
                 >
                   <MicIcon className="h-4 w-4" />

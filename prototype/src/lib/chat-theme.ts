@@ -25,6 +25,13 @@ export type ChatTheme = {
   wallpaper: string;
   /** Applied to "my" outgoing bubbles only — incoming bubbles stay on --surface-alt. */
   bubble: string;
+  /**
+   * Text colour on "my" bubble. Absent means white, which every saturated
+   * bubble above carries. The light bubble (WhatsApp green) sets
+   * this, because white on a pale fill is the illegibility this file exists to
+   * prevent.
+   */
+  ink?: string;
 };
 
 export const CHAT_THEMES: ChatTheme[] = [
@@ -76,6 +83,26 @@ export const CHAT_THEMES: ChatTheme[] = [
     bubble: "linear-gradient(135deg, #D97706, #DC2626)",
   },
   {
+    // The familiar one. A warm paper wallpaper with a faint doodle grain, and a
+    // soft green outgoing bubble — mixed into the current surface so it is a
+    // pale green in the light themes and a deep green in the dark ones, with
+    // the page's own foreground colour on top of it either way.
+    id: "whatsapp",
+    label: "Green chat",
+    swatch: "linear-gradient(135deg, #25D366, #128C7E)",
+    wallpaper:
+      "radial-gradient(circle, color-mix(in srgb, var(--foreground) 7%, transparent) 1px, transparent 1.3px) 0 0 / 24px 24px, color-mix(in srgb, #d6c8a4 24%, var(--surface-alt))",
+    bubble: "color-mix(in srgb, #25D366 30%, var(--surface))",
+    ink: "var(--foreground)",
+  },
+  {
+    id: "messenger",
+    label: "Blue chat",
+    swatch: "linear-gradient(135deg, #0A7CFF, #7A5CFF)",
+    wallpaper: "var(--surface)",
+    bubble: "linear-gradient(135deg, #0A7CFF, #0084FF 60%, #7A5CFF)",
+  },
+  {
     id: "dotted",
     label: "Dotted",
     swatch:
@@ -89,6 +116,10 @@ export const CHAT_THEMES: ChatTheme[] = [
 export const DEFAULT_CHAT_THEME_ID = CHAT_THEMES[0].id;
 export const CHAT_THEME_STORAGE_KEY = "easyway-chat-theme";
 
-export function chatThemeById(id: string | null | undefined): ChatTheme {
-  return CHAT_THEMES.find((theme) => theme.id === id) ?? CHAT_THEMES[0];
+export function chatThemeById(id: string | null | undefined, fallbackId?: string): ChatTheme {
+  return (
+    CHAT_THEMES.find((theme) => theme.id === id) ??
+    CHAT_THEMES.find((theme) => theme.id === fallbackId) ??
+    CHAT_THEMES[0]
+  );
 }
