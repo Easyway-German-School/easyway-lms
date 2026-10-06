@@ -3124,6 +3124,15 @@ model ClassSession {
    */
   timeSlot String   @default("morning")
 
+  /**
+   * The intake month ("September") this day belongs to. A batch's calendar is its
+   * own: September and October of the same sitting overlap for a month (and the
+   * weekend sitting meets the same Saturdays), so postponing one's class must not
+   * move the other's. '' = a row made before batches were separated, which still
+   * applies to every batch until that day is edited for one of them.
+   */
+  batch String @default("")
+
   startTime String? // "09:00"
   endTime   String? // "11:00"
 
@@ -3160,7 +3169,7 @@ model ClassSession {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([branchId, level, date, timeSlot])
+  @@unique([branchId, level, date, timeSlot, batch])
   @@index([branchId, level, date])
   @@index([tenantId])
 }

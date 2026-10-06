@@ -4,6 +4,7 @@ import { SLOT_DEFAULTS, normalizeSlot, isWeekendSlot, type TimeSlot } from "@/li
 import { sessionDurationMonths } from "@/lib/levels";
 import { SCHOOL_TIMEZONE, zonedDateKey } from "@/lib/school-time";
 import { readSchedulePatternSettings } from "@/lib/schedule-pattern-server";
+import { canonicalBatch } from "@/lib/class-batch";
 
 /**
  * Merges the generated timetable skeleton with the ClassSession overrides a
@@ -63,18 +64,24 @@ export async function ensureClassSessionForLiveStart(args: {
   sessionSlot: string;
   date: Date;
   lecturerId?: string | null;
+  /** The batch whose class this is — the day is recorded for THAT batch only. */
+  batch?: string | null;
 }): Promise<void> {
   const slot = normalizeSlot(args.sessionSlot);
   const day = dayKey(args.date);
   const level = args.level.toUpperCase();
+  const batch = canonicalBatch(args.batch);
 
   await prisma.classSession.upsert({
-    where: { branchId_level_date_timeSlot: { branchId: args.branchId, level, date: day, timeSlot: slot } },
+    where: {
+      branchId_level_date_timeSlot_batch: { branchId: args.branchId, level, date: day, timeSlot: slot, batch },
+    },
     create: {
       branchId: args.branchId,
       level,
       date: day,
       timeSlot: slot,
+      batch,
       status: "held",
       notes: AUTO_ADDED_LIVE_NOTE,
       lecturerId: args.lecturerId ?? undefined,
@@ -114,6 +121,12 @@ export type MergedSession = {
   movedFrom: string | null;
   /** True when a tutor has actually touched this day. */
   edited: boolean;
+  /**
+   * True when what this day says comes from a row made before batches were
+   * separated, so it still applies to EVERY batch of the sitting. Saving the day
+   * for one batch gives that batch its own row and leaves the others untouched.
+   */
+  shared?: boolean;
   lecturerName: string | null;
   /** Which Lecturer this class is assigned to, when one is — the admin rail's tutor picker preselects on this. */
   lecturerId: string | null;
@@ -185,11 +198,16 @@ export async function getMergedSchedule(args: {
   const windowStart = new Date(Date.UTC(first.year, first.monthIndex, 1));
   const windowEnd = new Date(Date.UTC(last.year, last.monthIndex + 1, 0, 23, 59, 59, 999));
 
-  const overrides = await prisma.classSession.findMany({
+  // THIS BATCH'S calendar: its own rows, plus the old shared rows (batch '')
+  // made before batches were separated. Another batch's rows never appear — a
+  // postponement saved for the October batch is not on the September calendar.
+  const batch = canonicalBatch(args.batch);
+  const rows = await prisma.classSession.findMany({
     where: {
       branchId: args.branchId,
       level: generated.level,
       timeSlot: slot,
+      batch: { in: batch ? [batch, ""] : [""] },
       date: { gte: windowStart, lte: windowEnd },
     },
     include: {
@@ -203,9 +221,17 @@ export async function getMergedSchedule(args: {
     },
   });
 
+  // One row per day: the batch's own row wins over an old shared one.
+  const winners = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const key = row.date.toISOString();
+    const current = winners.get(key);
+    if (!current || (current.batch === "" && row.batch !== "")) winners.set(key, row);
+  }
+  const overrides = [...winners.values()];
+
   // Key by day so lookup during the merge is O(1).
-  const byDay = new Map<string, (typeof overrides)[number]>();
-  for (const o of overrides) byDay.set(o.date.toISOString(), o);
+  const byDay = winners;
 
   // A public holiday closes the school — a generated class on that day is off,
   // for the group timetable too, not just private bookings. Branch-specific
@@ -249,6 +275,7 @@ export async function getMergedSchedule(args: {
       edited: true,
       lecturerName: o.lecturer?.user?.name ?? null,
       lecturerId: o.lecturerId ?? null,
+      shared: o.batch === "",
       material: o.material
         ? {
             id: o.material.id,
@@ -296,6 +323,7 @@ export async function getMergedSchedule(args: {
         edited: Boolean(override) || Boolean(closedByHoliday),
         lecturerName: override?.lecturer?.user?.name ?? null,
         lecturerId: override?.lecturerId ?? null,
+        shared: override ? override.batch === "" : false,
         material: override?.material
           ? {
               id: override.material.id,

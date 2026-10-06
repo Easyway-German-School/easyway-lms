@@ -41,10 +41,15 @@ type Session = {
   status: string;
   postponedTo: string | null;
   edited: boolean;
+  /** This day's setting predates batches and still applies to every batch of the sitting. */
+  shared?: boolean;
   material: { id: string; title: string } | null;
 };
 
 type Month = { label: string; sessions: Session[] };
+
+/** A batch of the class being edited, with how many students are in it. */
+type BatchOption = { batch: string; students: number };
 
 type Assignment = {
   branchIds: string[];
@@ -55,7 +60,11 @@ type Assignment = {
   batches: string[];
 };
 
-/** One class the tutor runs — a row in the "Class" picker. */
+/**
+ * One class the tutor runs — a row in the "Which class" picker. The SERVER builds
+ * this list (one entry per batch the tutor has students in), so the picker, the
+ * live room and the roster all agree about what a class is.
+ */
 type TimetableGroup = {
   key: string;
   branchId: string;
@@ -66,59 +75,6 @@ type TimetableGroup = {
   label: string;
   batchRange: string;
 };
-
-/**
- * The distinct classes a tutor runs, from the assignment the office set. A
- * tutor with two classes gets two entries; a single-class tutor gets one and
- * the picker collapses to a static label. Admins do not use this — they choose
- * any cohort freely.
- */
-function buildGroups(
-  assignment: Assignment | null,
-  branches: Array<{ id: string; name: string }>,
-): TimetableGroup[] {
-  if (!assignment) return [];
-  const names = new Map(branches.map((branch) => [branch.id, branch.name]));
-  const rows = assignment.groups.length
-    ? assignment.groups.map((group) => ({
-        branchId: group.branchId,
-        level: group.level.toUpperCase(),
-        sessionSlot: group.sessionSlot.toLowerCase(),
-        batch: group.batch ?? null,
-      }))
-    : assignment.branchIds.flatMap((branchId) =>
-        assignment.levels.flatMap((level) =>
-          (assignment.sessionSlots.length ? assignment.sessionSlots : [""]).map((sessionSlot) => ({
-            branchId,
-            level: level.toUpperCase(),
-            sessionSlot: sessionSlot.toLowerCase(),
-            batch: assignment.batches[0] ?? null,
-          })),
-        ),
-      );
-
-  const seen = new Set<string>();
-  const out: TimetableGroup[] = [];
-  for (const row of rows) {
-    const key = `${row.branchId}:${row.level}:${row.sessionSlot}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const slotLabel = row.sessionSlot
-      ? row.sessionSlot.charAt(0).toUpperCase() + row.sessionSlot.slice(1)
-      : "";
-    out.push({
-      key,
-      branchId: row.branchId,
-      branchName: names.get(row.branchId) ?? "Your branch",
-      level: row.level,
-      sessionSlot: row.sessionSlot,
-      batch: row.batch,
-      label: slotLabel ? `${row.level} · ${slotLabel}` : row.level,
-      batchRange: batchRangeLabel(row.batch, row.sessionSlot),
-    });
-  }
-  return out;
-}
 
 type ClosedDay = { id: string; date: string; label: string; branchId: string | null };
 
@@ -184,13 +140,14 @@ function dotIdFor(branchId: string, level: string, slot: string, originKey: stri
  * which would need a Suspense boundary and pull the whole route into CSR — the
  * same trade `/lecturer/messages` makes.
  */
-function linkedClass(): { branchId: string; level: string; slot: string } {
-  if (typeof window === "undefined") return { branchId: "", level: "", slot: "" };
+function linkedClass(): { branchId: string; level: string; slot: string; batch: string } {
+  if (typeof window === "undefined") return { branchId: "", level: "", slot: "", batch: "" };
   const params = new URLSearchParams(window.location.search);
   return {
     branchId: params.get("branchId") ?? "",
     level: (params.get("level") ?? "").toUpperCase(),
     slot: (params.get("slot") ?? "").toLowerCase(),
+    batch: params.get("batch") ?? "",
   };
 }
 
@@ -206,6 +163,12 @@ export default function LecturerTimetablePage() {
   const [branchId, setBranchId] = useState(() => linkedClass().branchId);
   const [level, setLevel] = useState(() => linkedClass().level);
   const [slot, setSlot] = useState(() => linkedClass().slot);
+  // Which BATCH's calendar is open. Empty until the server picks the class's
+  // longest-running batch; the picker owns it after that.
+  const [batch, setBatch] = useState(() => linkedClass().batch);
+  const [batches, setBatches] = useState<BatchOption[]>([]);
+  const [unplaced, setUnplaced] = useState(0);
+  const [myClasses, setMyClasses] = useState<TimetableGroup[]>([]);
 
   const [cursor, setCursor] = useState(() => new Date());
   const [cursorPinned, setCursorPinned] = useState(false);
@@ -231,9 +194,10 @@ export default function LecturerTimetablePage() {
       if (branchId) query.set("branchId", branchId);
       if (level) query.set("level", level);
       if (slot) query.set("slot", slot);
+      // The batch whose calendar is open. Left off on the first load: the server
+      // picks the class's longest-running batch and sends it back.
+      if (batch) query.set("batch", batch);
 
-      // The server pins the schedule window to the class's pinned intake month
-      // on its own — it has the assignment — so no `batch` is sent from here.
       const res = await fetch(`/api/lecturer/sessions?${query.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Unable to load the timetable");
@@ -243,11 +207,15 @@ export default function LecturerTimetablePage() {
       setBranches(data.branches ?? []);
       setAssignment(data.assignment ?? null);
       setCanChooseCohort(Boolean(data.canChooseCohort));
+      setBatches(data.batches ?? []);
+      setUnplaced(data.unplaced ?? 0);
+      setMyClasses(data.classes ?? []);
 
       if (data.context) {
         setBranchId((current) => current || data.context.branchId || "");
         setLevel((current) => current || data.context.level || "");
         setSlot((current) => current || data.context.slot || "");
+        setBatch((current) => current || data.context.batch || "");
       }
       setError("");
     } catch (loadError) {
@@ -255,7 +223,7 @@ export default function LecturerTimetablePage() {
     } finally {
       setLoading(false);
     }
-  }, [branchId, level, slot]);
+  }, [branchId, level, slot, batch]);
 
   useEffect(() => {
     load();
@@ -322,24 +290,53 @@ export default function LecturerTimetablePage() {
   const branchName = branches.find((branch) => branch.id === branchId)?.name ?? "—";
   const hasClass = Boolean(branchId && level);
 
-  // A tutor picks one of THEIR classes as a single unit — branch, level and
-  // sitting move together, so the old three independent pills can no longer be
-  // left in a combination that is not a real class of theirs.
-  const myGroups = useMemo(() => buildGroups(assignment, branches), [assignment, branches]);
-  const activeGroupKey = `${branchId}:${level.toUpperCase()}:${slot.toLowerCase()}`;
+  // A tutor picks one of THEIR classes as a single unit — branch, level, sitting
+  // and BATCH move together, so the picker can never be left in a combination
+  // that is not a real class of theirs. The server builds the list.
+  const myGroups = myClasses;
+  const activeGroupKey = `${branchId}:${level.toUpperCase()}:${slot.toLowerCase()}${batch ? `:${batch}` : ""}`;
   const activeGroup = myGroups.find((group) => group.key === activeGroupKey) ?? null;
-  const activeBatchRange =
-    activeGroup?.batchRange ||
-    (level && slot ? batchRangeLabel((assignment?.batches ?? [])[0], slot) : "");
+  const activeBatchRange = batch && slot ? batchRangeLabel(batch, slot) : "";
+  const activeBatchStudents = batches.find((option) => option.batch === batch)?.students ?? null;
+
+  /** "Lagos · A1 · Morning · September batch" — the one line that says exactly which class is open. */
+  const editingLabel = [
+    branchName,
+    level,
+    SLOT_LABELS[slot] ?? slot,
+    batch ? `${batch} batch` : "",
+  ]
+    .filter((part) => part && part !== "—")
+    .join(" · ");
 
   function selectGroup(next: TimetableGroup) {
     setBranchId(next.branchId);
     setLevel(next.level);
     setSlot(next.sessionSlot);
+    setBatch(next.batch ?? "");
     setSelectedDay(null);
     setEditing(null);
     setAdding(false);
     // Re-land on the month the newly chosen class actually runs in.
+    setCursorPinned(false);
+  }
+
+  /** Changing branch / level / sitting means a different class: let the server pick its batch afresh. */
+  function changeCohort(apply: () => void) {
+    apply();
+    setBatch("");
+    setBatches([]);
+    setSelectedDay(null);
+    setEditing(null);
+    setAdding(false);
+    setCursorPinned(false);
+  }
+
+  function selectBatch(next: string) {
+    setBatch(next);
+    setSelectedDay(null);
+    setEditing(null);
+    setAdding(false);
     setCursorPinned(false);
   }
 
@@ -360,6 +357,8 @@ export default function LecturerTimetablePage() {
       body: JSON.stringify({
         branchId,
         level,
+        // THE batch this save is for — the other batch's calendar is untouched.
+        batch,
         date: session.date,
         timeSlot: session.timeSlot,
         topic: fields.topic !== undefined ? fields.topic : session.topic,
@@ -395,7 +394,9 @@ export default function LecturerTimetablePage() {
     const before = { status: session.status, postponedTo: session.postponedTo };
     try {
       await putSession(session, { status: "scheduled", postponedTo: null });
-      setSaved(`Moved back to ${shortDay(ymd(new Date(session.date)))}. Your students have been told.`);
+      setSaved(
+        `Moved back to ${shortDay(ymd(new Date(session.date)))}. ${batch ? `The ${batch} batch has` : "Your students have"} been told.`,
+      );
       setUndo({
         label: `Moved back to ${shortDay(ymd(new Date(session.date)))}`,
         run: async () => {
@@ -424,10 +425,30 @@ export default function LecturerTimetablePage() {
       setError(`You already have a class on ${shortDay(dayKey)} — pick a different day.`);
       return;
     }
+    const move = resolveMove(session, dayKey, patch.status ?? session.status);
+
+    // CANCELLING OR MOVING A CLASS TELLS STUDENTS, so ask first — and say exactly
+    // who, so the office never cancels the wrong batch's class by accident.
+    const changesTheDay =
+      (move.status === "cancelled" && session.status !== "cancelled") ||
+      (move.status === "postponed" && (session.status !== "postponed" || move.postponedTo !== session.postponedTo));
+    if (changesTheDay && typeof window !== "undefined") {
+      const who =
+        activeBatchStudents !== null
+          ? `${activeBatchStudents} student${activeBatchStudents === 1 ? "" : "s"} in the ${batch} batch`
+          : "the students in this class";
+      const others = batches.filter((option) => option.batch !== batch);
+      const reassurance = batch && others.length ? ` The ${others.map((o) => o.batch).join(" and ")} batch is not affected.` : "";
+      const what =
+        move.status === "cancelled"
+          ? `Cancel ${editingLabel} on ${shortDay(ymd(new Date(session.date)))}?`
+          : `Move ${editingLabel} from ${shortDay(ymd(new Date(session.date)))} to ${shortDay(dayKey)}?`;
+      if (!window.confirm(`${what}\n\n${who} will be told.${reassurance}`)) return;
+    }
+
     setSavingKey(session.date);
     setSaved("");
     try {
-      const move = resolveMove(session, dayKey, patch.status ?? session.status);
       const before = { status: session.status, postponedTo: session.postponedTo, startTime: session.startTime, endTime: session.endTime };
       await putSession(session, {
         ...move,
@@ -438,12 +459,13 @@ export default function LecturerTimetablePage() {
         materialId: patch.materialId !== undefined ? patch.materialId : (session.material?.id ?? null),
       });
 
+      const audience = batch ? `The ${batch} batch` : "Your students";
       setSaved(
         move.status === "postponed"
-          ? "Saved. Your students have been told the class moved, and their calendar now shows the new date."
+          ? `Saved. ${audience} has been told the class moved, and their calendar now shows the new date.`
           : move.status === "cancelled"
-            ? "Saved. Your students have been told the class is cancelled."
-            : "Saved. Your students' calendars are updated.",
+            ? `Saved. ${audience} has been told the class is cancelled.`
+            : `Saved. ${audience}'s calendar is updated.`,
       );
       if (move.status !== before.status || move.postponedTo !== before.postponedTo) {
         setUndo({
@@ -483,6 +505,7 @@ export default function LecturerTimetablePage() {
         body: JSON.stringify({
           branchId,
           level,
+          batch,
           timeSlot: slot,
           date: `${addDraft.date}T00:00:00`,
           topic: addDraft.topic,
@@ -492,7 +515,7 @@ export default function LecturerTimetablePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Could not add this class");
-      setSaved("Class added. It is on your students' calendars now.");
+      setSaved(`Class added. It is on ${batch ? `the ${batch} batch's` : "your students'"} calendar${batch ? "" : "s"} now.`);
       setAdding(false);
       setAddDraft({ date: "", startTime: "", endTime: "", topic: "" });
       setSelectedDay(addDraft.date);
@@ -579,6 +602,14 @@ export default function LecturerTimetablePage() {
                         <span className="rounded bg-[var(--surface)] px-1.5 py-0.5 text-xs font-bold text-[var(--foreground)]">
                           {level}
                         </span>
+                        {session.shared && session.edited && batches.length > 1 ? (
+                          <span
+                            className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                            title="This day was set before batches had their own calendars, so it still applies to every batch of this sitting. Saving a change here gives the batch you are editing its own copy and leaves the others as they are."
+                          >
+                            Shared with other batches
+                          </span>
+                        ) : null}
                         {isMoved(session) ? (
                           <span className="rounded bg-[var(--accent)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--accent)]">
                             Moved from {shortDay(ymd(new Date(session.date)))}
@@ -852,21 +883,21 @@ export default function LecturerTimetablePage() {
           <Segmented
             value={branchId}
             options={selectableBranches.map((b) => ({ value: b.id, label: b.name }))}
-            onChange={setBranchId}
+            onChange={(next) => changeCohort(() => setBranchId(next))}
             locked={selectableBranches.length <= 1}
             fallbackLabel={branchName}
           />
           <Segmented
             value={level}
             options={selectableLevels.map((l) => ({ value: l, label: l }))}
-            onChange={setLevel}
+            onChange={(next) => changeCohort(() => setLevel(next))}
             locked={false}
             fallbackLabel={level}
           />
           <Segmented
             value={slot}
             options={selectableSlots.map((s) => ({ value: s, label: SLOT_LABELS[s] ?? s }))}
-            onChange={setSlot}
+            onChange={(next) => changeCohort(() => setSlot(next))}
             locked={false}
             fallbackLabel={SLOT_LABELS[slot] ?? slot}
           />
@@ -901,10 +932,66 @@ export default function LecturerTimetablePage() {
         <span className="rounded-lg bg-[var(--surface-alt)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
           {activeGroup?.label ?? [branchName, level, SLOT_LABELS[slot] ?? slot].filter(Boolean).join(" · ")}
           {activeBatchRange ? (
-            <span className="ml-1.5 text-xs font-medium text-[var(--muted)]">{activeBatchRange} batch</span>
+            <span className="ml-1.5 text-xs font-medium text-[var(--muted)]">runs {activeBatchRange}</span>
           ) : null}
         </span>
       )}
+
+      {/* THE BATCH PICKER. September and October of one sitting are two classes
+          with two calendars, so which one is open is never implicit. Shown to an
+          admin whenever the class has batches, and to a tutor only when they
+          have no per-batch class picker above (their picker already names them). */}
+      {batches.length > 0 && (canChooseCohort || myGroups.length <= 1) ? (
+        <div className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-2">
+          <span className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Batch</span>
+          <div className="inline-flex flex-wrap gap-1 rounded-lg bg-[var(--surface-alt)] p-1">
+            {batches.map((option) => (
+              <button
+                key={option.batch}
+                type="button"
+                onClick={() => selectBatch(option.batch)}
+                className={`rounded-md px-3 py-1.5 text-left text-sm font-semibold transition ${
+                  option.batch === batch
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--foreground-soft)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {option.batch} batch
+                <span
+                  className={`ml-1.5 text-xs font-medium ${option.batch === batch ? "text-white/80" : "text-[var(--muted)]"}`}
+                >
+                  {option.students} student{option.students === 1 ? "" : "s"}
+                </span>
+              </button>
+            ))}
+          </div>
+          {unplaced > 0 ? (
+            <p className="text-xs text-amber-700">
+              {unplaced} student{unplaced === 1 ? " has" : "s have"} no batch on record, so they are on none of these
+              calendars. Place them on the cohorts page.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
+  // THE BANNER: exactly which class is open and who a change reaches. Cancelling
+  // the wrong batch's class is the mistake this exists to make impossible to
+  // make quietly.
+  const banner = hasClass ? (
+    <div className="rounded-2xl border-2 border-[var(--accent)]/40 bg-[var(--accent-soft)] p-4">
+      <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">You are editing</p>
+      <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{editingLabel || "—"}</p>
+      <p className="mt-0.5 text-sm text-[var(--foreground-soft)]">
+        {batch
+          ? `Anything you change here reaches only the ${batch} batch${
+              activeBatchStudents !== null
+                ? ` — ${activeBatchStudents} student${activeBatchStudents === 1 ? "" : "s"}`
+                : ""
+            }.${batches.length > 1 ? ` The ${batches.filter((o) => o.batch !== batch).map((o) => o.batch).join(" and ")} batch keeps its own calendar.` : ""}`
+          : "Anything you change here reaches every student in this class."}
+      </p>
     </div>
   ) : null;
 
@@ -918,8 +1005,7 @@ export default function LecturerTimetablePage() {
               Class timetable
               {hasClass && !canChooseCohort && (activeGroup?.label || level) ? (
                 <span className="text-base font-semibold text-[var(--muted)]">
-                  · {activeGroup?.label ?? level}
-                  {activeBatchRange ? ` · ${activeBatchRange} batch` : ""}
+                  · {activeGroup?.label ?? [level, batch ? `${batch} batch` : ""].filter(Boolean).join(" · ")}
                 </span>
               ) : null}
             </h1>
@@ -948,6 +1034,8 @@ export default function LecturerTimetablePage() {
           {saved && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{saved}</div>
           )}
+
+          {banner}
 
           {loading ? (
             <div className="py-12 text-center text-[var(--muted)]">Loading timetable…</div>

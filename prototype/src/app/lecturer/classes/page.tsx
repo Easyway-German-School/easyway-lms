@@ -257,7 +257,7 @@ export default function LecturerClassesPage() {
                   group.branchId,
                 )}&level=${encodeURIComponent(group.level)}${
                   group.sessionSlot ? `&slot=${encodeURIComponent(group.sessionSlot)}` : ""
-                }`;
+                }${group.batch ? `&batch=${encodeURIComponent(group.batch)}` : ""}`;
                 return (
                   <section
                     key={group.key}
