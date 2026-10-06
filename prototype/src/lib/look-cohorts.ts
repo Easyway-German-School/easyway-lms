@@ -1,18 +1,17 @@
 /**
  * HOW MANY STUDENTS EACH LOOK RULE REACHES — for the admin to see BEFORE
- * moving the age cutoffs, not after.
+ * moving the age cutoff, not after.
  *
  * Counts only; never a name and never a birth date, the same rule the age
  * report follows. Pure, so it is tested without a database.
  */
 
-import { resolveLook, type Look, type LookWave, type PhoneUsage } from "@/lib/youth-look";
+import { resolveLook, type Look, type LookWave } from "@/lib/youth-look";
 
 export type CohortRow = {
   age: number | null;
   choice: Look | null;
   prompted: boolean;
-  usage: PhoneUsage | null;
 };
 
 export type CohortSummary = {
@@ -20,7 +19,6 @@ export type CohortSummary = {
   /** Rule-based cohorts, before anyone's own choice. */
   wave: number;
   invited: number;
-  classic: number;
   /** What students are actually seeing right now, choices included. */
   seeingNew: number;
   seeingClassic: number;
@@ -39,7 +37,6 @@ export function summariseLookCohorts(rows: CohortRow[], wave: LookWave): CohortS
     total: rows.length,
     wave: 0,
     invited: 0,
-    classic: 0,
     seeingNew: 0,
     seeingClassic: 0,
     chose: { youth: 0, classic: 0 },
@@ -49,7 +46,7 @@ export function summariseLookCohorts(rows: CohortRow[], wave: LookWave): CohortS
   };
 
   for (const row of rows) {
-    const decision = resolveLook({ age: row.age, choice: row.choice, wave, usage: row.usage });
+    const decision = resolveLook({ age: row.age, choice: row.choice, wave });
     out[decision.cohort] += 1;
     if (decision.look === "youth") out.seeingNew += 1;
     else out.seeingClassic += 1;

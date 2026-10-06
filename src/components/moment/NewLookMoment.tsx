@@ -49,7 +49,7 @@ const AUTO_HIDE_MS = 14000;
 export default function NewLookMoment() {
   const router = useRouter();
   const pathname = usePathname() ?? "";
-  const { prompt, setLook, markPromptSeen } = useLook();
+  const { prompt, setLook, markPromptSeen, declinePrompt } = useLook();
 
   // What Becca is saying is captured the first time the server asks for it and
   // held until she leaves. Marking it seen clears `prompt` locally (so nothing
@@ -126,7 +126,7 @@ export default function NewLookMoment() {
     setBusy(true);
     setError("");
     try {
-      await setLook(look);
+      await setLook(look, shown ?? undefined);
       dismiss();
     } catch {
       setError("Couldn't change that just now. You can do it from your profile any time.");
@@ -172,12 +172,12 @@ export default function NewLookMoment() {
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">Becca</p>
                 <p className="text-[15px] font-extrabold leading-snug text-[var(--foreground)]">
-                  {announce ? "Fresh look, same app" : "Want the phone-style look?"}
+                  {announce ? "Fresh look, same app" : "Try our new look?"}
                 </p>
                 <p className="mt-0.5 text-[13px] leading-snug text-[var(--muted)]">
                   {announce
                     ? "Everything's where you left it. Come and make your own avatar."
-                    : "A bottom menu and your own avatar. One tap to switch back."}
+                    : "Your own avatar and livelier class chats. Prefer things as they are? Keep them. You can switch any time from your profile."}
                 </p>
 
                 {error ? <p className="mt-1.5 text-xs font-semibold text-[var(--danger)]">{error}</p> : null}
@@ -216,10 +216,13 @@ export default function NewLookMoment() {
                       </button>
                       <button
                         type="button"
-                        onClick={dismiss}
+                        onClick={() => {
+                          void declinePrompt("invite");
+                          dismiss();
+                        }}
                         className="rounded-full px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:text-[var(--foreground)]"
                       >
-                        No thanks
+                        Keep mine
                       </button>
                     </>
                   )}

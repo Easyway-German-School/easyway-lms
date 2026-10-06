@@ -58,6 +58,7 @@ type Incoming = {
   weekday?: unknown;
   sessionKey?: unknown;
   durationSeconds?: unknown;
+  look?: unknown;
 };
 
 function text(value: unknown, max: number): string | null {
@@ -108,6 +109,8 @@ export async function POST(request: Request) {
         hourLocal: wholeNumber(raw.hourLocal, 0, 23),
         weekday: wholeNumber(raw.weekday, 0, 6),
         sessionKey: text(raw.sessionKey, 40),
+        // Only the two looks that exist; anything else is simply untagged.
+        look: raw.look === "youth" || raw.look === "classic" ? raw.look : null,
         durationSeconds: Math.max(0, Math.min(MAX_EVENT_SECONDS, Math.round(Number(raw.durationSeconds) || 0))),
       },
     ];

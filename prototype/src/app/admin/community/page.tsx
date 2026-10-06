@@ -4,6 +4,7 @@ import { useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import CommunityHub from "@/components/CommunityHub";
 import RemovedMessagesLog from "@/components/admin/RemovedMessagesLog";
+import CommunityInsights from "@/components/admin/CommunityInsights";
 
 /**
  * The office's window on the community.
@@ -27,7 +28,7 @@ import RemovedMessagesLog from "@/components/admin/RemovedMessagesLog";
  * moment one was needed.
  */
 
-type Tab = "rooms" | "removed";
+type Tab = "rooms" | "removed" | "insights";
 
 export default function AdminCommunityPage() {
   const [tab, setTab] = useState<Tab>("rooms");
@@ -47,6 +48,7 @@ export default function AdminCommunityPage() {
           {([
             { value: "rooms", label: "Rooms" },
             { value: "removed", label: "Removed messages" },
+            { value: "insights", label: "Insights" },
           ] as Array<{ value: Tab; label: string }>).map((option) => (
             <button
               key={option.value}
@@ -62,7 +64,7 @@ export default function AdminCommunityPage() {
           ))}
         </div>
 
-        {tab === "rooms" ? <CommunityHub /> : <RemovedMessagesLog />}
+        {tab === "rooms" ? <CommunityHub /> : tab === "removed" ? <RemovedMessagesLog /> : <CommunityInsights />}
       </div>
     </AdminShell>
   );
