@@ -214,6 +214,44 @@ export default function CohortsPage() {
     }
   };
 
+  // PLACE THE STUDENTS WHO HAVE NO BATCH. The same job the daily cron runs, on demand:
+  // first a preview (who would go where, who is left and why), then confirm.
+  type PlacementReport = {
+    applied: boolean;
+    scanned: number;
+    placed: Array<{ id: string; name: string; batch: string; reason: string }>;
+    needsPerson: Array<{ id: string; name: string; reason: string }>;
+    truncated: boolean;
+  };
+  const [placement, setPlacement] = useState<PlacementReport | null>(null);
+  const [placing, setPlacing] = useState(false);
+  const [placementMsg, setPlacementMsg] = useState("");
+  const runPlacement = async (applyIt: boolean) => {
+    setPlacing(true);
+    setPlacementMsg("");
+    try {
+      const res = await fetch("/api/admin/cohorts/auto-place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply: applyIt }),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || "Could not check.");
+      setPlacement(out);
+      if (applyIt) {
+        setPlacementMsg(`Placed ${out.placed.length} student${out.placed.length === 1 ? "" : "s"}.`);
+        await load();
+      }
+    } catch (error) {
+      setPlacementMsg(error instanceof Error ? error.message : "Could not check.");
+    } finally {
+      setPlacing(false);
+    }
+  };
+  const placedByBatch = placement
+    ? Object.entries(placement.placed.reduce<Record<string, number>>((acc, p) => ({ ...acc, [p.batch]: (acc[p.batch] ?? 0) + 1 }), {}))
+    : [];
+
   const tally = data?.classTally;
 
   return (
@@ -240,6 +278,63 @@ export default function CohortsPage() {
             </p>
           )}
         </div>
+
+        {data && data.noBatch > 0 && (
+          <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 text-amber-950">
+            <p className="text-sm font-bold uppercase tracking-wide">Students with no batch</p>
+            <p className="mt-1 text-lg font-semibold">
+              {data.noBatch} student{data.noBatch === 1 ? " is" : "s are"} not in any batch
+            </p>
+            <p className="mt-1 text-sm">
+              They are on no batch&apos;s calendar, chat or materials, and can only join a live class when just one batch is
+              on. The system places the clear cases by itself every day (an enrolment record, a brand-new student, a first
+              attendance in the last few months). Check who it would place now:
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={placing}
+                onClick={() => runPlacement(false)}
+                className="rounded-full border border-amber-400 bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              >
+                {placing ? "Checking…" : "See who can be placed"}
+              </button>
+              {placement && !placement.applied && placement.placed.length > 0 && (
+                <button
+                  type="button"
+                  disabled={placing}
+                  onClick={() => runPlacement(true)}
+                  className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  Place these {placement.placed.length} now
+                </button>
+              )}
+              {placementMsg && <span className="text-sm font-semibold">{placementMsg}</span>}
+            </div>
+            {placement && (
+              <div className="mt-3 space-y-2 text-sm">
+                <p>
+                  <strong>{placement.placed.length}</strong> {placement.applied ? "placed" : "can be placed"}
+                  {placedByBatch.length > 0 && <> ({placedByBatch.map(([batch, n]) => `${n} in ${batch}`).join(", ")})</>} ·{" "}
+                  <strong>{placement.needsPerson.length}</strong> need a person
+                  {placement.truncated && " · more remain; run it again"}
+                </p>
+                {placement.needsPerson.length > 0 && (
+                  <details>
+                    <summary className="cursor-pointer font-semibold">Who needs a person, and why</summary>
+                    <ul className="mt-2 max-h-56 list-disc space-y-1 overflow-y-auto pl-5">
+                      {placement.needsPerson.map((p) => (
+                        <li key={p.id}>
+                          <span className="font-medium">{p.name}</span> — {p.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+          </section>
+        )}
 
         {tally && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
