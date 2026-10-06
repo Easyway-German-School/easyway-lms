@@ -316,31 +316,14 @@ export default function NextLevelPipelinePage() {
               ))}
             </div>
 
-            {data.auto && (
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-[var(--foreground)]">
-                    Send automatically — {data.auto.enabled ? "ON" : "OFF"}
-                  </p>
-                  <p className="mt-0.5 text-xs text-[var(--muted)]">
-                    When on, every morning anyone new who becomes eligible (portal open, never messaged) gets Becca&apos;s message by
-                    bell, push and email — nobody twice, and you press nothing.
-                    {data.auto.lastRunSummary ? ` Last run: ${data.auto.lastRunSummary}` : ""}
-                  </p>
-                </div>
-                <button
-                  disabled={busy}
-                  onClick={() => setAuto(!data.auto?.enabled)}
-                  aria-pressed={data.auto.enabled}
-                  className={`relative h-7 w-12 shrink-0 rounded-full transition ${data.auto.enabled ? "bg-emerald-500" : "bg-[var(--border)]"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${data.auto.enabled ? "left-[22px]" : "left-0.5"}`}
-                  />
-                  <span className="sr-only">Toggle automatic sending</span>
-                </button>
-              </div>
-            )}
+            <p className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-xs text-[var(--muted)]">
+              Messages here only go out when you press a button. The morning summary (which tells you what is ready) is
+              switched on at{" "}
+              <Link href="/admin/graduation" className="font-semibold text-[var(--accent)] underline">
+                Finished batches
+              </Link>
+              .
+            </p>
 
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <button

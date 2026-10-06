@@ -712,39 +712,48 @@ export async function signOffForCheckout(studentId: string, now = new Date()): P
   return true;
 }
 
-/* ------------------------------ automatic run ------------------------------ */
+/* ------------------------------ morning summary ------------------------------ */
 
 function tenantWhere(tenantId: string) {
   return { OR: [{ tenantId }, { branch: { tenantId } }, { user: { tenantId } }] };
 }
 
+/** Small stable hash, only used to tell "the same list as yesterday" from "a changed list". */
+function signatureOf(text: string): string {
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+  return (hash >>> 0).toString(36);
+}
+
 /**
- * One switch for the office: "do this for me when a batch ends". It runs both
- * automatic halves together — this module's daily move-up-and-invite, and the
- * pipeline's hourly message to anyone who becomes eligible later — so there is
- * nothing else to find and flip. Reads back from this module's own flag.
+ * One switch for the office: the MORNING SUMMARY. When it is on, the system checks
+ * the finished batches every morning and TELLS the admins what it found; it never
+ * moves, invites or messages a single learner by itself.
+ *
+ * It used to move people on its own. That was retired: automatic moves are only as
+ * good as the data behind them, and where data is missing the system has to say
+ * "a person should look", not guess. The hourly auto-send of Becca's message is
+ * switched off with it, for the same reason. Reads back from this module's flag.
  */
 export async function setBatchAutomatic(tenantId: string, enabled: boolean): Promise<GraduationAuto> {
-  await writeNextLevelAuto(tenantId, { enabled });
+  await writeNextLevelAuto(tenantId, { enabled: false });
   return writeGraduationAuto(tenantId, { enabled });
 }
 
 /**
- * The daily automatic run. For every school that has switched it on, moves on
- * every learner the desk calls ready whose batch has actually FINISHED (the
- * manual button may go a fortnight early; the automatic one never does), and
- * invites — without moving — the ones who only owe on the level just finished,
- * once each. Capped per run so the cron job's time budget holds — the remainder
- * is picked up the next day, and the desk shows anything left.
+ * The daily check (06:00 UTC). For every school that has the morning summary on,
+ * counts per finished batch who is ready to move up, who owes (would be invited),
+ * who needs a look and why, plus anyone wrongly moved up, then sends the admins ONE
+ * bell + phone notification linking to the desk. The same list is never sent twice:
+ * it is only sent again when the numbers change.
  */
 export async function runAutoGraduation(
-  options: { now?: Date; cap?: number; budgetMs?: number } = {},
-): Promise<{ schools: number; graduated: number; invited: number; skipped: number }> {
+  options: { now?: Date; budgetMs?: number } = {},
+): Promise<{ schools: number; suggested: number }> {
   const now = options.now ?? new Date();
-  const cap = options.cap ?? 60;
   const started = Date.now();
   const budgetMs = options.budgetMs ?? 35_000;
-  const total = { schools: 0, graduated: 0, invited: 0, skipped: 0 };
+  const total = { schools: 0, suggested: 0 };
 
   const rows = await prisma.schoolSetting.findMany({
     where: { key: GRADUATION_AUTO_KEY },
@@ -760,48 +769,65 @@ export async function runAutoGraduation(
       const where = tenantWhere(row.tenantId);
       const startDayOverrides = await readIntakeStartDayOverrides(row.tenantId);
       const { candidates } = await scan({ where, now, startDayOverrides });
-      const ids = candidates
-        .filter(
-          (candidate) =>
-            candidate.timing.ended &&
-            (candidate.verdict.state === "ready" ||
-              // Owes on the level just finished: invited once, never moved.
-              (candidate.verdict.state === "blocked" && candidate.verdict.reason === "fees" && !candidate.offered)),
-        )
-        .map((candidate) => candidate.studentId)
-        .slice(0, cap);
+      const wrong = await findWronglyMoved({ where, now });
 
-      let graduated = 0;
-      let invited = 0;
-      let skipped = 0;
-      // Small slices, so a slow run stops between them instead of mid-learner.
-      for (let i = 0; i < ids.length; i += 10) {
-        if (Date.now() - started > budgetMs) break;
-        const result = await graduateStudents(ids.slice(i, i + 10), {
-          where,
-          tenantId: row.tenantId,
-          now,
-          endedOnly: true,
-        });
-        graduated += result.graduated.length;
-        invited += result.invited.length;
-        skipped += result.skipped.length;
+      type Tally = { ready: number; owes: number; unpaid: number; held: number; other: number };
+      const byBatch = new Map<string, Tally>();
+      for (const candidate of candidates) {
+        if (!candidate.timing.ended) continue;
+        const name = `${candidate.batch} batch${candidate.sessionSlot.toLowerCase() === "weekend" ? " (weekend)" : ""}`;
+        const tally = byBatch.get(name) ?? { ready: 0, owes: 0, unpaid: 0, held: 0, other: 0 };
+        const verdict = candidate.verdict;
+        if (verdict.state === "ready") tally.ready += 1;
+        else if (verdict.reason === "fees") {
+          if (!candidate.offered) tally.owes += 1;
+        } else if (verdict.reason === "unpaid") tally.unpaid += 1;
+        else if (verdict.reason === "held_back") tally.held += 1;
+        else tally.other += 1;
+        byBatch.set(name, tally);
       }
 
-      total.graduated += graduated;
-      total.invited += invited;
-      total.skipped += skipped;
-      if (graduated > 0 || invited > 0 || skipped > 0) {
+      let ready = 0;
+      let owes = 0;
+      const lines: string[] = [];
+      for (const [name, t] of [...byBatch.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        ready += t.ready;
+        owes += t.owes;
         const parts = [
-          `Moved up ${graduated} learner${graduated === 1 ? "" : "s"}`,
-          invited ? `invited ${invited} who still owe` : "",
-          skipped ? `${skipped} left for the office` : "",
+          t.ready ? `${t.ready} ready to move up` : "",
+          t.owes ? `${t.owes} owe on the finished level (would be invited)` : "",
+          t.unpaid ? `${t.unpaid} have not paid the deposit` : "",
+          t.held ? `${t.held} held back` : "",
+          t.other ? `${t.other} need a look` : "",
         ].filter(Boolean);
-        await writeGraduationAuto(row.tenantId, {
-          lastRunAt: now.toISOString(),
-          lastRunSummary: `${parts.join(", ")}.`,
-        });
+        if (parts.length) lines.push(`${name}: ${parts.join(", ")}`);
       }
+      if (wrong.length) lines.push(`${wrong.length} moved up without paying the deposit — use "Put back"`);
+
+      // Only worth a ping when there is something to DO.
+      if (ready + owes + wrong.length === 0) return;
+
+      const outcome = await notify({
+        to: { audience: "admin", capability: "students" },
+        title: ready > 0 ? `${ready} learner${ready === 1 ? "" : "s"} can move up — your call` : "Finished batches need your attention",
+        message: `${lines.join(". ")}. Open Finished batches to look and press the button. Nothing has been moved or sent.`,
+        kind: "level-complete",
+        severity: "info",
+        link: "/admin/graduation",
+        dedupeKey: `graduation-suggest:${row.tenantId}:${signatureOf(lines.join("|"))}`,
+        push: true,
+        email: false,
+        sms: false,
+      }).catch((error) => {
+        console.error("Morning summary failed", error);
+        return { created: 0 };
+      });
+
+      if (outcome.created > 0) total.suggested += 1;
+      await writeGraduationAuto(row.tenantId, {
+        lastRunAt: now.toISOString(),
+        lastRunSummary: `${ready} ready, ${owes} to invite${wrong.length ? `, ${wrong.length} to put back` : ""}. ${outcome.created > 0 ? "Admins told." : "Same as last time, so no new message."}`,
+      });
     });
   }
 
