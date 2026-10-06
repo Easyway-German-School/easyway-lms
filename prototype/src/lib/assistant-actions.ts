@@ -9,6 +9,7 @@ import { nextLevelAfter } from "@/lib/levels";
 import { generateTempPassword } from "@/lib/student-password";
 import { normalizeNigerianPhone } from "@/lib/sms";
 import { normalizeSlot } from "@/lib/class-times";
+import { classesHaveBegun } from "@/lib/attendance-guard";
 import { privateOverlaps } from "@/lib/private-classes";
 import { SCHOOL_TIMEZONE, formatWhen, zonedClock, zonedTimeToInstant } from "@/lib/school-time";
 import {
@@ -469,7 +470,11 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
         throw new PlanError("That day is in the future. A register can only be marked for a day that has happened.");
       }
 
-      const status = str(args, "status") || "present";
+      // No guessing: an unstated status is never assumed to be "present".
+      const status = str(args, "status");
+      if (!status) {
+        throw new PlanError("Say whether the class was present, absent or late. Attendance is never assumed.");
+      }
       const slot = str(args, "sessionSlot") ? normalizeSlot(str(args, "sessionSlot")) : null;
 
       const { rows, label } = await cohortFor(
@@ -479,9 +484,12 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
 
       const students = await prisma.student.findMany({
         where: { id: { in: rows.map((row) => row.id) }, ...(slot ? { sessionSlot: slot } : {}) },
-        select: { id: true },
+        select: { id: true, admission: true, classesStartedAt: true, createdAt: true },
       });
-      const ids = new Set(students.map((student) => student.id));
+      // Students whose batch hasn't begun can't have attended or missed anything.
+      const ids = new Set(
+        students.filter((student) => classesHaveBegun(student, date)).map((student) => student.id),
+      );
       const inClass = rows.filter((row) => ids.has(row.id));
 
       guardCohort(inClass, `${label}${slot ? ` (${slot})` : ""}`);

@@ -85,10 +85,14 @@ function absoluteOf(date: Date): number {
  */
 export function resolveBatchAbsolute(
   batch: string | null | undefined,
-  { registeredAt, now = new Date() }: { registeredAt?: Date | null; now?: Date } = {},
+  { registeredAt, batchYear, now = new Date() }: { registeredAt?: Date | null; batchYear?: number | null; now?: Date } = {},
 ): number | null {
   const monthIndex = monthNameToIndex(batch);
   if (monthIndex === null) return null;
+
+  if (typeof batchYear === "number" && Number.isInteger(batchYear)) {
+    return batchYear * 12 + monthIndex;
+  }
 
   if (registeredAt instanceof Date && !Number.isNaN(registeredAt.getTime())) {
     // Forwards from registration: the first occurrence at or after the month
@@ -110,11 +114,12 @@ export function resolveBatchWindow(
   batch: string | null | undefined,
   {
     registeredAt,
+    batchYear,
     now = new Date(),
     months = SESSION_MONTHS,
-  }: { registeredAt?: Date | null; now?: Date; months?: number } = {},
+  }: { registeredAt?: Date | null; batchYear?: number | null; now?: Date; months?: number } = {},
 ): BatchWindow | null {
-  const absolute = resolveBatchAbsolute(batch, { registeredAt, now });
+  const absolute = resolveBatchAbsolute(batch, { registeredAt, batchYear, now });
   if (absolute === null) return null;
 
   const year = Math.floor(absolute / 12);
@@ -176,4 +181,11 @@ export function batchFromAdmission(admission: unknown): string | null {
   if (!admission || typeof admission !== "object") return null;
   const value = (admission as Record<string, unknown>).batch;
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** Read the explicit calendar year off an admission payload, when present. */
+export function batchYearFromAdmission(admission: unknown): number | null {
+  if (!admission || typeof admission !== "object") return null;
+  const value = (admission as Record<string, unknown>).batchYear;
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }

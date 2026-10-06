@@ -76,6 +76,10 @@ export default function AdminPromotionsPage() {
   const [promoting, setPromoting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Where the promoted students land. The server suggests the school's current
+  // intake; the office can pick any batch from this month onward.
+  const [destinationOptions, setDestinationOptions] = useState<Array<{ month: string; year: number; label: string }>>([]);
+  const [destination, setDestination] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -101,6 +105,10 @@ export default function AdminPromotionsPage() {
 
       const data = await res.json();
       setCandidates(data.candidates ?? []);
+      setDestinationOptions(data.destinationOptions ?? []);
+      setDestination((prev) =>
+        prev || (data.suggestedDestination ? `${data.suggestedDestination.month} ${data.suggestedDestination.year}` : ""),
+      );
       // Stale ticks must not survive a reload, or a later promote would move
       // students the admin can no longer see.
       setSelected({});
@@ -119,20 +127,25 @@ export default function AdminPromotionsPage() {
 
   async function promote() {
     if (selectedIds.length === 0) return;
+    const chosen = destinationOptions.find((option) => option.label === destination);
+    if (!chosen) {
+      setError("Choose the batch these students are moving into.");
+      return;
+    }
     setPromoting(true);
     setNotice("");
     try {
       const res = await fetch("/api/admin/promotions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ studentIds: selectedIds }),
+        body: JSON.stringify({ studentIds: selectedIds, month: chosen.month, year: chosen.year }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Could not move these students");
 
       const result = await res.json();
       const skipped = result.skipped?.length ?? 0;
       setNotice(
-        `Moved ${result.promoted.length} student${result.promoted.length === 1 ? "" : "s"} up a level` +
+        `Moved ${result.promoted.length} student${result.promoted.length === 1 ? "" : "s"} up a level into the ${chosen.label} batch` +
         (skipped > 0 ? `. ${skipped} skipped.` : "."),
       );
       setError("");
@@ -183,9 +196,23 @@ export default function AdminPromotionsPage() {
             Export CSV
           </button>
 
+          <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
+            Land in batch
+            <select
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              aria-label="Batch the promoted students move into"
+              className="rounded-lg border px-3 py-2 text-sm text-[var(--foreground)]"
+            >
+              {destinationOptions.map((option) => (
+                <option key={option.label} value={option.label}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
           <button
             onClick={promote}
-            disabled={promoting || selectedIds.length === 0}
+            disabled={promoting || selectedIds.length === 0 || !destination}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
           >
             {promoting ? "Moving…" : `Move ${selectedIds.length || ""} up a level`}

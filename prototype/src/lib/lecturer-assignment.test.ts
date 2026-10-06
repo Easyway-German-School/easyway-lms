@@ -109,6 +109,27 @@ describe("studentWhereForAssignment class-type filtering", () => {
       ],
     });
   });
+
+  it("prefers explicit teaching groups over stale flat level/session mirrors", () => {
+    const assignment = readAssignment({
+      branchIds: ["branch-a"],
+      levels: ["A1", "B2", "C1"],
+      sessionSlots: ["morning", "evening"],
+      assignmentGroups: [
+        { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
+        { branchId: "branch-a", level: "B2", sessionSlot: "evening" },
+      ],
+    });
+
+    expect(assignment.levels).toEqual(["A1", "B2"]);
+    expect(assignment.sessionSlots).toEqual(["morning", "evening"]);
+    expect(studentWhereForAssignment(assignment)).toEqual({
+      OR: [
+        { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
+        { branchId: "branch-a", level: "B2", sessionSlot: "evening" },
+      ],
+    });
+  });
 });
 
 describe("belongsToLecturer with co-tutors", () => {

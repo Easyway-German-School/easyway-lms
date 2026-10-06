@@ -83,6 +83,7 @@ export async function GET() {
     requiredDeposit: requiredDepositFor(feeLookup),
     registeredAt: student.createdAt,
     sessionSlot: student.sessionSlot,
+    batchYear: typeof admission.batchYear === "number" && Number.isInteger(admission.batchYear) ? admission.batchYear : null,
   });
 
   if (eligibility.eligible) {

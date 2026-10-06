@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFImage } from "pdf-lib";
 
 /**
  * Proof-of-enrolment letter — the document a student hands to a visa office,
@@ -15,6 +15,29 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf
 const PAGE_SIZE: [number, number] = [595.28, 841.89]; // A4
 const MARGIN = 64;
 const ACCENT = rgb(1, 0.4, 0); // #FF6600
+
+/**
+ * The logo lives at `public/logo.png` — fine for `<img src="/logo.png">`, but
+ * this runs in a serverless function, not a browser, and Vercel does not
+ * bundle `public/` into the function alongside its code. Fetching the file
+ * over HTTP, the same way `enrolment-letter-email.ts` does for the emailed
+ * copy, sidesteps that entirely. Best-effort: a slow or unreachable fetch
+ * falls back to the text-only header below rather than failing the letter a
+ * student may be waiting on for a visa appointment.
+ */
+async function tryEmbedLogo(doc: PDFDocument): Promise<PDFImage | null> {
+  const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "").replace(/\/$/, "");
+  if (!base) return null;
+
+  try {
+    const response = await fetch(`${base}/logo.png`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const bytes = await response.arrayBuffer();
+    return await doc.embedPng(bytes);
+  } catch {
+    return null;
+  }
+}
 
 function wrapLines(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const words = text.split(/\s+/).filter(Boolean);
@@ -63,13 +86,31 @@ export async function buildEnrolmentLetterPdf(input: EnrolmentLetterInput): Prom
   let y = PAGE_SIZE[1] - MARGIN;
 
   const schoolName = input.schoolName ?? "Easyway Language School";
-  page.drawText(schoolName, { x: MARGIN, y, size: 18, font: bold, color: rgb(0.05, 0.05, 0.05) });
-  y -= 20;
+  const logo = await tryEmbedLogo(doc);
+
+  if (logo) {
+    const logoHeight = 30;
+    const logoWidth = (logo.width / logo.height) * logoHeight;
+    page.drawImage(logo, { x: MARGIN, y: y - logoHeight + 6, width: logoWidth, height: logoHeight });
+    page.drawText(schoolName, {
+      x: MARGIN + logoWidth + 12,
+      y: y - logoHeight / 2 - 3,
+      size: 14,
+      font: bold,
+      color: rgb(0.05, 0.05, 0.05),
+    });
+    y -= logoHeight + 6;
+  } else {
+    page.drawText(schoolName, { x: MARGIN, y, size: 18, font: bold, color: rgb(0.05, 0.05, 0.05) });
+    y -= 20;
+  }
+
   if (input.schoolAddress) {
     page.drawText(input.schoolAddress, { x: MARGIN, y, size: 10, font: body, color: rgb(0.45, 0.45, 0.45) });
     y -= 16;
   }
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_SIZE[0] - MARGIN, y }, thickness: 1, color: rgb(0.85, 0.85, 0.85) });
+  y -= 10;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_SIZE[0] - MARGIN, y }, thickness: 2, color: ACCENT });
   y -= 30;
 
   const issuedAt = input.issuedAt ?? new Date();

@@ -8,6 +8,8 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { notify, KIND } from "@/lib/notify";
+import { batchFromAdmission, batchYearFromAdmission } from "@/lib/batch";
+import { activatePaidBatchTransfer, readPendingBatchTransfer } from "@/lib/batch-transfer";
 
 /**
  * The one question every gated page asks: may this student see class content yet?
@@ -68,7 +70,23 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  if (readPendingBatchTransfer(student.admission)) {
+    try {
+      const activated = await activatePaidBatchTransfer(student.id);
+      if (activated) {
+        const current = await prisma.student.findUnique({
+          where: { id: student.id },
+          select: { admission: true },
+        });
+        if (current) student.admission = current.admission;
+      }
+    } catch (error) {
+      console.error("Could not activate paid batch transfer from student portal", { studentId: student.id, error });
+    }
+  }
+
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const batch = batchFromAdmission(student.admission);
   const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
 
   // An on-track tuition payment plan holds the balance lock back, like grace.
@@ -97,6 +115,8 @@ export async function GET() {
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
     paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
+    batch,
+    batchYear: batchYearFromAdmission(student.admission),
   });
   const hasPhoto = hasProfilePhoto(student.admission);
 

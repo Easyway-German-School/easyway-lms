@@ -66,6 +66,12 @@ export type RoomInteractions = {
   unreadChat: number;
   /** The tutor has said the lesson is over. One-way: it never goes back. */
   ended: boolean;
+  /**
+   * The moment "The Office" last signalled it is about to speak, or null.
+   * A timestamp rather than a boolean so a second notice while the banner is
+   * still up restarts its clock instead of being silently absorbed.
+   */
+  officeNotice: number | null;
   react: (kind: ReactionKind) => void;
   toggleHand: () => void;
   sendChat: (text: string) => void;
@@ -90,6 +96,9 @@ function displayName(participant: Participant): string {
   return participant.name || participant.identity;
 }
 
+/** How long the "an announcement is coming" banner stays up before clearing itself. */
+const OFFICE_NOTICE_TTL_MS = 15000;
+
 export function useRoomInteractions(room: Room | null, role: RoomRole, revision: number): RoomInteractions {
   const [mode, setModeState] = useState<RoomMode>("open");
   const [floor, setFloorState] = useState<string | null>(null);
@@ -98,6 +107,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
   const [chat, setChat] = useState<ChatLine[]>([]);
   const [unreadChat, setUnreadChat] = useState(0);
   const [ended, setEnded] = useState(false);
+  const [officeNotice, setOfficeNotice] = useState<number | null>(null);
   const lastReactionRef = useRef(0);
 
   // Mirrors for the announce-to-late-joiners path, which fires from an event
@@ -239,6 +249,10 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
         case "ended":
           setEnded(true);
           break;
+
+        case "officeNotice":
+          setOfficeNotice(Date.now());
+          break;
       }
     }
 
@@ -301,6 +315,15 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     const timer = window.setTimeout(() => setReactions((current) => current.slice(1)), REACTION_TTL_MS);
     return () => window.clearTimeout(timer);
   }, [reactions]);
+
+  // The "an announcement is coming" banner is a moment, not a fact — it clears
+  // itself so a class that scrolls back later does not find it stuck on
+  // screen from something that finished five minutes ago.
+  useEffect(() => {
+    if (officeNotice === null) return;
+    const timer = window.setTimeout(() => setOfficeNotice(null), OFFICE_NOTICE_TTL_MS);
+    return () => window.clearTimeout(timer);
+  }, [officeNotice]);
 
   // --- sending ------------------------------------------------------------
 
@@ -405,6 +428,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     chat,
     unreadChat,
     ended,
+    officeNotice,
     presented,
     react,
     toggleHand,

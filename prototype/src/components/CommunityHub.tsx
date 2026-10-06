@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePushNotifications } from "@/lib/use-push";
+import { requestInstall } from "@/lib/client/install-events";
 import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
@@ -1210,12 +1211,15 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         </div>
 
         <button
-          onClick={push.enabled ? push.disable : push.enable}
-          disabled={!push.supported || push.busy}
+          // On an iPhone in a browser tab the button used to be permanently
+          // greyed out; it now leads to the install steps, which is the only
+          // route to alerts there.
+          onClick={push.needsInstall ? requestInstall : push.enabled ? push.disable : push.enable}
+          disabled={(!push.supported && !push.needsInstall) || push.busy}
           className="m-2 flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface)] disabled:opacity-40"
         >
           {push.enabled ? <BellOffIcon className="h-3.5 w-3.5" /> : <BellIcon className="h-3.5 w-3.5" />}
-          {push.enabled ? "Mute this device" : "Notify me on this device"}
+          {push.needsInstall ? "Install app for alerts" : push.enabled ? "Mute this device" : "Notify me on this device"}
         </button>
       </aside>
 

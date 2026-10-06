@@ -10,6 +10,7 @@ import {
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
+import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,7 @@ export async function GET() {
       // Batch lives inside the admission JSON, which cannot be filtered on in
       // the query. A student named onto this tutor skips the check entirely.
       .filter((student) => belongsToLecturer(assignment, lecturer.id, student))
-      .map((student) => {
+      .map(async (student) => {
         const admission =
           typeof student.admission === "object" && student.admission !== null
             ? (student.admission as Record<string, unknown>)
@@ -103,6 +104,7 @@ export async function GET() {
           classType: student.classType,
           pathway: student.pathway,
         };
+        const planStatus = await planStatusForStudent(student.id);
         // Same ledger-aware fields the student's own portal and the admin
         // remote view feed in — omitting them is what let this tag disagree
         // with whether the student could actually get into the room.
@@ -116,6 +118,7 @@ export async function GET() {
           classesStartedAt: student.classesStartedAt,
           enrolledAt: student.createdAt,
           paymentGraceUntil: student.paymentGraceUntil,
+          paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
         });
 
         const present = student.attendances.filter((attendance) => attendance.present).length;
@@ -180,7 +183,7 @@ export async function GET() {
         : `${rows.length} student${rows.length === 1 ? "" : "s"} assigned to you by the office`,
       assignment,
       isOnlineBranch: assignment.branchIds.some((id) => onlineBranchIds.has(id)),
-      students: rows,
+      students: await Promise.all(rows),
     });
   } catch (error) {
     console.error("Lecturer students lookup failed", error);

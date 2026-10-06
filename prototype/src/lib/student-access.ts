@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess, type StudentAccess } from "@/lib/access";
+import { batchFromAdmission, batchYearFromAdmission } from "@/lib/batch";
 import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
@@ -29,6 +30,7 @@ export async function getStudentAccess(studentId: string): Promise<StudentAccess
       deliveryMode: true,
       classesStartedAt: true,
       createdAt: true,
+      admission: true,
       paymentGraceUntil: true,
       branch: { select: { name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
@@ -70,6 +72,8 @@ export async function getStudentAccess(studentId: string): Promise<StudentAccess
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
     paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
+    batch: batchFromAdmission(student.admission),
+    batchYear: batchYearFromAdmission(student.admission),
   });
 }
 

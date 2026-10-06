@@ -126,6 +126,13 @@ export type GenerateScheduleArgs = {
    * lib/batch.ts.
    */
   registeredAt?: Date | null;
+  /**
+   * The exact calendar year of the batch, when the office placed the student
+   * there (a cohort transfer, a promotion into a chosen intake). Beats the
+   * registration-date inference, which is wrong for anybody who registered more
+   * than a year before the batch they are now in.
+   */
+  batchYear?: number | null;
   /** Reference "now" — pass the request time so output is stable within a request. */
   now?: Date;
   /** How many months of timetable to generate. */
@@ -140,6 +147,7 @@ export function generatePersonalizedSchedule({
   level,
   batch,
   registeredAt = null,
+  batchYear: explicitBatchYear = null,
   now = new Date(),
   months = 2,
   sessionSlot = null,
@@ -153,7 +161,7 @@ export function generatePersonalizedSchedule({
 
   // One shared rule for which calendar month a batch name points at. Falls
   // back to the current month when the batch is missing or unreadable.
-  const batchAbsolute = resolveBatchAbsolute(batch, { registeredAt, now }) ?? currentAbsolute;
+  const batchAbsolute = resolveBatchAbsolute(batch, { registeredAt, batchYear: explicitBatchYear, now }) ?? currentAbsolute;
   const batchYear = Math.floor(batchAbsolute / 12);
   const batchMonthIndex = batchAbsolute % 12;
 

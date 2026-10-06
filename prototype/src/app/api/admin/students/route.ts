@@ -11,7 +11,7 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { writeAudit } from "@/lib/prisma-guard";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { slotTitle } from "@/lib/school-settings";
-import { assignStudentCode } from "@/lib/student-code";
+import { assignStudentCode, realignStudentCodeById } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { defaultBatchMonth } from "@/lib/intake-server";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
@@ -224,6 +224,16 @@ export async function POST(request: Request) {
 
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
+  }
+
+  // Jason: weekend hybrid isn't a sitting the school runs — a hybrid student
+  // picks one of the curated combos (lib/hybrid-combo.ts), none of which pair
+  // a weekend campus sitting with an online one.
+  if (requestedDeliveryMode === "hybrid" && sessionSlot === "weekend") {
+    return NextResponse.json(
+      { error: "Weekend isn't offered for hybrid students. Pick morning, afternoon or evening." },
+      { status: 400 },
+    );
   }
 
   if (password.length < 8) {
@@ -696,6 +706,10 @@ export async function PATCH(request: Request) {
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+    // The ID carries the intake month, so a changed batch re-issues it until that intake starts.
+    if (batch !== undefined) {
+      await realignStudentCodeById(studentId).catch((e) => console.error("Code realign failed", e));
+    }
 
     if (sessionSlotChanged || deliveryModeChanged) {
       await writeAudit(unguardedPrisma, {
@@ -1026,7 +1040,7 @@ export async function DELETE(request: Request) {
         // A staff member who also carries a Student row keeps their User — the
         // roster row is removed, the ability to sign in is not.
         const userIdChunk = slice
-          .filter((s) => s.user && s.user.role === "STUDENT" && s.user.adminRole == null)
+          .filter((s) => s.user && s.user.role === "STUDENT")
           .map((s) => s.userId);
         await prisma.student.deleteMany({ where: { id: { in: studentIdChunk } } });
         if (userIdChunk.length > 0) {
@@ -1097,10 +1111,7 @@ export async function DELETE(request: Request) {
       // super admin cleaning up test students soft-deleted their own login on
       // 2026-09-02. A missing `user` (already soft-deleted) is treated the same
       // conservative way: drop the Student row, leave the account alone.
-      const isStudentOnly =
-        student.user != null &&
-        student.user.role === "STUDENT" &&
-        student.user.adminRole == null;
+      const isStudentOnly = student.user != null && student.user.role === "STUDENT";
 
       if (!isStudentOnly) {
         await prisma.student.delete({ where: { id: student.id } });

@@ -6,6 +6,8 @@ import { classifyPaymentTransaction, isReceivedPayment } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
+import { activatePaidBatchTransfer } from "@/lib/batch-transfer";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped, setTenantScope } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
@@ -330,6 +332,10 @@ async function handlePOST(request: Request) {
       await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
         console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
       });
+      await notifyEnrolmentLetterIfSettled(student.id);
+      await activatePaidBatchTransfer(student.id).catch((error) => {
+        console.error("Paystack webhook: batch transfer activation failed", { studentId: student.id, error });
+      });
 
       return NextResponse.json({ received: true });
     }
@@ -518,6 +524,11 @@ async function handlePOST(request: Request) {
         console.error("Error sending welcome email:", error);
       }
     }
+
+    await notifyEnrolmentLetterIfSettled(student.id);
+    await activatePaidBatchTransfer(student.id).catch((error) => {
+      console.error("Paystack webhook: batch transfer activation failed", { studentId: student.id, error });
+    });
 
     return NextResponse.json({ received: true });
   } catch (error) {

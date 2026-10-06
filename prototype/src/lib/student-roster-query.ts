@@ -84,9 +84,9 @@ export function buildRosterWhereClause(
   ctx: { tenantId: string | null | undefined; allowedBranchIds: string[] | null },
 ): any {
   const whereClause: any = {};
-  // Never surface staff in the student roster — see api/admin/students GET's
-  // long-form note on why this join, not a role column alone, is the rule.
-  whereClause.user = { is: { role: "STUDENT", adminRole: null } };
+  // Role is the authoritative account type. adminRole is only meaningful for
+  // admin accounts and may contain stale data on imported student accounts.
+  whereClause.user = { is: { role: "STUDENT" } };
   if (filters.branchId) whereClause.branchId = filters.branchId;
   if (filters.level) whereClause.level = filters.level;
   if (filters.batch) whereClause.admission = { path: ["batch"], equals: filters.batch };

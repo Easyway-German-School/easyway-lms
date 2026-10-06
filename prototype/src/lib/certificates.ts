@@ -5,7 +5,7 @@ import { awardFor, hasPassed, weightedCourseworkAverage, type Award } from "@/li
 import { SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
 import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
-import { resolveBatchWindow } from "@/lib/batch";
+import { batchYearFromAdmission, resolveBatchWindow } from "@/lib/batch";
 
 /**
  * Certificates.
@@ -70,8 +70,9 @@ export function courseWindow(
   now = new Date(),
   registeredAt: Date | null = null,
   sessionSlot: string | null = null,
+  batchYear: number | null = null,
 ): { start: Date | null; end: Date | null } {
-  const window = resolveBatchWindow(batch, { registeredAt, now, months: sessionDurationMonths(sessionSlot) });
+  const window = resolveBatchWindow(batch, { registeredAt, batchYear, now, months: sessionDurationMonths(sessionSlot) });
   if (!window) return { start: null, end: null };
   return { start: window.startsOn, end: window.endsOn };
 }
@@ -81,9 +82,10 @@ export function sessionIsComplete(
   now = new Date(),
   registeredAt: Date | null = null,
   sessionSlot: string | null = null,
+  batchYear: number | null = null,
 ): boolean {
   const months = sessionDurationMonths(sessionSlot);
-  const window = resolveBatchWindow(batch, { registeredAt, now, months });
+  const window = resolveBatchWindow(batch, { registeredAt, batchYear, now, months });
   if (!window) return false;
   return window.monthsElapsed >= months;
 }
@@ -108,8 +110,10 @@ export function certificateEligibility(input: {
   /** When the student registered — decides which occurrence of the batch month. */
   registeredAt?: Date | null;
   sessionSlot?: string | null;
+  /** Explicit batch year for an office-placed student — see lib/batch.ts. */
+  batchYear?: number | null;
 }): Eligibility {
-  if (!sessionIsComplete(input.batch, input.now, input.registeredAt ?? null, input.sessionSlot ?? null)) {
+  if (!sessionIsComplete(input.batch, input.now, input.registeredAt ?? null, input.sessionSlot ?? null, input.batchYear ?? null)) {
     return {
       eligible: false,
       reason: `Your ${sessionDurationMonths(input.sessionSlot)}-month session is still running. Certificates are issued at the end of it.`,
@@ -221,6 +225,7 @@ export async function issueCertificateForStudent(
     now,
     registeredAt: student.createdAt,
     sessionSlot: student.sessionSlot,
+    batchYear: batchYearFromAdmission(admission),
   });
   if (!eligibility.eligible) return { issued: false, reason: eligibility.reason };
 
@@ -264,8 +269,8 @@ export async function issueCertificateForStudent(
       // Snapshotted like every other field here: a student who repeats the
       // level or moves batch must not change the dates on a document already
       // printed and in somebody's hand.
-      courseStart: courseWindow(batch, now, student.createdAt, student.sessionSlot).start,
-      courseEnd: courseWindow(batch, now, student.createdAt, student.sessionSlot).end,
+      courseStart: courseWindow(batch, now, student.createdAt, student.sessionSlot, batchYearFromAdmission(admission)).start,
+      courseEnd: courseWindow(batch, now, student.createdAt, student.sessionSlot, batchYearFromAdmission(admission)).end,
       issuedAt: now,
     },
     select: { id: true },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { dayKey } from "@/lib/class-sessions";
+import { classesHaveBegun } from "@/lib/attendance-guard";
 import {
   belongsToLecturer,
   readAssignment,
@@ -79,6 +80,8 @@ export async function GET(req: NextRequest) {
         admission: true,
         tutorId: true,
         coTutors: { select: { lecturerId: true } },
+        classesStartedAt: true,
+        createdAt: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
       },
@@ -106,15 +109,15 @@ export async function GET(req: NextRequest) {
           level: student.level,
           sessionSlot: student.sessionSlot,
           branch: student.branch?.name || "N/A",
-          // Default PRESENT, not absent. The register used to default unmarked
-          // students to absent, which meant anyone the tutor didn't explicitly
-          // click — or a register saved in a hurry — got silently written to
-          // the database as absent even though they were sitting in class.
-          // Absence is the exception a tutor should have to flag, not the
-          // default every student starts from.
-          present: mark?.present ?? true,
-          status: mark?.status ?? "present",
+          // UNMARKED unless a tutor or admin recorded something. No default of
+          // either kind: "present" by default wrote a mark nobody made, and
+          // "absent" by default notified students who were never taught. The
+          // register only saves rows the tutor explicitly set.
+          present: mark ? mark.present : null,
+          status: mark ? mark.status : null,
           alreadyMarked: Boolean(mark),
+          // Batch hasn't opened yet — nothing to mark.
+          notStarted: !classesHaveBegun(student, date),
         };
       }),
     );

@@ -1,5 +1,6 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
 import { alignCurrentChargePrice, buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
+import { resolveBatchWindow } from "@/lib/batch";
 
 /**
  * Who can see what before tuition is paid.
@@ -142,7 +143,7 @@ const LOCK_DAY_MS = 24 * 60 * 60 * 1000;
  *   unsettled_balance  paid the deposit, never cleared the balance, and the
  *                      30-day grace after classes started has run out
  */
-export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | null;
+export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | "upcoming_batch" | null;
 
 export type StudentAccess = {
   /** physical | hybrid | online — see DeliveryMode. */
@@ -156,6 +157,8 @@ export type StudentAccess = {
   classType: ClassType;
   /** False while a registration-only student still owes the deposit. */
   hasAccess: boolean;
+  /** True once the current level's 60% deposit threshold is cleared. */
+  depositCleared: boolean;
   /** True once anything at all has been paid — the registration fee. */
   registrationPaid: boolean;
   totalPaid: number;
@@ -175,6 +178,13 @@ export type StudentAccess = {
   lockAt: string | null;
   /** ISO date an admin has granted grace until. Null when none. */
   graceUntil: string | null;
+  /** The selected batch and its first day, when the admission has one. */
+  batch: string | null;
+  batchLabel: string | null;
+  batchStartsOn: string | null;
+  /** True while a future batch is waiting for its first day. */
+  batchLocked: boolean;
+  daysUntilBatchStart: number;
   currency: string;
 };
 
@@ -217,6 +227,8 @@ export function deriveStudentAccess({
   enrolledAt,
   paymentGraceUntil,
   paymentPlanOnTrack,
+  batch,
+  batchYear,
   now = new Date(),
 }: {
   totalPaid: number;
@@ -249,6 +261,10 @@ export function deriveStudentAccess({
    * grace date; a defaulted or absent plan is `false`/undefined.
    */
   paymentPlanOnTrack?: boolean;
+  /** Batch month selected at registration, read from the admission payload. */
+  batch?: string | null;
+  /** Explicit calendar year for an office-scheduled cohort transfer. */
+  batchYear?: number | null;
   now?: Date;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
@@ -291,6 +307,9 @@ export function deriveStudentAccess({
     : Math.max(0, fee - paid);
   const fullPaid = ledger ? outstandingBalance <= 0 : fee > 0 ? paid >= fee : depositPaid;
 
+  const batchWindow = resolveBatchWindow(batch, { registeredAt: toDate(enrolledAt), batchYear, now });
+  const batchLocked = Boolean(batchWindow && !batchWindow.hasBegun);
+
   // The balance lock only exists for a student who is past the deposit gate
   // but has not settled the fee.
   const graceDate = toDate(paymentGraceUntil);
@@ -314,12 +333,14 @@ export function deriveStudentAccess({
     }
   }
 
-  const hasAccess = depositPaid && !balanceLocked;
+  const hasAccess = depositPaid && !balanceLocked && !batchLocked;
   const lockReason: PaymentLockReason = hasAccess
     ? null
-    : balanceLocked
-      ? "unsettled_balance"
-      : "unpaid_deposit";
+    : batchLocked
+      ? "upcoming_batch"
+      : balanceLocked
+        ? "unsettled_balance"
+        : "unpaid_deposit";
 
   // Deposit-gate figures: against the CURRENT level's charge when the ledger is
   // driving, against the raw payment sum otherwise.
@@ -343,6 +364,7 @@ export function deriveStudentAccess({
     deliveryMode: normaliseDeliveryMode(deliveryMode),
     classType: normaliseClassType(classType),
     hasAccess,
+    depositCleared: depositPaid,
     registrationPaid: paid > 0,
     totalPaid: paid,
     tuitionFee: fee,
@@ -354,6 +376,11 @@ export function deriveStudentAccess({
     lockReason,
     lockAt: lockAt ? lockAt.toISOString() : null,
     graceUntil: graceDate ? graceDate.toISOString() : null,
+    batch: batchWindow?.batch ?? null,
+    batchLabel: batchWindow?.label ?? null,
+    batchStartsOn: batchWindow?.startsOn.toISOString() ?? null,
+    batchLocked,
+    daysUntilBatchStart: batchWindow?.daysUntilStart ?? 0,
     currency: "NGN",
   };
 }

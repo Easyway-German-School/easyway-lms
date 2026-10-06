@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
-import { batchFromAdmission, monthNameToIndex, MONTH_NAMES } from "@/lib/batch";
+import { realignStudentCodeById } from "@/lib/student-code";
+import { batchFromAdmission, batchYearFromAdmission, monthNameToIndex, MONTH_NAMES, resolveBatchWindow } from "@/lib/batch";
+import { parseBatchDestination, readPendingBatchTransfer, scheduleBatchTransfers } from "@/lib/batch-transfer";
 import { classifyRoster } from "@/lib/cohort-classify-server";
 import { readCurrentIntake } from "@/lib/intake-server";
 
@@ -20,10 +22,12 @@ import { readCurrentIntake } from "@/lib/intake-server";
  */
 
 export const dynamic = "force-dynamic";
+// A move re-points tutors and student IDs per student; see batch-transfer.ts.
+export const maxDuration = 60;
 
 const NO_BATCH = "(no batch)";
 const MAX_STUDENTS = 4000;
-const MAX_ASSIGN = 500;
+const MAX_ASSIGN = 400;
 
 /** The tenant fence GET/DELETE on /api/admin/students use — no-branch students included. */
 function tenantWhere(tenantId: string | null | undefined) {
@@ -42,6 +46,8 @@ type Row = {
   level: string;
   branchName: string | null;
   batch: string | null;
+  batchYear: number | null;
+  pendingBatchTransfer: { month: string; year: number } | null;
   startedClasses: boolean;
 };
 
@@ -69,35 +75,50 @@ export async function GET() {
         levelCompletedFor: true,
         createdAt: true,
         admission: true,
+        enrolments: {
+          where: { outcome: "ongoing", deletedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { batchYear: true },
+        },
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
       },
     });
 
-    const rows: Row[] = students.map((s) => ({
-      id: s.id,
-      name: s.user?.name ?? "(no name)",
-      email: s.user?.email ?? "",
-      studentCode: s.studentCode,
-      status: s.status,
-      level: s.level,
-      branchName: s.branch?.name ?? null,
-      batch: batchFromAdmission(s.admission),
-      startedClasses: Boolean(s.classesStartedAt),
-    }));
+    const rows: Row[] = students.map((s) => {
+      const batch = batchFromAdmission(s.admission);
+      const batchYear =
+        batchYearFromAdmission(s.admission) ??
+        s.enrolments[0]?.batchYear ??
+        (batch ? resolveBatchWindow(batch, { registeredAt: s.createdAt })?.year ?? null : null);
+      return {
+        id: s.id,
+        name: s.user?.name ?? "(no name)",
+        email: s.user?.email ?? "",
+        studentCode: s.studentCode,
+        status: s.status,
+        level: s.level,
+        branchName: s.branch?.name ?? null,
+        batch,
+        batchYear,
+        pendingBatchTransfer: readPendingBatchTransfer(s.admission),
+        startedClasses: Boolean(s.classesStartedAt),
+      };
+    });
 
     // branch → level → batch, each a stable key so the client can address a
     // group without sending its whole membership back.
     const groups = new Map<
       string,
-      { branch: string; level: string; batch: string; count: number; started: number; ids: string[] }
+      { branch: string; level: string; batch: string; batchYear: number | null; count: number; started: number; ids: string[] }
     >();
     for (const row of rows) {
       const branch = row.branchName ?? "No branch";
       const batch = row.batch ?? NO_BATCH;
-      const key = `${branch}||${row.level}||${batch}`;
+      const key = `${branch}||${row.level}||${batch}||${row.batchYear ?? "?"}`;
       const g =
-        groups.get(key) ?? { branch, level: row.level, batch, count: 0, started: 0, ids: [] };
+        groups.get(key) ?? { branch, level: row.level, batch, batchYear: row.batchYear, count: 0, started: 0, ids: [] };
       g.count += 1;
       if (row.startedClasses) g.started += 1;
       g.ids.push(row.id);
@@ -109,7 +130,8 @@ export async function GET() {
         a.branch.localeCompare(b.branch) ||
         a.level.localeCompare(b.level) ||
         // Unknown month sorts last; real months in calendar order.
-        (monthNameToIndex(a.batch) ?? 99) - (monthNameToIndex(b.batch) ?? 99),
+        (monthNameToIndex(a.batch) ?? 99) - (monthNameToIndex(b.batch) ?? 99) ||
+        (a.batchYear ?? 0) - (b.batchYear ?? 0),
     );
 
     const byId: Record<string, Omit<Row, "id">> = {};
@@ -136,6 +158,17 @@ export async function GET() {
       currentIntake,
     );
 
+    const startAbsolute = Math.max(
+      new Date().getFullYear() * 12 + new Date().getMonth(),
+      currentIntake.year * 12 + (monthNameToIndex(currentIntake.month) ?? new Date().getMonth()),
+    );
+    const batchOptions = Array.from({ length: 24 }, (_, offset) => {
+      const absolute = startAbsolute + offset;
+      const year = Math.floor(absolute / 12);
+      const month = MONTH_NAMES[absolute % 12];
+      return { month, year, label: `${month} ${year}` };
+    });
+
     return NextResponse.json({
       groups: groupList,
       students: byId,
@@ -143,7 +176,7 @@ export async function GET() {
       truncated: rows.length >= MAX_STUDENTS,
       noBatch: rows.filter((r) => !r.batch).length,
       currentIntake,
-      months: MONTH_NAMES,
+      batchOptions,
       classifications,
       classTally,
     });
@@ -165,16 +198,14 @@ export async function POST(request: Request) {
         .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
         .slice(0, MAX_ASSIGN)
     : [];
-  const batch = typeof body.batch === "string" ? body.batch.trim() : "";
-  const monthIndex = monthNameToIndex(batch);
-
   if (ids.length === 0) {
     return NextResponse.json({ error: "Select at least one student" }, { status: 400 });
   }
-  if (monthIndex === null) {
-    return NextResponse.json({ error: "Give a real month name" }, { status: 400 });
+  const parsed = parseBatchDestination(body.batch, body.batchYear);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const month = MONTH_NAMES[monthIndex];
+  const { destination } = parsed;
 
   const where: Record<string, unknown> = { id: { in: ids }, ...tenantWhere(tenantId) };
   const allowedBranchIds = scopedBranchIds(gate.admin);
@@ -182,36 +213,22 @@ export async function POST(request: Request) {
 
   try {
     // Read-modify-write: admission is one JSON blob and the other keys in it
-    // (phone, city, photo) must survive a batch change.
+    // (phone, city, photo) must survive a batch change. The move itself - the
+    // schedule, the wait for payment, the tutor, the student ID - is
+    // src/lib/batch-transfer.ts, shared with the Students page.
     const targets = await prisma.student.findMany({
       where,
-      select: { id: true, admission: true },
+      select: { id: true, admission: true, createdAt: true },
     });
 
-    let updated = 0;
-    for (let i = 0; i < targets.length; i += 50) {
-      const chunk = targets.slice(i, i + 50);
-      await Promise.all(
-        chunk.map((student) => {
-          const admission =
-            student.admission && typeof student.admission === "object"
-              ? (student.admission as Record<string, unknown>)
-              : {};
-          if (admission.batch === month) return Promise.resolve();
-          updated += 1;
-          return prisma.student.update({
-            where: { id: student.id },
-            data: { admission: { ...admission, batch: month } },
-          });
-        }),
-      );
-    }
+    const summary = await scheduleBatchTransfers(targets, destination, gate.session.user.id ?? null);
 
     return NextResponse.json({
       ok: true,
-      updated,
+      ...summary,
       skipped: ids.length - targets.length,
-      batch: month,
+      batch: destination.month,
+      batchYear: destination.year,
     });
   } catch (error) {
     console.error("Failed to assign cohort batch:", error);

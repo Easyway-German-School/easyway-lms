@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { resolveBatchWindow } from "@/lib/batch";
 
 /**
  * Official Easyway student identifiers.
@@ -25,6 +26,13 @@ import { isOnlineBranch } from "@/lib/online-branch";
  * The code is assigned once at signup and never regenerated. It appears on
  * certificates and exam entries, so a student moving from A1 to A2 keeps the
  * code they were issued — it records where they started, not where they are.
+ *
+ * THE MONTH AND YEAR ARE THE INTAKE, not the day they signed up. Someone who
+ * registers on 26 September for the October intake is EW/2026/A1/OCT/… and one
+ * who registers in December for January is EW/2027/…/JAN/…. Until that intake
+ * begins, `realignStudentCode` keeps the code in step with the student's batch
+ * (the office moves people between cohorts); once the batch has started the
+ * code is frozen, because that is when it starts appearing on certificates.
  *
  * Codes issued under the old flat format are still valid and are NOT rewritten:
  * they are printed on certificates and exam entries that already exist, and a
@@ -86,6 +94,46 @@ export function formatStudentCode(parts: {
   return `EW/${parts.year}/${level}/${parts.batchMonth}/${parts.letter}${number}`;
 }
 
+/** Furthest ahead of today an intake may be and still set the code's year. */
+const MAX_LEAD_MONTHS = 2;
+
+/**
+ * The month and year a code should carry for this batch, or null when the
+ * batch says nothing usable, the intake is already under way, or it is so far
+ * off that this is a mid-course import (those keep the plain current year).
+ */
+function intakeSlot(
+  batch: unknown,
+  registeredAt: Date,
+  now: Date,
+  batchYear?: number | null,
+): { month: string; year: number } | null {
+  const window = resolveBatchWindow(typeof batch === "string" ? batch : null, { registeredAt, batchYear, now });
+  if (!window || window.hasBegun) return null;
+  if (-window.monthsElapsed > MAX_LEAD_MONTHS) return null;
+  return { month: MONTHS[window.monthIndex], year: window.year };
+}
+
+/**
+ * Highest sequence already issued for a branch letter in a year. Filtered in
+ * JS off the year's codes rather than a SQL `contains` — a `contains: "/A"`
+ * would also match the "A1" level segment or a batch month that happens to
+ * hold that letter, which a plain substring check cannot tell apart.
+ */
+async function highestSequence(year: number, letter: string): Promise<number> {
+  const codesThisYear = await prisma.student.findMany({
+    where: { studentCode: { startsWith: `EW/${year}/` } },
+    select: { studentCode: true },
+  });
+  const pattern = new RegExp(`/${letter}(\\d+)$`);
+  let highest = 0;
+  for (const { studentCode } of codesThisYear) {
+    const match = studentCode?.match(pattern);
+    if (match) highest = Math.max(highest, parseInt(match[1], 10));
+  }
+  return highest;
+}
+
 /**
  * Allocate the next free code for a student.
  *
@@ -104,30 +152,19 @@ export function formatStudentCode(parts: {
 export async function generateStudentCode(input: {
   level: string;
   batch?: unknown;
+  batchYear?: number | null;
   branch?: BranchLike;
   classType?: string | null;
   now?: Date;
   minSequence?: number;
 }): Promise<string> {
   const now = input.now ?? new Date();
-  const year = now.getFullYear();
-  const batchMonth = toBatchMonth(input.batch, now);
+  // The month and year are the INTAKE the student is joining, not today.
+  const slot = intakeSlot(input.batch, now, now, input.batchYear);
+  const year = slot?.year ?? now.getFullYear();
+  const batchMonth = slot?.month ?? toBatchMonth(input.batch, now);
   const letter = branchLetter(input.branch, input.classType);
-
-  // Counted per branch letter rather than across the whole school, so filtered
-  // in JS off the year's codes instead of a SQL `contains` — a `contains: "/A"`
-  // would also match the "A1" level segment or a batch month that happens to
-  // hold that letter, which a plain substring check cannot tell apart.
-  const codesThisYear = await prisma.student.findMany({
-    where: { studentCode: { startsWith: `EW/${year}/` } },
-    select: { studentCode: true },
-  });
-  const pattern = new RegExp(`/${letter}(\\d+)$`);
-  let highest = 0;
-  for (const { studentCode } of codesThisYear) {
-    const match = studentCode?.match(pattern);
-    if (match) highest = Math.max(highest, parseInt(match[1], 10));
-  }
+  const highest = await highestSequence(year, letter);
 
   return formatStudentCode({
     year,
@@ -173,4 +210,62 @@ export async function assignStudentCode(studentId: string, input: {
   // must never block a signup — the backfill script can repair it later.
   console.error(`Could not allocate a student code for ${studentId}`);
   return null;
+}
+
+const CODE_PARTS = /^EW\/(\d{4})\/([^/]+)\/([A-Z]{3})\/([A-Z])(\d+)$/;
+
+/**
+ * Bring a not-yet-started student's code in line with their intake.
+ *
+ * The month (and, across New Year, the year) follows `admission.batch`; the
+ * level, branch letter and number are kept. Returns the new code, or null when
+ * nothing needed changing: no code, an old-format code, a batch that has
+ * already begun (frozen — it may be on a certificate by now), or already right.
+ */
+export async function realignStudentCode(
+  student: { id: string; studentCode: string | null; admission: unknown; createdAt: Date },
+  now: Date = new Date(),
+): Promise<string | null> {
+  const parts = student.studentCode?.match(CODE_PARTS);
+  if (!parts) return null;
+
+  const batch = (student.admission as { batch?: unknown } | null)?.batch;
+  const batchYear = (student.admission as { batchYear?: unknown } | null)?.batchYear;
+  const slot = intakeSlot(
+    batch,
+    student.createdAt,
+    now,
+    typeof batchYear === "number" ? batchYear : null,
+  );
+  if (!slot) return null;
+
+  const [, codeYear, level, codeMonth, letter, number] = parts;
+  if (Number(codeYear) === slot.year && codeMonth === slot.month) return null;
+
+  // Same year: the number is still this branch's, so keep it. A new year has
+  // its own sequence, so take the next free number there.
+  let sequence =
+    Number(codeYear) === slot.year ? parseInt(number, 10) : (await highestSequence(slot.year, letter)) + 1;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = formatStudentCode({ year: slot.year, level, batchMonth: slot.month, letter, sequence });
+    try {
+      await prisma.student.update({ where: { id: student.id }, data: { studentCode: code } });
+      return code;
+    } catch (error: any) {
+      if (error?.code !== "P2002") throw error;
+      sequence = Math.max(sequence, await highestSequence(slot.year, letter)) + 1;
+    }
+  }
+  console.error(`Could not realign the student code for ${student.id}`);
+  return null;
+}
+
+/** Realign one student by id — for the moment the office changes their batch. */
+export async function realignStudentCodeById(studentId: string): Promise<string | null> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { id: true, studentCode: true, admission: true, createdAt: true },
+  });
+  return student ? realignStudentCode(student) : null;
 }

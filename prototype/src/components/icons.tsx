@@ -1035,3 +1035,20 @@ export const PictureInPictureIcon = icon("PictureInPictureIcon", (
     <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
   </>
 ));
+
+/** iOS "Share" glyph: a box open at the top with an arrow leaving it. */
+export const ShareSquareIcon = icon("ShareSquareIcon", (
+  <>
+    <path d="M12 3v12" />
+    <path d="m8 7 4-4 4 4" />
+    <path d="M7 10.5H6a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6.5a2 2 0 0 0-2-2h-1" />
+  </>
+));
+
+/** iOS "Add to Home Screen" glyph: a rounded square with a plus. */
+export const AddSquareIcon = icon("AddSquareIcon", (
+  <>
+    <rect x="4" y="4" width="16" height="16" rx="3.5" />
+    <path d="M12 8.5v7M8.5 12h7" />
+  </>
+));

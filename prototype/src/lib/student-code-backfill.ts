@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { assignStudentCode } from "@/lib/student-code";
+import { assignStudentCode, realignStudentCode } from "@/lib/student-code";
 
 /**
  * Self-heals any student who slipped through signup or the admin add form
@@ -46,4 +46,28 @@ export async function backfillMissingStudentCodes(limit = 100) {
   }
 
   return { checked: students.length, assigned, failed: failed.length };
+}
+
+/**
+ * Keeps the month in every not-yet-started student's code equal to their
+ * intake — the "signed up in September for October but the ID says SEP" case.
+ * Only students registered in the last 120 days can still be waiting on an
+ * intake, so the sweep stays small. Frozen once the batch begins.
+ */
+export async function realignUpcomingIntakeCodes() {
+  const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+  const students = await prisma.student.findMany({
+    where: { studentCode: { not: null }, createdAt: { gte: since } },
+    select: { id: true, studentCode: true, admission: true, createdAt: true },
+  });
+
+  let realigned = 0;
+  for (const student of students) {
+    try {
+      if (await realignStudentCode(student)) realigned += 1;
+    } catch (error) {
+      console.error("Student code realign failed", student.id, error);
+    }
+  }
+  return { checked: students.length, realigned };
 }

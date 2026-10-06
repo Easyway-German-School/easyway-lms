@@ -6,10 +6,12 @@ import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
   COURSE_LEVELS,
   assignmentToData,
+  classificationLevels,
   describeAssignment,
   hasBatchConstraint,
   isAssigned,
   readAssignment,
+  readTutorClassifications,
   studentWhereForLecturer,
   belongsToLecturer,
   type CourseLevel,
@@ -174,6 +176,7 @@ export async function GET() {
           id: lecturer.id,
           user: lecturer.user,
           specialization: lecturer.specialization,
+          classifications: readTutorClassifications(lecturer.classifications),
           bio: lecturer.bio,
           phone: lecturer.phone,
           photoUrl: lecturer.photoUrl,
@@ -222,6 +225,7 @@ export async function POST(request: NextRequest) {
   const bio = typeof body?.bio === "string" ? body.bio.trim() : "";
   const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
   const photoUrl = typeof body?.photoUrl === "string" ? body.photoUrl.trim() : "";
+  const classifications = readTutorClassifications(body?.classifications);
 
   if (!name || !email || !password) {
     return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
@@ -236,7 +240,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Email already registered" }, { status: 409 });
   }
 
-  const assignment = assignmentToData(body ?? {});
+  const assignment = assignmentToData({
+    ...(body ?? {}),
+    levels: [...(Array.isArray(body?.levels) ? body.levels : []), ...classificationLevels(classifications)],
+    classTypes: classifications.length
+      ? [...(Array.isArray(body?.classTypes) ? body.classTypes : []), "online", "private"]
+      : body?.classTypes,
+  });
+  if (classifications.length && Array.isArray(body?.assignmentGroups)) {
+    const groupLevels = new Set(assignment.levels);
+    if (classificationLevels(classifications).some((level) => !groupLevels.has(level))) {
+      return NextResponse.json({ error: "Each selected classification must have a matching teaching group" }, { status: 400 });
+    }
+  }
 
   // A newly created tutor is active unless the office says otherwise — the
   // usual case is hiring somebody, and "probation" is the only other sensible
@@ -264,6 +280,7 @@ export async function POST(request: NextRequest) {
       lecturer: {
         create: {
           specialization: specialization || null,
+          classifications: classifications.length ? classifications : undefined,
           bio: bio || null,
           phone: phone || null,
           photoUrl: photoUrl || null,
@@ -283,6 +300,11 @@ export async function POST(request: NextRequest) {
 
   if (user.lecturer?.id && assignment.levels.length) {
     await syncLecturerClasses(user.lecturer.id, assignment.levels);
+  }
+
+  if (user.lecturer?.id) {
+    const { announceTutorBatches } = await import("@/lib/tutor-batch-notice");
+    await announceTutorBatches({ lecturerId: user.lecturer.id }).catch((error) => console.error("Batch notice failed", error));
   }
 
   return NextResponse.json(
@@ -330,6 +352,10 @@ export async function PATCH(request: NextRequest) {
 
   const data: Record<string, unknown> = {};
   if (typeof body.specialization === "string") data.specialization = body.specialization.trim() || null;
+  if (body.classifications !== undefined) {
+    const classifications = readTutorClassifications(body.classifications);
+    data.classifications = classifications.length ? classifications : null;
+  }
   if (typeof body.bio === "string") data.bio = body.bio.trim() || null;
   if (typeof body.phone === "string") data.phone = body.phone.trim() || null;
   if (typeof body.photoUrl === "string") data.photoUrl = body.photoUrl.trim() || null;
@@ -385,6 +411,7 @@ export async function PATCH(request: NextRequest) {
   // The assignment fields move as a set. Sending any one of them rewrites all
   // of them, so a half-submitted form can never leave a tutor assigned to a
   // branch at a level they no longer teach.
+  const touchesClassification = body.classifications !== undefined;
   const touchesAssignment = [
     "branchIds",
     "levels",
@@ -392,10 +419,28 @@ export async function PATCH(request: NextRequest) {
     "classTypes",
     "batches",
     "assignmentGroups",
-  ].some((key) => body[key] !== undefined);
+  ].some((key) => body[key] !== undefined) || touchesClassification;
   let assignment: ReturnType<typeof assignmentToData> | null = null;
   if (touchesAssignment) {
-    assignment = assignmentToData(body);
+    const classifications = readTutorClassifications(body.classifications ?? lecturer.classifications);
+    const existingAssignment = readAssignment(lecturer);
+    assignment = assignmentToData({
+      ...body,
+      branchIds: body.branchIds ?? existingAssignment.branchIds,
+      sessionSlots: body.sessionSlots ?? existingAssignment.sessionSlots,
+      assignmentGroups: body.assignmentGroups ?? existingAssignment.groups,
+      batches: body.batches ?? existingAssignment.batches,
+      levels: [...(Array.isArray(body.levels) ? body.levels : existingAssignment.levels), ...classificationLevels(classifications)],
+      classTypes: classifications.length
+        ? [...(Array.isArray(body.classTypes) ? body.classTypes : existingAssignment.classTypes), "online", "private"]
+        : body.classTypes ?? existingAssignment.classTypes,
+    });
+    if (classifications.length && Array.isArray(body.assignmentGroups)) {
+      const groupLevels = new Set(assignment.levels);
+      if (classificationLevels(classifications).some((level) => !groupLevels.has(level))) {
+        return NextResponse.json({ error: "Each selected classification must have a matching teaching group" }, { status: 400 });
+      }
+    }
     Object.assign(data, assignment);
   }
 
@@ -428,7 +473,7 @@ export async function PATCH(request: NextRequest) {
   // Tell the tutor their timetable changed. Silently reassigning somebody and
   // letting them find out from a roster that no longer matches their class is
   // how a Monday morning goes wrong.
-  if (touchesAssignment) {
+  if (touchesAssignment || touchesClassification) {
     const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
     const label = describeAssignment(
       readAssignment(updated),
@@ -447,7 +492,19 @@ export async function PATCH(request: NextRequest) {
     }).catch((error) => console.error("Assignment notification failed", error));
   }
 
-  return NextResponse.json({ success: true });
+  // Name the batch to the tutor (bell, push, email). Deduped per tutor+batch,
+  // so re-saving the same assignment never repeats it.
+  let toldBatches: string[] = [];
+  if (touchesAssignment) {
+    const { announceTutorBatches } = await import("@/lib/tutor-batch-notice");
+    const told = await announceTutorBatches({ lecturerId }).catch((error) => {
+      console.error("Batch notice failed", error);
+      return null;
+    });
+    toldBatches = told?.told ?? [];
+  }
+
+  return NextResponse.json({ success: true, toldBatches });
 }
 
 export async function DELETE(request: NextRequest) {

@@ -11,7 +11,7 @@ import { EyeIcon } from "@/components/icons";
  * src/lib/impersonation.ts for the mechanism this is the visible half of.
  */
 export default function ImpersonationBanner() {
-  const { data: session } = useSession();
+  const { data: session, update } = useSession();
   const [ending, setEnding] = useState(false);
   const impersonatedBy = session?.user?.impersonatedBy;
 
@@ -22,11 +22,13 @@ export default function ImpersonationBanner() {
     try {
       const res = await fetch("/api/admin/impersonate/end", { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      // Hard navigation, and replace() rather than href: the session cookie
-      // just changed under this tab, so next-auth's client cache has no way
-      // to know that on its own — and a push would leave the student
-      // dashboard sitting in this admin's history as something Back can
-      // land on later, after the session behind it has already moved on.
+      // The cookie changes on the server, but SessionProvider may still hold
+      // the student's role in memory. Refresh it before entering an admin
+      // route, or AdminShell can mistake the handoff for a real student and
+      // send the admin to the student sign-in page.
+      if (res.ok) await update();
+      // Replace rather than push: the student dashboard must not remain in
+      // this admin's history after the session has moved back.
       window.location.replace(res.ok && data.redirectTo ? data.redirectTo : "/admin");
     } catch {
       window.location.replace("/admin");

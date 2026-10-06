@@ -32,6 +32,15 @@ export const SESSION_SLOTS = ["morning", "afternoon", "evening", "weekend"] as c
  */
 export const CLASS_TYPES = ["physical", "online", "private"] as const;
 
+export const TUTOR_CLASSIFICATIONS = [
+  { value: "private_b2_exam_prep_online", label: "Private B2 exam prep (online)", level: "B2" },
+  { value: "private_b1_exam_prep_online", label: "Private B1 exam prep (online)", level: "B1" },
+  { value: "private_a1_exam_prep_online", label: "Private A1 exam prep (online)", level: "A1" },
+  { value: "private_a2_exam_prep_online", label: "Private A2 exam prep (online)", level: "A2" },
+] as const;
+
+export type TutorClassification = (typeof TUTOR_CLASSIFICATIONS)[number]["value"];
+
 export const BATCHES = [
   "January",
   "February",
@@ -51,6 +60,25 @@ export type CourseLevel = (typeof COURSE_LEVELS)[number];
 export type SessionSlot = (typeof SESSION_SLOTS)[number];
 export type ClassType = (typeof CLASS_TYPES)[number];
 export type Batch = (typeof BATCHES)[number];
+
+export function readTutorClassifications(raw: unknown): TutorClassification[] {
+  const values = Array.isArray(raw) ? raw : [];
+  return values.filter((value): value is TutorClassification =>
+    typeof value === "string" && TUTOR_CLASSIFICATIONS.some((option) => option.value === value),
+  );
+}
+
+export function classificationLevels(classifications: TutorClassification[]): string[] {
+  return [
+    ...new Set(
+      classifications.reduce<string[]>((levels, classification) => {
+        const level = TUTOR_CLASSIFICATIONS.find((option) => option.value === classification)?.level;
+        if (level) levels.push(level);
+        return levels;
+      }, []),
+    ),
+  ];
+}
 
 export type LecturerAssignment = {
   branchIds: string[];
@@ -126,9 +154,6 @@ export function readAssignment(source: AssignmentSource | null | undefined): Lec
     return { branchIds: [], levels: [], sessionSlots: [], groups: [], classTypes: [], batches: [] };
   }
 
-  const branchIds = readList(source.branchIds);
-  const levels = readList(source.levels, COURSE_LEVELS);
-  const sessionSlots = readList(source.sessionSlots, SESSION_SLOTS);
   const groups = Array.isArray(source.assignmentGroups)
     ? source.assignmentGroups.flatMap((group) => {
         if (!group || typeof group !== "object") return [];
@@ -142,6 +167,12 @@ export function readAssignment(source: AssignmentSource | null | undefined): Lec
           : [];
       })
     : [];
+
+  const branchIds = groups.length ? [...new Set(groups.map((group) => group.branchId))] : readList(source.branchIds);
+  const levels = groups.length ? [...new Set(groups.map((group) => group.level))] : readList(source.levels, COURSE_LEVELS);
+  const sessionSlots = groups.length
+    ? [...new Set(groups.map((group) => group.sessionSlot))]
+    : readList(source.sessionSlots, SESSION_SLOTS);
 
   return {
     branchIds: branchIds.length ? branchIds : source.branchId ? [source.branchId] : [],
@@ -546,9 +577,6 @@ export function assignmentToData(input: {
   classTypes?: unknown;
   batches?: unknown;
 }) {
-  const branchIds = readList(input.branchIds);
-  const levels = readList(input.levels, COURSE_LEVELS);
-  const sessionSlots = readList(input.sessionSlots, SESSION_SLOTS);
   const assignmentGroups = Array.isArray(input.assignmentGroups)
     ? input.assignmentGroups.flatMap((group) => {
         if (!group || typeof group !== "object") return [];
@@ -562,6 +590,13 @@ export function assignmentToData(input: {
           : [];
       })
     : [];
+  const branchIds = assignmentGroups.length ? [...new Set(assignmentGroups.map((group) => group.branchId))] : readList(input.branchIds);
+  const levels = assignmentGroups.length
+    ? [...new Set(assignmentGroups.map((group) => group.level))]
+    : readList(input.levels, COURSE_LEVELS);
+  const sessionSlots = assignmentGroups.length
+    ? [...new Set(assignmentGroups.map((group) => group.sessionSlot))]
+    : readList(input.sessionSlots, SESSION_SLOTS);
   const classTypes = readList(input.classTypes, CLASS_TYPES);
   const batches = readList(input.batches, BATCHES);
 

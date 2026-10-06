@@ -44,6 +44,7 @@ type Group = {
   branch: string;
   level: string;
   batch: string;
+  batchYear: number | null;
   count: number;
   started: number;
   ids: string[];
@@ -57,6 +58,8 @@ type StudentInfo = {
   level: string;
   branchName: string | null;
   batch: string | null;
+  batchYear: number | null;
+  pendingBatchTransfer: { month: string; year: number } | null;
   startedClasses: boolean;
 };
 
@@ -67,14 +70,14 @@ type CohortData = {
   truncated: boolean;
   noBatch: number;
   currentIntake: { month: string; year: number };
-  months: string[];
+  batchOptions: Array<{ month: string; year: number; label: string }>;
   classifications: Record<string, CohortClassification>;
   classTally: Record<CohortStatus, number> & { mismatches: number };
 };
 
 type RowFilter = "all" | "mismatch" | "unknown";
 
-const groupKey = (g: Group) => `${g.branch}||${g.level}||${g.batch}`;
+const groupKey = (g: Group) => `${g.branch}||${g.level}||${g.batch}||${g.batchYear ?? "?"}`;
 
 const STATUS_META: Record<CohortStatus, { label: string; className: string; hint: string }> = {
   new: {
@@ -104,7 +107,7 @@ export default function CohortsPage() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [targetMonth, setTargetMonth] = useState("");
+  const [targetIntake, setTargetIntake] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
@@ -116,7 +119,7 @@ export default function CohortsPage() {
       if (res.ok) {
         const next: CohortData = await res.json();
         setData(next);
-        setTargetMonth((prev) => prev || next.currentIntake.month);
+        setTargetIntake((prev) => prev || `${next.currentIntake.month} ${next.currentIntake.year}`);
       } else {
         setMsg("Could not load cohorts.");
       }
@@ -186,20 +189,30 @@ export default function CohortsPage() {
   };
 
   const apply = async () => {
-    if (selected.size === 0 || !targetMonth) return;
+    if (selected.size === 0 || !targetIntake || !data) return;
+    const destination = data.batchOptions.find((option) => option.label === targetIntake);
+    if (!destination) return;
     setBusy(true);
     setMsg("");
     try {
       const res = await fetch("/api/admin/cohorts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentIds: [...selected], batch: targetMonth }),
+        body: JSON.stringify({ studentIds: [...selected], batch: destination.month, batchYear: destination.year }),
       });
       const out = await res.json();
       if (res.ok) {
         setMsg(
-          `Moved ${out.updated} student${out.updated === 1 ? "" : "s"} into the ${out.batch} intake` +
-            (out.skipped ? ` (${out.skipped} skipped — not on your roster)` : "") +
+          `${out.batch} ${out.batchYear}: ` +
+            [
+              out.activated ? `${out.activated} moved now (tutor, timetable and student ID updated)` : "",
+              out.awaitingPayment ? `${out.awaitingPayment} will move once the tuition deposit clears` : "",
+              out.alreadyThere ? `${out.alreadyThere} already there` : "",
+              out.failed ? `${out.failed} failed — try again` : "",
+              out.skipped ? `${out.skipped} skipped — not on your roster` : "",
+            ]
+              .filter(Boolean)
+              .join("; ") +
             ".",
         );
         setSelected(new Set());
@@ -337,7 +350,7 @@ export default function CohortsPage() {
                             <span className="text-[var(--muted)]">{isOpen ? "▾" : "▸"}</span>
                             {g.level}
                             <span className={noBatch ? "font-semibold text-amber-700" : "text-[var(--muted)]"}>
-                              · {g.batch}
+                              · {g.batch}{g.batchYear ? ` ${g.batchYear}` : ""}
                             </span>
                             {groupMismatches > 0 && (
                               <span
@@ -386,6 +399,11 @@ export default function CohortsPage() {
                                       <span className="min-w-0 flex-1">
                                         <span className="flex flex-wrap items-center gap-2">
                                           <span className="text-sm text-[var(--foreground)]">{s.name}</span>
+                                          {s.pendingBatchTransfer && (
+                                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                                              Moving to {s.pendingBatchTransfer.month} {s.pendingBatchTransfer.year} after deposit
+                                            </span>
+                                          )}
                                           {s.studentCode && (
                                             <span className="text-xs text-[var(--muted)]">{s.studentCode}</span>
                                           )}
@@ -444,13 +462,13 @@ export default function CohortsPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm text-[var(--muted)]">Move to</span>
               <select
-                value={targetMonth}
-                onChange={(e) => setTargetMonth(e.target.value)}
+                value={targetIntake}
+                onChange={(e) => setTargetIntake(e.target.value)}
                 className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
               >
-                {data.months.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                {data.batchOptions.map((option) => (
+                  <option key={option.label} value={option.label}>
+                    {option.label}
                   </option>
                 ))}
               </select>

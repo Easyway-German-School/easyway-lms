@@ -10,6 +10,7 @@ import {
 } from "@/lib/lecturer-assignment";
 import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway } from "@/lib/payment";
 import { setStudentTutor } from "@/lib/tutor-pairing";
+import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
 /**
  * Which students a tutor teaches, from the office's side.
@@ -104,7 +105,7 @@ type RawStudent = {
   coTutors: { lecturerId: string }[];
 };
 
-function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
+async function toRow(student: RawStudent, lecturerId: string | null): Promise<StudentRow> {
   const totalPaid = student.payments
     .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
     .reduce((sum, payment) => sum + payment.amount, 0);
@@ -115,6 +116,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     classType: student.classType,
     pathway: student.pathway,
   };
+  const planStatus = await planStatusForStudent(student.id);
   // Same ledger-aware fields the student's own portal and the admin remote
   // view feed in — omitting them is what let this tag disagree with whether
   // the student could actually get into class.
@@ -128,6 +130,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     classesStartedAt: student.classesStartedAt,
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
+    paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
   });
 
   return {
@@ -200,13 +203,14 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
-  const roster = (rosterRaw as unknown as RawStudent[])
+  const roster = await Promise.all((rosterRaw as unknown as RawStudent[])
     .filter((student) => (assignment ? belongsToLecturer(assignment, lecturerId, student) : false))
-    .map((student) => toRow(student, lecturerId || null));
+    .map((student) => toRow(student, lecturerId || null)));
 
   return NextResponse.json({
     roster,
-    results: (searchRaw as unknown as RawStudent[]).map((student) => toRow(student, lecturerId || null)),
+    results: await Promise.all((searchRaw as unknown as RawStudent[])
+      .map((student) => toRow(student, lecturerId || null))),
     // So the panel can say "12 of these come from the class description" and
     // make the difference between the two routes visible rather than folklore.
     matchedByAssignment: roster.filter((student) => !student.namedByOffice).length,

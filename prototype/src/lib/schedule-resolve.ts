@@ -4,6 +4,7 @@ import { getMergedSchedule, type MergedSession } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
+import { batchYearFromAdmission } from "@/lib/batch";
 
 /**
  * Builds the same timetable payload /api/schedule has always returned for a
@@ -19,6 +20,7 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
       ? (student.admission as Record<string, unknown>)
       : {};
   const batch = typeof admission.batch === "string" ? admission.batch : null;
+  const batchYear = batchYearFromAdmission(admission);
 
   const nextLevel = nextLevelAfter(student.level);
 
@@ -48,6 +50,7 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
     branchId: student.branchId,
     level,
     batch,
+    batchYear,
     registeredAt: student.createdAt,
     sessionSlot: student.sessionSlot,
     now: new Date(),
@@ -104,6 +107,7 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
           branchId: student.branchId,
           level,
           batch,
+          batchYear,
           registeredAt: student.createdAt,
           sessionSlot: s,
           now: new Date(),

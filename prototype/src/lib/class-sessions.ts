@@ -145,6 +145,8 @@ export async function getMergedSchedule(args: {
   batch?: string | null;
   /** When the student registered — decides WHICH occurrence of the batch month. */
   registeredAt?: Date | null;
+  /** Explicit year of the batch (office transfer / promotion) — see schedule.ts. */
+  batchYear?: number | null;
   sessionSlot?: string | null;
   now?: Date;
   months?: number;
@@ -156,6 +158,7 @@ export async function getMergedSchedule(args: {
     level: args.level,
     batch: args.batch ?? null,
     registeredAt: args.registeredAt ?? null,
+    batchYear: args.batchYear ?? null,
     now: args.now,
     months: args.months ?? sessionDurationMonths(slot),
     sessionSlot: slot,

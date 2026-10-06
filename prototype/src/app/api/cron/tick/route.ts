@@ -86,6 +86,19 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  /**
+   * Students the office has scheduled for another batch whose tuition deposit
+   * has cleared by a road nobody hooked (a payment recorded in bulk, a waiver,
+   * a plan coming on track). Every payment path asks for itself; this asks on
+   * behalf of whichever one forgot. See src/lib/batch-transfer.ts.
+   */
+  results.push(
+    await run("batch-transfers", async () => {
+      const { sweepPendingBatchTransfers } = await import("@/lib/batch-transfer");
+      return sweepPendingBatchTransfers();
+    }),
+  );
+
   results.push(
     await run("accountant-digest", async () => {
       // Self-gated: idempotent per ISO week via the notification dedupeKey.
@@ -190,6 +203,15 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  // Tutors assigned to an intake before they were ever told get told once.
+  // Idempotent per tutor+batch via the dedupeKey.
+  results.push(
+    await run("tutor-batch-notice", async () => {
+      const { announceTutorBatches } = await import("@/lib/tutor-batch-notice");
+      return announceTutorBatches();
+    }),
+  );
+
   results.push(
     await run("recording-reconcile", async () => {
       const { reconcileRecordings } = await import("@/lib/class-recorder");
@@ -234,6 +256,13 @@ async function handleGET(request: NextRequest) {
     await run("student-code-backfill", async () => {
       const { backfillMissingStudentCodes } = await import("@/lib/student-code-backfill");
       return backfillMissingStudentCodes();
+    }),
+  );
+
+  results.push(
+    await run("student-code-realign", async () => {
+      const { realignUpcomingIntakeCodes } = await import("@/lib/student-code-backfill");
+      return realignUpcomingIntakeCodes();
     }),
   );
 

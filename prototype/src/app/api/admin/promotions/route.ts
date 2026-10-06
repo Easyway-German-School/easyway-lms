@@ -5,8 +5,12 @@ import { findPromotionCandidates, promoteStudents, SESSION_MONTHS } from "@/lib/
 import { letterFor, PASS_MARK, weightedCourseworkAverage } from "@/lib/grading";
 import { receivedPaymentFilter } from "@/lib/payment";
 import { buildLedger } from "@/lib/finance/ledger";
+import { MONTH_NAMES } from "@/lib/batch";
+import { defaultDestination, parseBatchDestination, type BatchDestination } from "@/lib/batch-transfer";
 
 export const dynamic = "force-dynamic";
+// Each promotion raises a charge, rewrites the enrolment history and re-points the tutor.
+export const maxDuration = 60;
 
 async function requireStudentsAdmin() {
   return requireCapability("students");
@@ -99,7 +103,25 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ candidates: enriched, sessionMonths: SESSION_MONTHS, passMark: PASS_MARK });
+    // Where a promoted student can land: this month and 18 after it, with the
+    // school's current intake pre-selected.
+    const now = new Date();
+    const nowAbsolute = now.getFullYear() * 12 + now.getMonth();
+    const destinationOptions = Array.from({ length: 19 }, (_, offset) => {
+      const absolute = nowAbsolute + offset;
+      const month = MONTH_NAMES[absolute % 12];
+      const year = Math.floor(absolute / 12);
+      return { month, year, label: `${month} ${year}` };
+    });
+    const suggested = await defaultDestination(gate.session.user.tenantId ?? null, now);
+
+    return NextResponse.json({
+      candidates: enriched,
+      sessionMonths: SESSION_MONTHS,
+      passMark: PASS_MARK,
+      destinationOptions,
+      suggestedDestination: suggested,
+    });
   } catch (error) {
     console.error("Promotion candidates GET failed:", error);
     return NextResponse.json({ error: "Unable to build the promotion list" }, { status: 500 });
@@ -144,8 +166,17 @@ export async function POST(req: NextRequest) {
       override = { by: gate.admin.email, reason };
     }
 
-    const result = await promoteStudents(ids, { override });
-    return NextResponse.json(result);
+    // The batch they land in. Optional so older callers keep working - it then
+    // falls back to the school's current intake (see promoteStudents).
+    let destination: BatchDestination | undefined;
+    if (body?.month || body?.year) {
+      const parsed = parseBatchDestination(body.month, body.year);
+      if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+      destination = parsed.destination;
+    }
+
+    const result = await promoteStudents(ids, { override, destination });
+    return NextResponse.json({ ...result, destination: destination ?? null });
   } catch (error) {
     console.error("Promotion POST failed:", error);
     return NextResponse.json({ error: "Unable to move these students" }, { status: 500 });

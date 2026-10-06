@@ -5,6 +5,8 @@ import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { safeJson } from "@/lib/safe-json";
 import { setTenantScope } from "@/lib/tenant/context";
 import { revealTutorAfterPayment } from "@/lib/tutor-reveal";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { activatePaidBatchTransfer } from "@/lib/batch-transfer";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -101,6 +103,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     // Money already recorded (full, or a deposit that landed as `partial`).
     if (isReceivedPayment(existingPayment.status)) {
       await revealTutorAfterPayment(studentId).catch(() => null);
+      await notifyEnrolmentLetterIfSettled(studentId);
       return;
     }
 
@@ -127,6 +130,10 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
       console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
     });
     await revealTutorAfterPayment(studentId).catch(() => null);
+    await notifyEnrolmentLetterIfSettled(studentId);
+    await activatePaidBatchTransfer(studentId).catch((error) => {
+      console.error("Paystack verify: batch transfer activation failed", { studentId, reference, error });
+    });
 
     return;
   }
@@ -216,6 +223,10 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
   });
   await revealTutorAfterPayment(studentId).catch(() => null);
+  await notifyEnrolmentLetterIfSettled(studentId);
+  await activatePaidBatchTransfer(studentId).catch((error) => {
+    console.error("Paystack verify: batch transfer activation failed", { studentId, reference, error });
+  });
 }
 
 /**

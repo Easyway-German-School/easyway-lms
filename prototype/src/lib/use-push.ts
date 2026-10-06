@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { isInstalledApp } from "@/lib/client/standalone";
+import { currentInstallEnv } from "@/lib/client/platform";
 
 /**
  * Browser side of Web Push: register the service worker, ask permission once,
@@ -20,6 +22,15 @@ function urlBase64ToUint8Array(base64: string) {
 
 export type PushState = {
   supported: boolean;
+  /**
+   * iPhone/iPad in a normal browser tab. Apple only exposes Web Push to a site
+   * opened from the Home Screen, so `supported` is false here NOT because the
+   * device can't do alerts but because the app isn't installed yet. UI should
+   * offer "install to get alerts" rather than hide the feature.
+   */
+  needsInstall: boolean;
+  /** iOS older than 16.4: no Web Push exists at all, installing won't help. */
+  iosTooOld: boolean;
   permission: NotificationPermission | "unsupported";
   enabled: boolean;
   busy: boolean;
@@ -30,6 +41,8 @@ export type PushState = {
 
 export function usePushNotifications(): PushState {
   const [supported, setSupported] = useState(false);
+  const [needsInstall, setNeedsInstall] = useState(false);
+  const [iosTooOld, setIosTooOld] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -43,6 +56,11 @@ export function usePushNotifications(): PushState {
       "Notification" in window;
 
     setSupported(ok);
+    if (typeof window !== "undefined") {
+      const env = currentInstallEnv();
+      setIosTooOld(env.ios && env.iosTooOldForPush);
+      setNeedsInstall(env.ios && !env.iosTooOldForPush && !isInstalledApp() && !ok);
+    }
     if (!ok) return;
 
     setPermission(Notification.permission);
@@ -63,15 +81,22 @@ export function usePushNotifications(): PushState {
     setError(null);
 
     try {
+      // FIRST, and before any `await`: iOS Safari only honours
+      // requestPermission() while the tap that caused it is still the current
+      // user gesture. The old order fetched the VAPID config first, and on a
+      // slow phone connection that network round trip used the gesture up —
+      // iOS then resolves the request as "denied" without ever showing the
+      // prompt, which reads to the student as "the button does nothing".
+      const permissionRequest = Notification.requestPermission();
+      const result = await permissionRequest;
+      setPermission(result);
+      if (result !== "granted") {
+        throw new Error("Notifications were blocked. You can turn them on in Settings > Notifications > EasyWay.");
+      }
+
       const config = await fetch("/api/push/subscribe").then((r) => r.json());
       if (!config.configured || !config.publicKey) {
         throw new Error("Notifications aren't configured on the server yet.");
-      }
-
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result !== "granted") {
-        throw new Error("Notifications were blocked. You can turn them on in your browser settings.");
       }
 
       const registration = await navigator.serviceWorker.register("/sw.js");
@@ -130,5 +155,5 @@ export function usePushNotifications(): PushState {
     }
   }, [supported, busy]);
 
-  return { supported, permission, enabled, busy, enable, disable, error };
+  return { supported, needsInstall, iosTooOld, permission, enabled, busy, enable, disable, error };
 }

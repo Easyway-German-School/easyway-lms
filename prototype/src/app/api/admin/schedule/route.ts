@@ -151,6 +151,7 @@ export async function GET() {
       branchId: student.branch!.id,
       level: student.level,
       batch: typeof admission.batch === "string" ? admission.batch : null,
+      batchYear: typeof admission.batchYear === "number" && Number.isInteger(admission.batchYear) ? admission.batchYear : null,
       registeredAt: student.createdAt,
       sessionSlot: student.sessionSlot,
       now: new Date(),

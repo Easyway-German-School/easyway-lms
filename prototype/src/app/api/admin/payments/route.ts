@@ -11,6 +11,8 @@ import {
   requiredDepositFor,
 } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { activatePaidBatchTransfer } from "@/lib/batch-transfer";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -144,6 +146,11 @@ export async function POST(request: Request) {
       }
     }
 
+    await notifyEnrolmentLetterIfSettled(studentId);
+    await activatePaidBatchTransfer(studentId).catch((error) => {
+      console.error("Manual payment: batch transfer activation failed", { studentId, error });
+    });
+
     return NextResponse.json({ payment, warning, notice }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: "Unable to create payment", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
@@ -243,6 +250,9 @@ export async function PATCH(request: Request) {
       } catch (reconcileError) {
         console.error("Travel Package reconcile failed after payment edit", { id, reconcileError });
       }
+      await activatePaidBatchTransfer(existing.studentId).catch((error) => {
+        console.error("Edited payment: batch transfer activation failed", { studentId: existing.studentId, error });
+      });
     }
 
     return NextResponse.json({ payment, travelPackage });

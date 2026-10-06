@@ -4,6 +4,8 @@ import { getStripe, stripeConfigured } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { withUnscoped } from "@/lib/tenant/context";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
+import { activatePaidBatchTransfer } from "@/lib/batch-transfer";
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
 
@@ -158,6 +160,11 @@ async function handlePOST(request: NextRequest) {
             html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
           });
         }
+
+        await notifyEnrolmentLetterIfSettled(studentId);
+        await activatePaidBatchTransfer(studentId).catch((error) => {
+          console.error("Stripe webhook: batch transfer activation failed", { studentId, error });
+        });
       }
 
       console.log("Webhook processed for session:", session.id);

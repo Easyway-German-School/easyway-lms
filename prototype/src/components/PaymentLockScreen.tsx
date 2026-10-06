@@ -2,7 +2,7 @@
 import { CheckIcon } from "@/components/icons";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import type { StudentAccess } from "@/lib/access";
@@ -85,6 +85,34 @@ function naira(value: number) {
   return `₦${Math.max(0, Math.round(value)).toLocaleString("en-NG")}`;
 }
 
+function BatchCountdown({ startsOn }: { startsOn: string }) {
+  const [remaining, setRemaining] = useState(() => Math.max(0, new Date(startsOn).getTime() - Date.now()));
+
+  useEffect(() => {
+    const update = () => setRemaining(Math.max(0, new Date(startsOn).getTime() - Date.now()));
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [startsOn]);
+
+  const totalSeconds = Math.floor(remaining / 1_000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return (
+    <div className="mt-6 rounded-2xl border border-[#FF9d5c]/25 bg-[#FF9d5c]/10 p-4 text-center">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#ffc18f]">Your classes open in</p>
+      <div className="mt-2 flex items-baseline justify-center gap-2 font-mono text-2xl font-bold tracking-tight text-white sm:text-3xl">
+        <span>{days}d</span><span className="text-white/35">:</span><span>{String(hours).padStart(2, "0")}h</span>
+        <span className="text-white/35">:</span><span>{String(minutes).padStart(2, "0")}m</span>
+        <span className="text-white/35">:</span><span>{String(seconds).padStart(2, "0")}s</span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * A blurred impression of the page that would have been here.
  *
@@ -145,9 +173,11 @@ export default function PaymentLockScreen({
   // deposit) and no "study one-to-one instead" offer, since they are already
   // enrolled.
   const balanceLock = access?.lockReason === "unsettled_balance";
+  const batchLock = access?.lockReason === "upcoming_batch";
   const outstanding = balanceLock ? access?.outstandingBalance ?? 0 : access?.outstanding ?? 0;
   const progress = balanceLock ? access?.feeProgressPercent ?? 0 : access?.progressPercent ?? 0;
   const registrationPaid = access?.registrationPaid ?? true;
+  const tuitionFullyPaid = (access?.feeProgressPercent ?? 0) >= 100;
   const lockedSince = balanceLock && access?.lockAt ? new Date(access.lockAt) : null;
 
   return (
@@ -313,13 +343,29 @@ export default function PaymentLockScreen({
                 <span className="absolute -left-2 top-1/2 hidden h-5 w-5 -translate-y-1/2 rotate-45 border-b border-l border-white/15 bg-white/[0.07] sm:block" />
 
                 <p className="text-2xl font-semibold leading-snug text-white sm:text-[26px]">
-                  {balanceLock
+                  {batchLock
+                    ? `Your ${access?.batchLabel ?? "October"} seat is reserved.`
+                    : balanceLock
                     ? "Please settle your tuition balance to keep going."
                     : "Please proceed to pay the tuition fee to start your classes."}
                 </p>
 
                 <div className="mt-6 space-y-3">
-                  {balanceLock ? (
+                  {batchLock ? (
+                    <>
+                      <div className="flex items-center gap-3 text-sm text-emerald-200">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
+                          <CheckIcon className="h-3.5 w-3.5" strokeWidth={2.6} />
+                        </span>
+                        {tuitionFullyPaid ? "Tuition fully paid — your place is secured" : registrationPaid ? "Registration received — your place is being held" : "Your early reservation window is open"}
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-amber-100">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400/20 text-xs">✦</span>
+                        {access?.batchLabel ?? "October classes"} begins on {access?.batchStartsOn ? new Date(access.batchStartsOn).toLocaleDateString("en-NG", { day: "numeric", month: "long", year: "numeric" }) : "1 October"}
+                      </div>
+                      {access?.batchStartsOn && <BatchCountdown startsOn={access.batchStartsOn} />}
+                    </>
+                  ) : balanceLock ? (
                     <>
                       <div className="flex items-center gap-3 text-sm text-emerald-200">
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
@@ -380,7 +426,7 @@ export default function PaymentLockScreen({
                   </div>
                 ) : null}
 
-                {!balanceLock && access && access.requiredDeposit > 0 && (
+                {!balanceLock && !batchLock && access && access.requiredDeposit > 0 && (
                   <div className="mt-6">
                     <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-white/60">
                       <span>Towards your seat</span>
@@ -401,12 +447,14 @@ export default function PaymentLockScreen({
                 )}
 
                 <div className="mt-7 flex flex-wrap gap-3">
-                  <Link
-                    href="/programs"
-                    className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/30 transition hover:-translate-y-0.5 hover:brightness-110"
-                  >
-                    {balanceLock ? "Pay my balance" : "Pay tuition now"}
-                  </Link>
+                  {!tuitionFullyPaid && (
+                    <Link
+                      href="/programs"
+                      className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/30 transition hover:-translate-y-0.5 hover:brightness-110"
+                    >
+                      {balanceLock ? "Pay my balance" : batchLock ? "Reserve my October seat" : "Pay tuition now"}
+                    </Link>
+                  )}
                   <Link
                     href="/payments"
                     className="rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
@@ -425,7 +473,7 @@ export default function PaymentLockScreen({
                   on a track, so switching them to private here makes no sense —
                   they just need to settle what they owe.
                 */}
-                {!balanceLock && <PrivateClassAlternative />}
+                {!balanceLock && !batchLock && <PrivateClassAlternative />}
               </motion.div>
             </motion.div>
           )}
@@ -433,7 +481,11 @@ export default function PaymentLockScreen({
 
         {!revealed && (
           <p className="mt-10 max-w-md text-sm leading-7 text-white/60">
-            {balanceLock
+            {batchLock
+              ? tuitionFullyPaid
+                ? `Your place is secured. The ${access?.batchLabel ?? "October"} classroom opens when the countdown reaches zero.`
+                : `You are among the first learners held for the ${access?.batchLabel ?? "October"} intake. Complete your tuition payment to keep your seat confirmed before classes open.`
+              : balanceLock
               ? `Your tuition balance is outstanding — settle it to unlock ${areaLabel.toLowerCase()} again.`
               : `Your registration is confirmed — pay the tuition fee to unlock ${areaLabel.toLowerCase()}.`}
           </p>

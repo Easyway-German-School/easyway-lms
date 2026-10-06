@@ -63,6 +63,12 @@ type SessionSummary = {
   observers: number;
 };
 
+function isMissingRoomError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = "status" in error ? error.status : "statusCode" in error ? error.statusCode : undefined;
+  return status === 404 || (error instanceof Error && /\b404\b|room.*not found/i.test(error.message));
+}
+
 async function headcount(
   client: ReturnType<typeof roomServiceClient>,
   roomName: string,
@@ -134,6 +140,7 @@ export async function GET(request: NextRequest) {
         }),
       });
     } catch (error) {
+      if (isMissingRoomError(error)) return NextResponse.json({ participants: [] });
       console.error("Admin live participants fetch failed", error);
       return NextResponse.json({ error: "Could not reach LiveKit for that room." }, { status: 502 });
     }

@@ -6,6 +6,8 @@ import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { writeAudit } from "@/lib/prisma-guard";
 import { naira } from "@/lib/finance/receivables";
 import { closeOpenEnrolment, openEnrolment } from "@/lib/student-enrolment";
+import { defaultDestination, formatDestination, withoutPendingBatchTransfer, type BatchDestination } from "@/lib/batch-transfer";
+import { reassignTutorForPlacement } from "@/lib/tutor-auto-assign";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -61,8 +63,9 @@ export function monthsSinceBatchStart(
   batch: string | null,
   now: Date = new Date(),
   registeredAt: Date | null = null,
+  batchYear: number | null = null,
 ): number | null {
-  const startAbsolute = batchStartAbsolute(batch, now, registeredAt);
+  const startAbsolute = batchStartAbsolute(batch, now, registeredAt, batchYear);
   if (startAbsolute === null) return null;
   return now.getFullYear() * 12 + now.getMonth() - startAbsolute;
 }
@@ -74,8 +77,13 @@ export function monthsSinceBatchStart(
  * having started a year ago, and this list would put them up for promotion
  * before their first lesson.
  */
-function batchStartAbsolute(batch: string | null, now: Date, registeredAt: Date | null = null): number | null {
-  return resolveBatchAbsolute(batch, { registeredAt, now });
+function batchStartAbsolute(
+  batch: string | null,
+  now: Date,
+  registeredAt: Date | null = null,
+  batchYear: number | null = null,
+): number | null {
+  return resolveBatchAbsolute(batch, { registeredAt, batchYear, now });
 }
 
 export async function findPromotionCandidates(opts: {
@@ -108,7 +116,12 @@ export async function findPromotionCandidates(opts: {
         : {};
     const batch = typeof admission.batch === "string" && admission.batch.trim() ? admission.batch : null;
 
-    const startAbsolute = batchStartAbsolute(batch, now, student.createdAt);
+    const startAbsolute = batchStartAbsolute(
+      batch,
+      now,
+      student.createdAt,
+      typeof admission.batchYear === "number" && Number.isInteger(admission.batchYear) ? admission.batchYear : null,
+    );
     // No usable batch means no way to know the session ended. Reporting those
     // as overdue would bury the real ones in false positives.
     if (startAbsolute === null) continue;
@@ -169,11 +182,23 @@ export type PromotionOptions = {
    * promotion and never need an override.
    */
   override?: { by: string; reason: string };
+  /**
+   * The batch (month + year) the promoted students land in. This is the part
+   * that used to be missing: promotion put everybody in whatever the CALENDAR
+   * month happened to be, so students signed off from August who were meant
+   * for October landed in September, or in November if the office was late.
+   * The office now says where they go; when nobody has (a payment-triggered
+   * promotion, the assistant) it is the school's current intake - never a batch
+   * that has already finished.
+   */
+  destination?: BatchDestination;
 };
 
 /**
- * Move students up a level. The new batch month is set to the current month so
- * their calendar regenerates from now rather than replaying the old session.
+ * Move students up a level, into a chosen batch (see PromotionOptions). Their
+ * calendar regenerates from that batch rather than replaying the old session,
+ * and - because a new level in a new batch is a new first day - their start
+ * date, tutor and enrolment history move with them.
  *
  * A student who still owes on a GO-FORWARD charge (their current level or an
  * earlier one they were signed off from) is skipped unless `override` is given
@@ -192,8 +217,6 @@ export async function promoteStudents(
   const override = options.override;
 
   const result: PromotionResult = { promoted: [], skipped: [], overridden: [] };
-
-  const monthName = now.toLocaleString("en-US", { month: "long" });
 
   for (const studentId of studentIds) {
     const student = await prisma.student.findUnique({
@@ -266,11 +289,28 @@ export async function promoteStudents(
         ? (student.admission as Record<string, unknown>)
         : {};
 
+    // Where they land: the office's choice, else the school's current intake.
+    const destination = options.destination ?? (await defaultDestination(student.tenantId, now));
+    const destinationLabel = formatDestination(destination);
+
     await prisma.student.update({
       where: { id: studentId },
       data: {
         level: next,
-        admission: { ...admission, batch: monthName } as any,
+        // `batchYear` matters as much as the month: without it a student who
+        // registered a year or more ago resolves "October" to an October that
+        // has already gone. A scheduled batch move is dropped - it was for the
+        // level they are leaving.
+        admission: { ...withoutPendingBatchTransfer(admission), batch: destination.month, batchYear: destination.year } as any,
+        // A new level in a new batch is a new first day. The old start date
+        // would make the register treat them as already started, and the
+        // journey countdown run from a level that is over.
+        classesStartedAt: null,
+        startConfirmedAt: null,
+        startConfirmedVia: null,
+        startPromptSnoozedUntil: null,
+        notStartedCount: 0,
+        notStartedReason: null,
       },
     });
 
@@ -303,10 +343,11 @@ export async function promoteStudents(
         sessionSlot: student.sessionSlot,
         classType: student.classType,
         deliveryMode: student.deliveryMode,
-        batch: monthName,
+        batch: destination.month,
+        batchYear: destination.year,
         registeredAt: now,
         tenantId: student.tenantId,
-        startedAt: now,
+        startedAt: null,
         tuitionChargeId: charge?.chargeId ?? null,
         feeSnapshot: charge?.amount ?? null,
         now,
@@ -314,6 +355,14 @@ export async function promoteStudents(
     } catch (enrolmentError) {
       console.error("Enrolment history update failed on promotion", { studentId, next, enrolmentError });
     }
+
+    // Level and batch both changed, so the tutor who fits may have too. Without
+    // this the student stayed on last level's tutor's register and never
+    // appeared on the new batch's tutor's. Best-effort, and it fails safe: no
+    // single match leaves the tutor alone and tells the office by name.
+    await reassignTutorForPlacement(studentId, `${next}, ${destinationLabel} batch`).catch((tutorError) => {
+      console.error("Tutor re-placement failed on promotion", { studentId, next, tutorError });
+    });
 
     result.promoted.push(studentId);
   }

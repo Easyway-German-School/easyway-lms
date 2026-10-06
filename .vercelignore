@@ -23,3 +23,13 @@ prototype/prototype/
 # Unrelated local project with a vendored Python env.
 TRON/
 
+# Never upload personal data or credentials. The build needs none of this:
+# database snapshots (full student/payment tables), student CSV imports, and a
+# curl cookie jar that holds a live admin session.
+prodcj.txt
+**/*cj.txt
+prototype/backups/
+prototype/imports/
+prototype/*.csv
+prototype/build-validation.txt
+

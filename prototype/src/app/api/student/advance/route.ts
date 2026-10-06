@@ -60,7 +60,12 @@ export async function GET() {
 
     // Registration date anchored — see lib/batch.ts. Only used for the "how
     // long have you been at this" figures below, never to decide eligibility.
-    const monthsElapsed = monthsSinceBatchStart(batch, new Date(), student.createdAt);
+    const monthsElapsed = monthsSinceBatchStart(
+      batch,
+      new Date(),
+      student.createdAt,
+      typeof admission.batchYear === "number" && Number.isInteger(admission.batchYear) ? admission.batchYear : null,
+    );
     const currentLevel = student.level;
     const nextLevel = nextLevelAfter(currentLevel);
     const branchName = student.branch?.name ?? null;

@@ -8,6 +8,8 @@ import {
   TUITION_FREE_ROUTES,
   canAttendLive,
   deriveStudentAccess,
+  hasProfilePhoto,
+  isPhotoGatedRoute,
 } from "@/lib/access";
 import {
   isReceivedPayment,
@@ -148,6 +150,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     paymentGraceUntil: student.paymentGraceUntil,
     paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
   });
+  const hasPhoto = hasProfilePhoto(student.admission);
+  const photoLocked = !hasPhoto;
 
   /**
    * The tabs, resolved the same way the student's own shell resolves them, so
@@ -173,7 +177,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       ...tab,
       label: tab.label.charAt(0).toUpperCase() + tab.label.slice(1),
       hidden,
-      locked: !hidden && !free && !access.hasAccess,
+      locked:
+        !hidden &&
+        ((!free && !access.hasAccess) || (isPhotoGatedRoute(tab.path) && photoLocked)),
     };
   });
 
@@ -282,7 +288,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       tutor: student.tutor?.user.name ?? null,
     },
     portal: {
-      locked: !access.hasAccess,
+      locked: !access.hasAccess || photoLocked,
+      lockReason: !access.hasAccess ? "payment" : photoLocked ? "photo" : null,
+      hasPhoto,
       registrationPaid: access.registrationPaid,
       progressPercent: access.progressPercent,
       // Amounts follow the same rule as the rest of the admin area: an admin

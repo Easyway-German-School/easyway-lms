@@ -7,6 +7,7 @@ import {
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
+  teachingGroups,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
@@ -54,12 +55,19 @@ export async function GET() {
     const students = where
       ? await prisma.student.findMany({
           where: where as any,
-          select: { id: true, admission: true, tutorId: true, coTutors: { select: { lecturerId: true } } },
+          select: {
+            id: true,
+            admission: true,
+            tutorId: true,
+            coTutors: { select: { lecturerId: true } },
+            branchId: true,
+            level: true,
+            sessionSlot: true,
+          },
         })
       : [];
-    const studentIds = students
-      .filter((student) => belongsToLecturer(assignment, lecturer.id, student))
-      .map((student) => student.id);
+    const mine = students.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
+    const studentIds = mine.map((student) => student.id);
 
     // Nothing described and nobody named — the office has not set this tutor
     // up at all. A tutor with named students but no class falls through, which
@@ -82,7 +90,7 @@ export async function GET() {
     // never writes.
     const attendance = await prisma.attendance.findMany({
       where: { studentId: { in: studentIds } },
-      select: { present: true },
+      select: { present: true, studentId: true },
     });
     const averageAttendance = attendance.length
       ? Math.round((attendance.filter((entry) => entry.present).length / attendance.length) * 100)
@@ -150,8 +158,58 @@ export async function GET() {
       .sort((a, b) => b.at.localeCompare(a.at))
       .slice(0, 6);
 
+    /**
+     * One card per class the tutor runs, with the intake it belongs to and its
+     * own numbers. The roster is attributed to the group it sits in (same
+     * branch / level / sitting, and the pinned month when there is one), so a
+     * tutor on September AND October sees each batch's students apart.
+     */
+    const lower = (value: string | null | undefined) => (value ?? "").toLowerCase();
+    const presentByStudent = new Map<string, { present: number; total: number }>();
+    for (const row of attendance) {
+      const tally = presentByStudent.get(row.studentId) ?? { present: 0, total: 0 };
+      tally.total += 1;
+      if (row.present) tally.present += 1;
+      presentByStudent.set(row.studentId, tally);
+    }
+    const batchOf = (admission: unknown) => {
+      const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
+      return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
+    };
+    const batches = teachingGroups(
+      assignment,
+      new Map(branches.map((branch) => [branch.id, branch.name])),
+    ).map((group) => {
+      const roster = mine.filter(
+        (student) =>
+          lower(student.branchId) === lower(group.branchId) &&
+          lower(student.level) === lower(group.level) &&
+          (!group.sessionSlot || lower(student.sessionSlot) === group.sessionSlot) &&
+          (!group.batch || batchOf(student.admission) === group.batch.toLowerCase()),
+      );
+      let present = 0;
+      let total = 0;
+      for (const student of roster) {
+        const tally = presentByStudent.get(student.id);
+        if (tally) {
+          present += tally.present;
+          total += tally.total;
+        }
+      }
+      return {
+        key: group.key,
+        batch: group.batch,
+        batchRange: group.batchRange,
+        branchName: group.branchName,
+        label: group.label,
+        students: roster.length,
+        attendance: total ? Math.round((present / total) * 100) : null,
+      };
+    });
+
     return NextResponse.json({
       assigned: true,
+      batches,
       assignmentLabel: isAssigned(assignment)
         ? assignmentLabel
         : "Students assigned to you individually by the office",

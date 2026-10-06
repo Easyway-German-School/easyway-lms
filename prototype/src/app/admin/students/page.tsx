@@ -268,6 +268,35 @@ function StudentsRoster() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetPhrase, setResetPhrase] = useState("");
   const [resetting, setResetting] = useState(false);
+  /**
+   * "Move to batch": the destinations the office may send students to, the one
+   * picked, and whether a move is mid-flight. A move only TAKES EFFECT once each
+   * student's tuition deposit has cleared - see src/lib/batch-transfer.ts.
+   */
+  const [moveOptions, setMoveOptions] = useState<Array<{ month: string; year: number; label: string }>>([]);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [moving, setMoving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/students/batch-transfer", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setMoveOptions(Array.isArray(data.options) ? data.options : []);
+        if (data.currentIntake?.month) {
+          setMoveTarget((prev) => prev || `${data.currentIntake.month} ${data.currentIntake.year}`);
+        }
+      } catch {
+        // The picker just stays empty; nothing else on the page depends on it.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadBranches = useCallback(async () => {
     const [branchesRes, lecturersRes] = await Promise.all([
@@ -928,6 +957,89 @@ function StudentsRoster() {
       return next;
     });
     await loadStudents();
+  }
+
+  /**
+   * Move the ticked students (or everyone the current filters match) to the
+   * chosen batch, or - with `cancel` - drop a move that was scheduled.
+   */
+  async function handleMoveSelected(cancel = false) {
+    setStudentError("");
+    setDeleteFeedback("");
+    const destination = moveOptions.find((option) => option.label === moveTarget);
+    if (!cancel && !destination) {
+      setStudentError("Choose the batch to move these students to.");
+      return;
+    }
+
+    const ids = [...selectedStudentIds];
+    const count = selectAllMatching ? totalCount : ids.length;
+    if (!count) return;
+
+    // A derived view (a focus preset, aging bucket, tag) cannot be re-expressed
+    // as plain filters, so send exactly the ids it matched instead.
+    const derivedIds = matchedIds ? [...matchedIds] : null;
+    const scope = selectAllMatching
+      ? derivedIds
+        ? { studentIds: derivedIds }
+        : {
+            filters: {
+              ...(filterBranchId ? { branchId: filterBranchId } : {}),
+              ...(filterLevel ? { level: filterLevel } : {}),
+              ...(filterBatch ? { batch: filterBatch } : {}),
+              ...(filterClassType ? { classType: filterClassType } : {}),
+              ...(filterSessionSlot ? { sessionSlot: filterSessionSlot } : {}),
+              ...(filterStatus ? { status: filterStatus } : {}),
+              ...(filterPaymentStatus ? { paymentStatus: filterPaymentStatus } : {}),
+              ...(filterTutorId ? { tutorId: filterTutorId } : {}),
+              ...(filterYear ? { year: filterYear } : {}),
+              ...(search ? { search } : {}),
+            },
+          }
+      : { studentIds: ids };
+
+    const noun = `${count} student${count === 1 ? "" : "s"}`;
+    const question = cancel
+      ? `Cancel the scheduled batch move for ${noun}? Anyone not yet moved stays where they are.`
+      : `Move ${noun} to the ${destination!.label} batch?\n\nThose who have paid their tuition deposit move now - their tutor, timetable and student ID follow. Everyone else moves automatically the moment their deposit clears.`;
+    if (!confirm(question)) return;
+
+    setMoving(true);
+    try {
+      const res = await fetch("/api/admin/students/batch-transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...scope,
+          ...(cancel ? { action: "cancel" } : { month: destination!.month, year: destination!.year }),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStudentError(data?.error || "Unable to move the selected students.");
+        return;
+      }
+      setDeleteFeedback(
+        cancel
+          ? `Cancelled ${data.cancelled ?? 0} scheduled move${data.cancelled === 1 ? "" : "s"}.`
+          : `${data.batch} ${data.batchYear}: ` +
+              [
+                data.activated ? `${data.activated} moved now (tutor, timetable and student ID updated)` : "",
+                data.awaitingPayment ? `${data.awaitingPayment} will move once their tuition deposit clears` : "",
+                data.alreadyThere ? `${data.alreadyThere} already there` : "",
+                data.failed ? `${data.failed} failed - try again` : "",
+                data.skipped ? `${data.skipped} outside your access` : "",
+              ]
+                .filter(Boolean)
+                .join("; ") +
+              ".",
+      );
+      setSelectAllMatching(false);
+      setSelectedStudentIds(new Set());
+      await loadStudents();
+    } finally {
+      setMoving(false);
+    }
   }
 
   async function handleResetRoster() {
@@ -1794,9 +1906,43 @@ function StudentsRoster() {
                 </button>
               ) : null}
             </div>
-            <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
-              {selectAllMatching ? `Remove all ${totalCount}` : "Delete selected"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Move to another batch. Deliberately NOT red - the bar is red for
+                  the delete button's sake, and this must not read as destructive. */}
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-2 text-[var(--foreground)]">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Move to batch</span>
+                <select
+                  value={moveTarget}
+                  onChange={(event) => setMoveTarget(event.target.value)}
+                  aria-label="Batch to move the selected students to"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
+                >
+                  {moveOptions.map((option) => (
+                    <option key={option.label} value={option.label}>{option.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleMoveSelected(false)}
+                  disabled={moving || !moveTarget}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {moving ? "Moving…" : "Move"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMoveSelected(true)}
+                  disabled={moving}
+                  title="Take a scheduled move off these students"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                >
+                  Cancel pending move
+                </button>
+              </div>
+              <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
+                {selectAllMatching ? `Remove all ${totalCount}` : "Delete selected"}
+              </button>
+            </div>
           </div>
         ) : null}
         <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
@@ -1984,7 +2130,33 @@ function StudentsRoster() {
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
                     <td className="px-6 py-4">{student.admission && typeof student.admission === "object" && (student.admission as any).classApplied ? String((student.admission as any).classApplied) : (student.level || "—")}</td>
-                    <td className="px-6 py-4">{typeof student.admission === "object" && student.admission && !Array.isArray(student.admission) && (student.admission as Record<string, unknown>).batch ? String((student.admission as Record<string, unknown>).batch) : "—"}</td>
+                    <td className="px-6 py-4">
+                      {(() => {
+                        const admission =
+                          typeof student.admission === "object" && student.admission && !Array.isArray(student.admission)
+                            ? (student.admission as Record<string, unknown>)
+                            : {};
+                        const batch = admission.batch ? String(admission.batch) : "";
+                        // The year is only shown when the office placed the student
+                        // (a move or a promotion) - for everyone else it is inferred
+                        // from the registration date and a guess would mislead.
+                        const year = typeof admission.batchYear === "number" ? ` ${admission.batchYear}` : "";
+                        const pending = admission.pendingBatchTransfer as { month?: unknown; year?: unknown } | undefined;
+                        return (
+                          <>
+                            <span>{batch ? `${batch}${year}` : "—"}</span>
+                            {pending && typeof pending.month === "string" ? (
+                              <span
+                                className="mt-1 block w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900"
+                                title="Scheduled by the office. It takes effect as soon as the tuition deposit clears."
+                              >
+                                Moving to {pending.month} {String(pending.year ?? "")} after payment
+                              </span>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+                    </td>
                     <td className="px-6 py-4">
                       {student.germanyGoal ? (
                         <span

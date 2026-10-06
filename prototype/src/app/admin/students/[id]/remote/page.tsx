@@ -63,6 +63,8 @@ type Remote = {
   };
   portal: {
     locked: boolean;
+    lockReason: "payment" | "photo" | null;
+    hasPhoto: boolean;
     registrationPaid: boolean;
     progressPercent: number;
     outstanding?: number;
@@ -386,7 +388,11 @@ export default function RemoteViewPage() {
                   {portal.locked ? <LockIcon /> : <UnlockIcon />}
                 </span>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">
-                  {portal.locked ? "Their portal is locked" : "Their portal is open"}
+                  {portal.locked
+                    ? portal.lockReason === "photo"
+                      ? "Their portal needs a profile photo"
+                      : "Their portal is locked"
+                    : "Their portal is open"}
                 </p>
               </div>
               {portal.outstanding !== undefined ? (

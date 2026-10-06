@@ -13,6 +13,7 @@ import {
   CLASS_TYPES,
   COURSE_LEVELS,
   SESSION_SLOTS,
+  TUTOR_CLASSIFICATIONS,
   assignmentBatches,
   type LecturerAssignment,
 } from "@/lib/lecturer-assignment";
@@ -49,6 +50,7 @@ type Tutor = {
   id: string;
   user: { id: string; name: string | null; email: string; role: string };
   specialization: string | null;
+  classifications: string[];
   bio: string | null;
   phone: string | null;
   photoUrl: string | null;
@@ -912,18 +914,6 @@ function ClassRoster({
               student={student}
               right={
                 <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => pair(student, lecturerId)}
-                    disabled={busyId === student.id}
-                    className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                  >
-                    {busyId === student.id
-                      ? "Assigning…"
-                      : student.currentTutorName
-                        ? `Move from ${student.currentTutorName}`
-                        : "Add as primary tutor"}
-                  </button>
                   {student.classType === "group" &&
                   ["online", "hybrid"].includes(student.deliveryMode) &&
                   student.currentTutorId !== lecturerId &&
@@ -932,11 +922,25 @@ function ClassRoster({
                       type="button"
                       onClick={() => addCoTutor(student)}
                       disabled={busyId === student.id}
-                      className="rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] disabled:opacity-60"
+                      title="Keep the current primary tutor and add this tutor as an additional tutor"
+                      className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
                     >
                       {busyId === student.id ? "Adding…" : "Add as co-tutor"}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => pair(student, lecturerId)}
+                    disabled={busyId === student.id}
+                    title="Replace the student's current primary tutor"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] disabled:opacity-60"
+                  >
+                    {busyId === student.id
+                      ? "Assigning…"
+                      : student.currentTutorName
+                        ? `Replace primary tutor (${student.currentTutorName})`
+                        : "Add as primary tutor"}
+                  </button>
                 </div>
               }
             />
@@ -963,6 +967,7 @@ export default function AdminTutorsPage() {
     bio: "",
     employmentType: "",
     startedAt: "",
+    classifications: [] as string[],
   });
   const [newAssignment, setNewAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   // A new tutor starts with everything, matching what every tutor created
@@ -978,6 +983,7 @@ export default function AdminTutorsPage() {
   const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
   const [uploadingEditPhoto, setUploadingEditPhoto] = useState(false);
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
+  const [editClassifications, setEditClassifications] = useState<string[]>([]);
   const [editFeatures, setEditFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [savingEdit, setSavingEdit] = useState(false);
   /**
@@ -1129,6 +1135,7 @@ export default function AdminTutorsPage() {
         body: JSON.stringify({
           ...form,
           ...newAssignment,
+          classifications: form.classifications,
           assignmentGroups: newAssignment.groups,
           features: newFeatures,
           photoUrl: uploadedPhotoUrl ?? undefined,
@@ -1149,6 +1156,7 @@ export default function AdminTutorsPage() {
         bio: "",
         employmentType: "",
         startedAt: "",
+        classifications: [],
       });
       setNewAssignment(EMPTY_ASSIGNMENT);
       setCreatePhotoFile(null);
@@ -1211,6 +1219,7 @@ export default function AdminTutorsPage() {
         body: JSON.stringify({
           lecturerId: editingId,
           ...editAssignment,
+          classifications: editClassifications,
           assignmentGroups: editAssignment.groups,
           features: editFeatures,
           photoUrl: uploadedPhotoUrl ?? undefined,
@@ -1218,7 +1227,12 @@ export default function AdminTutorsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the assignment");
-      setSuccess("Assignment saved. The tutor has been notified and their roster is already updated.");
+      const toldBatches: string[] = Array.isArray(data.toldBatches) ? data.toldBatches : [];
+      setSuccess(
+        toldBatches.length
+          ? `Assignment saved. The tutor was notified and emailed about the ${toldBatches.join(" and ")} batch, and their roster is already updated.`
+          : "Assignment saved. The tutor has been notified and their roster is already updated.",
+      );
       setEditingId("");
       setEditPhotoFile(null);
       setEditPhotoUrl(null);
@@ -1375,6 +1389,11 @@ export default function AdminTutorsPage() {
                           Class types: {tutor.assignment.classTypes.map((type) => CLASS_TYPE_LABELS[type] ?? type).join(", ")}
                         </p>
                       ) : null}
+                      {tutor.classifications?.length ? (
+                        <p className="mt-1 text-xs font-semibold text-[var(--accent)]">
+                          Exam-prep offerings: {tutor.classifications.map((value) => TUTOR_CLASSIFICATIONS.find((option) => option.value === value)?.label ?? value).join(", ")}
+                        </p>
+                      ) : null}
                       {assignmentBatches(tutor.assignment).length ? (
                         <p className="mt-1 text-xs text-[var(--muted)]">
                           Batches: {assignmentBatches(tutor.assignment).join(", ")}
@@ -1396,6 +1415,7 @@ export default function AdminTutorsPage() {
                         onClick={() => {
                           setEditingId(isEditing ? "" : tutor.id);
                           setEditAssignment(tutor.assignment);
+                          setEditClassifications(tutor.classifications ?? []);
                           setEditFeatures(tutor.features ?? [...LECTURER_FEATURES]);
                           setCoveragePreview(null);
                         }}
@@ -1459,6 +1479,17 @@ export default function AdminTutorsPage() {
                           </div>
                         ) : null}
                       </div>
+
+                      <fieldset className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                        <legend className="text-sm font-semibold text-[var(--foreground)]">Tutor classification</legend>
+                        <p className="mt-1 text-xs text-[var(--muted)]">Operational private online exam-prep offerings. Each selected offering requires online and private coverage at its level.</p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {TUTOR_CLASSIFICATIONS.map((option) => {
+                            const selected = editClassifications.includes(option.value);
+                            return <label key={option.value} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-xs font-semibold ${selected ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)]"}`}><input type="checkbox" checked={selected} onChange={() => setEditClassifications((current) => selected ? current.filter((value) => value !== option.value) : [...current, option.value])} />{option.label}</label>;
+                          })}
+                        </div>
+                      </fieldset>
 
                       <AssignmentFields
                         branches={branches}
@@ -1629,6 +1660,16 @@ export default function AdminTutorsPage() {
                 placeholder="German language, exam prep, business communication"
               />
             </label>
+            <fieldset className="md:col-span-2">
+              <legend className="text-sm font-medium">Tutor classification</legend>
+              <p className="mt-1 text-xs text-[var(--muted)]">Choose the private online exam-prep offerings this tutor actually provides. The server stores these and enforces their level and delivery coverage.</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {TUTOR_CLASSIFICATIONS.map((option) => {
+                  const selected = form.classifications.includes(option.value);
+                  return <label key={option.value} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-xs font-semibold ${selected ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)]"}`}><input type="checkbox" checked={selected} onChange={() => setForm((current) => ({ ...current, classifications: selected ? current.classifications.filter((value) => value !== option.value) : [...current.classifications, option.value] }))} />{option.label}</label>;
+                })}
+              </div>
+            </fieldset>
             <label className="block text-sm font-medium md:col-span-2">
               Bio
               <textarea

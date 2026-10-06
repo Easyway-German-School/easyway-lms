@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lecturerCan } from "@/lib/lecturer-features";
 import { liveWhere } from "@/lib/live-presence";
+import { isAnnounceIdentity } from "@/lib/live-classroom";
 import {
   muteAllStudents,
   muteParticipantMic,
@@ -94,6 +95,16 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: "Bad request", message: "You cannot target yourself." },
           { status: 400 },
+        );
+      }
+
+      // The anonymous announcement identity is not moderatable by anyone
+      // through this route, tutor or admin — it is the school speaking, and
+      // it stops itself (see /api/admin/live/speak), never a tutor's menu.
+      if (isAnnounceIdentity(identity)) {
+        return NextResponse.json(
+          { error: "Forbidden", message: "That is an anonymous office announcement — it cannot be moderated from here." },
+          { status: 403 },
         );
       }
 

@@ -689,10 +689,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       {/*
         The office assistant as a floating launcher — same idea as the student
-        portal's CommunityLauncher. Hidden on its own full page, where it would
-        just be a second copy of itself.
+        portal's CommunityLauncher. Hide it on its own page and the community
+        composer, where it would cover the send control on narrow screens.
       */}
-      {!blocked && pathname !== '/admin/assistant' && <AdminAssistantLauncher />}
+      {!blocked && pathname !== '/admin/assistant' && pathname !== '/admin/community' && <AdminAssistantLauncher />}
 
       {/* Once-a-day "good morning" card — the office counterpart to the
           students' daily brief. Self-gates on a localStorage date key. */}

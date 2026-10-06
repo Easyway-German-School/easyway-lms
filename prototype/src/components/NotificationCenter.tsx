@@ -21,6 +21,7 @@ import {
   UserPlusIcon,
 } from "@/components/icons";
 import { usePushNotifications } from "@/lib/use-push";
+import { requestInstall } from "@/lib/client/install-events";
 
 /**
  * The bell, shared by all three portals.
@@ -393,6 +394,32 @@ export default function NotificationCenter({
                     </button>
                   )}
                 </div>
+
+                {push.needsInstall ? (
+                  // iPhone in a browser tab: Web Push does not exist here, so
+                  // `supported` is false and this whole strip used to vanish —
+                  // leaving no hint that alerts were possible at all.
+                  <div className="border-b border-[var(--border)] bg-[var(--accent)]/[0.05] px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-[var(--foreground)]">Get alerts on your iPhone</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-[var(--muted)]">
+                          iPhone only sends alerts to apps on your Home Screen. Install EasyWay first.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsOpen(false);
+                          requestInstall();
+                        }}
+                        className="shrink-0 rounded-lg bg-[var(--accent)] px-3 py-2 text-[11px] font-bold text-white transition hover:brightness-110"
+                      >
+                        Show me how
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {push.supported && !push.enabled ? (
                   <div className="border-b border-[var(--border)] bg-[var(--accent)]/[0.05] px-4 py-3">
