@@ -100,6 +100,10 @@ export default function CommunityInsights() {
 
   return (
     <div className="space-y-5">
+      <p className="text-sm text-[var(--muted)]">
+        New look vs classic look, side by side. The People tab lists every student by name.
+      </p>
+
       <div className="flex flex-wrap items-center gap-2">
         {[7, 30, 90].map((n) => (
           <button
