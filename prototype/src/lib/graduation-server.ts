@@ -107,6 +107,7 @@ export type GraduationAuto = {
 export type GraduationDesk = {
   cohorts: DeskCohort[];
   running: RunningBatch[];
+  accounting: DeskAccounting;
   auto: GraduationAuto;
 };
 
@@ -129,7 +130,17 @@ type Scanned = {
   verdict: GraduationVerdict;
 };
 
-type Scan = { candidates: Scanned[]; running: RunningBatch[] };
+/** Where every active learner went: the answer to "I have 500, why are only 19 here?" */
+export type DeskAccounting = {
+  total: number;
+  onDesk: number;
+  running: number;
+  notOpenYet: number;
+  noBatch: number;
+  topOfLadder: number;
+};
+
+type Scan = { candidates: Scanned[]; running: RunningBatch[]; accounting: DeskAccounting };
 
 function readJson(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -176,23 +187,35 @@ async function scan(options: {
 
   const due: Array<{ student: (typeof students)[number]; batch: string; timing: CohortTiming }> = [];
   const runningMap = new Map<string, RunningBatch>();
+  const accounting: DeskAccounting = { total: students.length, onDesk: 0, running: 0, notOpenYet: 0, noBatch: 0, topOfLadder: 0 };
 
   for (const student of students) {
-    if (!nextLevelAfter(student.level)) continue;
+    if (!nextLevelAfter(student.level)) {
+      accounting.topOfLadder += 1;
+      continue;
+    }
     const batch = batchFromAdmission(student.admission);
-    if (!batch) continue;
+    if (!batch) {
+      accounting.noBatch += 1;
+      continue;
+    }
     const timing = cohortTiming({
       batch,
       sessionSlot: student.sessionSlot,
       registeredAt: student.createdAt,
       now,
     });
-    if (!timing) continue;
+    if (!timing) {
+      accounting.noBatch += 1;
+      continue;
+    }
 
     if (timing.graduatable) {
+      accounting.onDesk += 1;
       due.push({ student, batch, timing });
     } else if (timing.startsOn.getTime() <= now.getTime()) {
       // Mid-course. Listed so the office can see what is coming, never actionable.
+      accounting.running += 1;
       const key = `${student.branchId ?? "none"}|${student.level}|${batch}|${dayKey(timing.endsOn)}`;
       const seen = runningMap.get(key);
       if (seen) seen.count += 1;
@@ -207,11 +230,13 @@ async function scan(options: {
           daysToEnd: timing.daysToEnd,
           count: 1,
         });
+    } else {
+      accounting.notOpenYet += 1;
     }
   }
 
   const running = [...runningMap.values()].sort((a, b) => a.daysToEnd - b.daysToEnd);
-  if (due.length === 0) return { candidates: [], running };
+  if (due.length === 0) return { candidates: [], running, accounting };
 
   const ids = due.map((row) => row.student.id);
   const [attendance, charges, payments] = await Promise.all([
@@ -259,6 +284,15 @@ async function scan(options: {
     const priorLevelOwed = ledger.lines
       .filter((line) => line.outstanding > 0 && !line.legacyArrears && line.level !== next)
       .reduce((sum, line) => sum + line.outstanding, 0);
+    // The same test the certificate and the portal paywall use: at least the deposit paid.
+    const paidDeposit =
+      (paidBy.get(student.id) ?? 0) >=
+      requiredDepositFor({
+        level: student.level,
+        branch: student.branch?.name ?? null,
+        classType: student.classType,
+        pathway: student.pathway,
+      });
 
     return {
       studentId: student.id,
@@ -286,17 +320,22 @@ async function scan(options: {
         level: student.level,
         heldBackAt: student.heldBackAt,
         heldBackReason: student.heldBackReason,
+        // Attendance registers were not kept for a long stretch and most learners only have a
+        // batch month on file, so "has started" also counts a paid deposit — which is exactly
+        // what the certificate asks for. A no-show who paid nothing is caught by `paidDeposit`.
         hasStarted: Boolean(
           (student.classesStartedAt && student.classesStartedAt.getTime() <= now.getTime()) ||
-            attended.has(student.id),
+            attended.has(student.id) ||
+            paidDeposit,
         ),
+        paidDeposit,
         priorLevelOwed,
         formatMoney: naira,
       }),
     };
   });
 
-  return { candidates, running };
+  return { candidates, running, accounting };
 }
 
 /* ------------------------------ auto setting ------------------------------ */
@@ -344,7 +383,7 @@ export async function loadGraduationDesk(options: {
 }): Promise<GraduationDesk> {
   const now = options.now ?? new Date();
   const startDayOverrides = await readIntakeStartDayOverrides(options.tenantId ?? null);
-  const { candidates, running } = await scan({ where: options.where, now, startDayOverrides });
+  const { candidates, running, accounting } = await scan({ where: options.where, now, startDayOverrides });
 
   const cohorts = new Map<string, DeskCohort>();
   for (const row of candidates) {
@@ -397,7 +436,7 @@ export async function loadGraduationDesk(options: {
     }))
     .sort((a, b) => a.daysToEnd - b.daysToEnd || a.branch.localeCompare(b.branch) || a.level.localeCompare(b.level));
 
-  return { cohorts: ordered, running, auto: await readGraduationAuto(options.tenantId ?? null) };
+  return { cohorts: ordered, running, accounting, auto: await readGraduationAuto(options.tenantId ?? null) };
 }
 
 /* ------------------------------- graduating ------------------------------- */
@@ -602,6 +641,9 @@ export async function signOffForCheckout(studentId: string, now = new Date()): P
       tenantId: true,
       heldBackAt: true,
       heldBackReason: true,
+      classType: true,
+      pathway: true,
+      branch: { select: { name: true } },
     },
   });
   if (!student) return false;
@@ -627,13 +669,30 @@ export async function signOffForCheckout(studentId: string, now = new Date()): P
       : await prisma.attendance.count({
           where: { studentId, status: { in: ["present", "late"] } },
         });
+  // Same test as the desk and the certificate: the deposit for the level they finished is in.
+  const paid = await prisma.payment.aggregate({
+    where: { studentId, deletedAt: null, ...receivedPaymentFilter() },
+    _sum: { amount: true },
+  });
+  const paidDeposit =
+    (paid._sum.amount ?? 0) >=
+    requiredDepositFor({
+      level: student.level,
+      branch: student.branch?.name ?? null,
+      classType: student.classType,
+      pathway: student.pathway,
+    });
   const verdict = graduationVerdict({
     level: student.level,
     heldBackAt: student.heldBackAt,
     heldBackReason: student.heldBackReason,
     hasStarted: Boolean(
-      (student.classesStartedAt && student.classesStartedAt.getTime() <= now.getTime()) || attendedCount > 0,
+      (student.classesStartedAt && student.classesStartedAt.getTime() <= now.getTime()) ||
+        attendedCount > 0 ||
+        paidDeposit,
     ),
+    // A learner the office invited by hand is the office's decision; the deposit rule is for the automatic list.
+    paidDeposit: audience.state === "invited" ? true : paidDeposit,
     // The checkout bills what is owed; it is not a reason to refuse the sign-off.
     priorLevelOwed: 0,
   });
