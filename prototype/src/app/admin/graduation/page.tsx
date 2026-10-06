@@ -29,7 +29,7 @@ import { LevelUpIcon } from "@/components/icons";
 
 type Verdict =
   | { state: "ready" }
-  | { state: "blocked"; reason: "fees" | "never_started" | "held_back" | "top_of_ladder"; detail: string };
+  | { state: "blocked"; reason: "fees" | "unpaid" | "never_started" | "held_back" | "top_of_ladder"; detail: string };
 
 type DeskStudent = { studentId: string; name: string; email: string; sitting: string; verdict: Verdict; offered: boolean };
 
@@ -63,6 +63,15 @@ type RunningBatch = {
 };
 
 type Auto = { enabled: boolean; lastRunAt: string | null; lastRunSummary: string | null };
+
+type Accounting = {
+  total: number;
+  onDesk: number;
+  running: number;
+  notOpenYet: number;
+  noBatch: number;
+  topOfLadder: number;
+};
 
 type RunResult = {
   graduated: { studentId: string; name: string }[];
@@ -104,7 +113,15 @@ type BatchGroup = {
 
 const CHUNK = 10;
 
+const REASON_LABEL: Record<string, string> = {
+  unpaid: "have not paid the deposit — left alone",
+  never_started: "never started — left alone",
+  held_back: "held back by the office",
+  top_of_ladder: "at the top level",
+};
+
 const REASON_STYLE: Record<string, string> = {
+  unpaid: "bg-rose-50 text-rose-800 ring-rose-300",
   fees: "bg-amber-50 text-amber-800 ring-amber-300",
   never_started: "bg-rose-50 text-rose-800 ring-rose-300",
   held_back: "bg-sky-50 text-sky-800 ring-sky-300",
@@ -208,6 +225,7 @@ export default function GraduationPage() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [showRunning, setShowRunning] = useState(false);
+  const [accounting, setAccounting] = useState<Accounting | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -218,6 +236,7 @@ export default function GraduationPage() {
       if (!response.ok) throw new Error(json.error || "Could not load");
       setCohorts(json.cohorts);
       setRunning(json.running);
+      setAccounting(json.accounting ?? null);
       setAuto(json.auto);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load");
@@ -469,11 +488,21 @@ export default function GraduationPage() {
                       {batch.owes} owe on this level — invited, not moved
                     </span>
                   )}
-                  {batch.blocked > 0 && (
-                    <span className="rounded-full bg-rose-50 px-3 py-1 font-semibold text-rose-800 ring-1 ring-inset ring-rose-300">
-                      {batch.blocked} need a look
+                  {Object.entries(
+                    students.reduce<Record<string, number>>((counts, student) => {
+                      if (student.verdict.state === "blocked" && student.verdict.reason !== "fees") {
+                        counts[student.verdict.reason] = (counts[student.verdict.reason] ?? 0) + 1;
+                      }
+                      return counts;
+                    }, {}),
+                  ).map(([reason, count]) => (
+                    <span
+                      key={reason}
+                      className={`rounded-full px-3 py-1 font-semibold ring-1 ring-inset ${REASON_STYLE[reason] ?? REASON_STYLE.top_of_ladder}`}
+                    >
+                      {count} {REASON_LABEL[reason] ?? "need a look"}
                     </span>
-                  )}
+                  ))}
                 </div>
 
                 <div className="space-y-3">
@@ -575,6 +604,24 @@ export default function GraduationPage() {
                 ))}
               </ul>
             )}
+          </section>
+        )}
+
+        {accounting && (
+          <section className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Where is everybody?</p>
+            <p className="text-[var(--foreground)]">
+              <strong>{accounting.total}</strong> active learners. Only a batch that has <em>ended</em> (or ends within two weeks) is listed above.
+            </p>
+            <ul className="grid gap-1 text-[var(--muted)] sm:grid-cols-2">
+              <li><strong className="text-[var(--foreground)]">{accounting.onDesk}</strong> are on this page</li>
+              <li><strong className="text-[var(--foreground)]">{accounting.running}</strong> are in a batch still running — they appear when it ends</li>
+              <li><strong className="text-[var(--foreground)]">{accounting.notOpenYet}</strong> are waiting for a batch that has not opened yet</li>
+              <li><strong className="text-[var(--foreground)]">{accounting.noBatch}</strong> have no readable batch on their record</li>
+              {accounting.topOfLadder > 0 && (
+                <li><strong className="text-[var(--foreground)]">{accounting.topOfLadder}</strong> are already at the top level</li>
+              )}
+            </ul>
           </section>
         )}
 

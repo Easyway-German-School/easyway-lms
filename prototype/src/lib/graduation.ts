@@ -145,7 +145,7 @@ export function nextPlacement(input: {
 
 export type GraduationVerdict =
   | { state: "ready" }
-  | { state: "blocked"; reason: "fees" | "never_started" | "held_back" | "top_of_ladder"; detail: string };
+  | { state: "blocked"; reason: "fees" | "unpaid" | "never_started" | "held_back" | "top_of_ladder"; detail: string };
 
 /**
  * Can this learner be moved on right now?
@@ -157,6 +157,7 @@ export type GraduationVerdict =
  *
  *   held back      the office withheld sign-off on purpose — never overridden
  *   never started  no confirmed first day and no attendance on the register
+ *   unpaid         never paid the deposit for the level they finished
  *   fees           owes on a level they have already been in (the same gate
  *                  promoteStudents enforces); collected first, or promoted by a
  *                  super admin with an override on /admin/promotions
@@ -167,6 +168,11 @@ export function graduationVerdict(input: {
   heldBackAt: Date | string | null;
   heldBackReason?: string | null;
   hasStarted: boolean;
+  /**
+   * They have paid at least the deposit for the level they finished — the same test the
+   * certificate and the portal paywall use. Defaults to true so older callers keep working.
+   */
+  paidDeposit?: boolean;
   priorLevelOwed: number;
   formatMoney?: (value: number) => string;
 }): GraduationVerdict {
@@ -179,6 +185,12 @@ export function graduationVerdict(input: {
   }
   if (!nextLevelAfter(input.level)) {
     return { state: "blocked", reason: "top_of_ladder", detail: `Already at ${input.level}` };
+  }
+  // Never paid the deposit: not a paying learner of this level, so there is nothing to move
+  // up and nothing to certify. Charge records alone cannot show this — a learner with no
+  // charge row reads as "owes nothing" even when they have paid nothing.
+  if (input.paidDeposit === false) {
+    return { state: "blocked", reason: "unpaid", detail: `Has not paid the ${input.level} deposit` };
   }
   if (!input.hasStarted) {
     return { state: "blocked", reason: "never_started", detail: "Never marked present — check before moving up" };

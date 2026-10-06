@@ -123,6 +123,23 @@ describe("nextPlacement", () => {
 });
 
 describe("graduationVerdict", () => {
+  it("blocks a learner who has not paid the deposit, even with no money owed on record", () => {
+    // No charge row means priorLevelOwed is 0; only the deposit check can catch this learner.
+    const verdict = graduationVerdict({ level: "A1", heldBackAt: null, hasStarted: true, paidDeposit: false, priorLevelOwed: 0 });
+    expect(verdict.state).toBe("blocked");
+    expect(verdict.state === "blocked" && verdict.reason).toBe("unpaid");
+  });
+
+  it("lets a learner who has paid the deposit through, and treats an omitted flag as paid", () => {
+    expect(graduationVerdict({ level: "A1", heldBackAt: null, hasStarted: true, paidDeposit: true, priorLevelOwed: 0 }).state).toBe("ready");
+    expect(graduationVerdict({ level: "A1", heldBackAt: null, hasStarted: true, priorLevelOwed: 0 }).state).toBe("ready");
+  });
+
+  it("still lets the office hold someone back before anything else", () => {
+    const verdict = graduationVerdict({ level: "A1", heldBackAt: new Date(), hasStarted: true, paidDeposit: false, priorLevelOwed: 0 });
+    expect(verdict.state === "blocked" && verdict.reason).toBe("held_back");
+  });
+
   const base = { level: "A1", heldBackAt: null, hasStarted: true, priorLevelOwed: 0 };
 
   it("is ready when started, not held and owing nothing", () => {
