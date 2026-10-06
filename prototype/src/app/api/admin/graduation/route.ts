@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { graduateStudents, loadGraduationDesk, setBatchAutomatic } from "@/lib/graduation-server";
 import { undoWrongMoves } from "@/lib/graduation-repair-server";
+import { adoptIntoBatch, sweepBatch } from "@/lib/batch-sweep-server";
 
 /**
  * The graduation desk.
@@ -16,6 +17,8 @@ import { undoWrongMoves } from "@/lib/graduation-repair-server";
  *                                        intake) and INVITE the ones who only owe on
  *                                        the level just finished; everyone gets
  *                                        Becca's next-level message, and tutors a note
+ *   GET  ?sweep=August                   sweep every learner for that batch: who belongs, and why each is or is not listed
+ *   POST {action:"adopt", month, studentIds} write the batch onto learners who have none but clearly were in it
  *   POST {action:"undoMoves", studentIds}  put back learners moved up without paying the deposit
  *   POST {action:"setAuto", enabled}     one switch for the whole thing, run each morning
  *
@@ -44,9 +47,22 @@ function fence(gate: Gate) {
   return where;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
+
+  // ?sweep=August — look at EVERY learner and say who belongs to that batch and why each is or is not on the lists.
+  const sweepMonth = new URL(request.url).searchParams.get("sweep");
+  if (sweepMonth) {
+    try {
+      const sweep = await sweepBatch({ where: fence(gate), tenantId: gate.session.user.tenantId ?? null, month: sweepMonth });
+      if (!sweep) return NextResponse.json({ error: "Choose a month" }, { status: 400 });
+      return NextResponse.json({ sweep });
+    } catch (error) {
+      console.error("Batch sweep failed:", error);
+      return NextResponse.json({ error: "Unable to sweep right now" }, { status: 500 });
+    }
+  }
 
   try {
     const desk = await loadGraduationDesk({ where: fence(gate), tenantId: gate.session.user.tenantId ?? null });
@@ -76,6 +92,19 @@ export async function POST(request: Request) {
       }
       const only = body.only === "move" || body.only === "invite" ? (body.only as "move" | "invite") : undefined;
       const result = await graduateStudents(ids, { where: fence(gate), tenantId, only });
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (action === "adopt") {
+      const month = typeof body.month === "string" ? body.month : "";
+      const ids: string[] = Array.isArray(body.studentIds)
+        ? (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        : [];
+      if (!month || ids.length === 0) return NextResponse.json({ error: "Choose a month and at least one learner" }, { status: 400 });
+      if (ids.length > MAX_PER_CALL) {
+        return NextResponse.json({ error: `Add at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
+      }
+      const result = await adoptIntoBatch(ids, { where: fence(gate), tenantId, month, by: gate.session.user.email ?? undefined });
       return NextResponse.json({ ok: true, ...result });
     }
 

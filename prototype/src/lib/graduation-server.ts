@@ -360,6 +360,18 @@ async function scan(options: {
   return { candidates, running, accounting };
 }
 
+/** The desk's own candidate list, for the sweep to compare against. */
+export async function scanDeskCandidates(options: {
+  where?: Record<string, unknown>;
+  tenantId?: string | null;
+  now?: Date;
+}): Promise<Array<{ studentId: string }>> {
+  const now = options.now ?? new Date();
+  const startDayOverrides = await readIntakeStartDayOverrides(options.tenantId ?? null);
+  const { candidates } = await scan({ where: options.where, now, startDayOverrides });
+  return candidates.map((candidate) => ({ studentId: candidate.studentId }));
+}
+
 /* ------------------------------ auto setting ------------------------------ */
 
 function parseAuto(value: unknown): GraduationAuto {

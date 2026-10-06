@@ -83,6 +83,42 @@ type WrongMove = {
   movedAt: string;
 };
 
+type SweepRow = {
+  studentId: string;
+  name: string;
+  email: string;
+  branch: string;
+  level: string;
+  reason: string;
+  detail: string;
+  evidence: string[];
+};
+
+type Sweep = {
+  month: string;
+  year: number;
+  scanned: number;
+  total: number;
+  counts: Record<string, number>;
+  rows: SweepRow[];
+};
+
+const SWEEP_ORDER = ["on_desk", "moved_up", "no_label_strong", "no_label_weak", "unreadable_label", "other_batch", "still_running", "not_active", "top_level"];
+
+const SWEEP_LABEL: Record<string, string> = {
+  on_desk: "On the lists above",
+  moved_up: "Already moved up",
+  no_label_strong: "No batch on their record, but they clearly were in it — can be added",
+  no_label_weak: "No batch on record; only their registration month points here — check by hand",
+  unreadable_label: "Batch written in a way the system cannot read — check by hand",
+  other_batch: "Recorded in a different batch — check by hand",
+  still_running: "Their batch has not finished yet (e.g. weekend sitting)",
+  not_active: "Not an active learner (withdrawn, paused…)",
+  top_level: "Already at the top level",
+};
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 type Accounting = {
   total: number;
   onDesk: number;
@@ -252,6 +288,10 @@ export default function GraduationPage() {
   const [accounting, setAccounting] = useState<Accounting | null>(null);
   const [wrong, setWrong] = useState<WrongMove[]>([]);
   const [fixed, setFixed] = useState<string>("");
+  const [sweepMonth, setSweepMonth] = useState<string>("August");
+  const [sweep, setSweep] = useState<Sweep | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepOpen, setSweepOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -332,6 +372,49 @@ export default function GraduationPage() {
       setBusy(false);
       setProgress(null);
       await load();
+    }
+  }
+
+  async function runSweep(month = sweepMonth) {
+    setSweeping(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/graduation?sweep=${encodeURIComponent(month)}`, { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Could not sweep");
+      setSweep(json.sweep);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not sweep");
+    } finally {
+      setSweeping(false);
+    }
+  }
+
+  async function adopt() {
+    if (!sweep) return;
+    const rows = sweep.rows.filter((row) => row.reason === "no_label_strong");
+    if (rows.length === 0) return;
+    if (
+      !window.confirm(
+        `Put ${plural(rows.length, "learner")} on the ${sweep.month} batch?\n\nThey have no batch on their record, but their own history or first day proves they were in it. This only writes the batch name; nobody is moved or messaged. They then appear in the lists above.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      let added = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const json = await post({ action: "adopt", month: sweep.month, studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId) });
+        added += json.added.length;
+      }
+      setFixed(`Put ${plural(added, "learner")} on the ${sweep.month} batch. They are in the lists above now.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work");
+    } finally {
+      setBusy(false);
+      await load();
+      await runSweep(sweep.month);
     }
   }
 
@@ -426,6 +509,84 @@ export default function GraduationPage() {
           >
             {auto.enabled ? "Morning summary is on" : "Turn morning summary on"}
           </button>
+        </section>
+
+        <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Sweep the database</p>
+              <p className="max-w-xl text-sm text-[var(--muted)]">
+                Looks at <strong>every</strong> learner in the school, whatever their status or how their batch was written, and finds everyone who belongs to a batch. For each one it says plainly whether they are in the lists above — and if not, why.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={sweepMonth}
+                onChange={(e) => setSweepMonth(e.target.value)}
+                className="rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm font-semibold text-[var(--foreground)]"
+              >
+                {MONTHS.map((m) => (
+                  <option key={m} value={m}>
+                    {m} batch
+                  </option>
+                ))}
+              </select>
+              <button
+                disabled={sweeping || busy}
+                onClick={() => runSweep()}
+                className="rounded-full bg-[#FF6600] px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+              >
+                {sweeping ? "Sweeping…" : "Sweep"}
+              </button>
+            </div>
+          </div>
+
+          {sweep && (
+            <div className="space-y-3">
+              <p className="text-sm text-[var(--foreground)]">
+                Looked at <strong>{sweep.scanned}</strong> learners. <strong>{sweep.total}</strong> belong to the {sweep.month} {sweep.year} batch:
+              </p>
+              <ul className="space-y-2">
+                {SWEEP_ORDER.filter((reason) => (sweep.counts[reason] ?? 0) > 0).map((reason) => (
+                  <li key={reason} className="rounded-2xl bg-[var(--background)] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        onClick={() => setSweepOpen(sweepOpen === reason ? null : reason)}
+                        className="text-left text-sm font-semibold text-[var(--foreground)]"
+                      >
+                        <span className="mr-2 rounded-full bg-[var(--surface)] px-2.5 py-0.5 text-base font-bold">{sweep.counts[reason]}</span>
+                        {SWEEP_LABEL[reason]}
+                      </button>
+                      {reason === "no_label_strong" && (
+                        <button
+                          disabled={busy}
+                          onClick={adopt}
+                          className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                        >
+                          Put these {sweep.counts[reason]} on the {sweep.month} batch
+                        </button>
+                      )}
+                    </div>
+                    {sweepOpen === reason && (
+                      <ul className="mt-2 divide-y divide-[var(--border)] rounded-xl bg-[var(--surface)] text-sm">
+                        {sweep.rows
+                          .filter((row) => row.reason === reason)
+                          .map((row) => (
+                            <li key={row.studentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+                              <Link href={`/admin/students/${row.studentId}`} className="font-medium text-[var(--foreground)] hover:underline">
+                                {row.name} <span className="text-xs text-[var(--muted)]">· {row.level} · {row.branch}</span>
+                              </Link>
+                              <span className="text-xs text-[var(--muted)]">{[row.detail, ...row.evidence].filter(Boolean).join(" · ")}</span>
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {sweep.total === 0 && <p className="text-sm text-[var(--muted)]">Nobody in the database points to a {sweep.month} batch.</p>}
+            </div>
+          )}
         </section>
 
         {fixed && <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">{fixed}</div>}
