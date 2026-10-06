@@ -387,16 +387,16 @@ export default function GraduationPage() {
 
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
           <div className="space-y-1">
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Automatic</p>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Morning summary</p>
             <p className="font-semibold text-[var(--foreground)]">
               {auto.enabled
-                ? "On — the morning after a batch ends, it is done for you"
-                : "Off — you press the button for each batch yourself"}
+                ? "On — every morning the system checks and tells you what is ready"
+                : "Off — nothing is checked for you"}
             </p>
             <p className="max-w-xl text-sm text-[var(--muted)]">
-              Same rules as the buttons below: ready learners move up, learners who owe on the finished level are invited
-              (not moved), and anyone who never started or was held back is left for you.
-              {auto.lastRunSummary && auto.lastRunAt ? ` Last run ${when(auto.lastRunAt)}: ${auto.lastRunSummary}` : ""}
+              You get one bell + phone message with the numbers. It never moves, invites or messages a learner by itself —
+              you look and press the button. You are only told again when the numbers change.
+              {auto.lastRunSummary && auto.lastRunAt ? ` Last check ${when(auto.lastRunAt)}: ${auto.lastRunSummary}` : ""}
             </p>
           </div>
           <button
@@ -408,7 +408,7 @@ export default function GraduationPage() {
               auto.enabled ? "bg-emerald-600 text-white" : "border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--background)]"
             }`}
           >
-            {auto.enabled ? "Automatic is on" : "Turn automatic on"}
+            {auto.enabled ? "Morning summary is on" : "Turn morning summary on"}
           </button>
         </section>
 

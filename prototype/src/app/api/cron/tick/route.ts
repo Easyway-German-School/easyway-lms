@@ -118,9 +118,9 @@ async function handleGET(request: NextRequest) {
   });
 
   register("auto-graduation", async () => {
-    // Off until a school switches it on at /admin/graduation. Moves on every
-    // learner whose batch has FINISHED and who the desk calls ready (started,
-    // not held back, nothing owed on a past level); the rest stay on the desk.
+    // The MORNING SUMMARY. Off until a school switches it on at /admin/graduation.
+    // Counts what is ready on the finished batches and tells the admins; it never
+    // moves, invites or messages a learner itself.
     const { runAutoGraduation } = await import("@/lib/graduation-server");
     return runAutoGraduation();
   });

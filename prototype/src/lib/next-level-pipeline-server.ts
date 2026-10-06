@@ -495,6 +495,11 @@ export async function writeNextLevelAuto(tenantId: string, patch: Partial<NextLe
 export async function runAutoNextLevel(
   options: { now?: Date; cap?: number; budgetMs?: number } = {},
 ): Promise<{ schools: number; sent: number; skipped: number }> {
+  // RETIRED. Messaging students without a person pressing a button is how the wrong
+  // learners got told. The office now reviews the desk's morning summary and presses
+  // send itself; this stays callable so the scheduler entry keeps working.
+  if (process.env.EW_ALLOW_AUTO_NEXT_LEVEL !== "1") return { schools: 0, sent: 0, skipped: 0 };
+
   const now = options.now ?? new Date();
   const cap = options.cap ?? 120;
   const started = Date.now();
