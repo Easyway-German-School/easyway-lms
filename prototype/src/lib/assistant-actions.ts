@@ -9,6 +9,7 @@ import { nextLevelAfter } from "@/lib/levels";
 import { generateTempPassword } from "@/lib/student-password";
 import { normalizeNigerianPhone } from "@/lib/sms";
 import { normalizeSlot } from "@/lib/class-times";
+import { batchOfAdmission } from "@/lib/class-batch";
 import { classesHaveBegun } from "@/lib/attendance-guard";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { privateOverlaps } from "@/lib/private-classes";
@@ -699,10 +700,19 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
       const { rows } = await cohortFor({ branch: branch.name, level, status: "active" }, admin);
       const affected = await prisma.student.findMany({
         where: { id: { in: rows.map((row) => row.id) }, sessionSlot: slot },
-        select: { id: true },
+        select: { id: true, admission: true },
       });
 
       const warnings: string[] = [];
+      // September and October of one sitting have their OWN calendars now. This
+      // action moves the whole sitting, so say so when it would reach more than
+      // one — the timetable is where a single batch is changed.
+      const batchesReached = [...new Set(affected.map((student) => batchOfAdmission(student.admission)).filter(Boolean))];
+      if (batchesReached.length > 1) {
+        warnings.push(
+          `This sitting has ${batchesReached.length} batches in it (${batchesReached.join(", ")}). This changes the class for ALL of them. To change just one batch, use the timetable.`,
+        );
+      }
       if (affected.length === 0) {
         warnings.push(`No active students are in the ${branch.name} ${level} ${slot} class — nobody will be told.`);
       }
@@ -749,24 +759,25 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
       // The unique key is branch+level+date+slot, which is why the slot has to
       // be part of this: a branch runs the same level three times a day, and
       // dropping the slot would postpone whichever sitting was written last.
+      const change = {
+        status: newDate ? "postponed" : "cancelled",
+        postponedTo: newDate,
+        notes: reason,
+      };
+      // The whole sitting: the shared row (batch "") covers every batch that has
+      // no row of its own for the day…
       await prisma.classSession.upsert({
         where: {
-          branchId_level_date_timeSlot: { branchId, level, date, timeSlot: slot },
+          branchId_level_date_timeSlot_batch: { branchId, level, date, timeSlot: slot, batch: "" },
         },
-        create: {
-          branchId,
-          level,
-          date,
-          timeSlot: slot,
-          status: newDate ? "postponed" : "cancelled",
-          postponedTo: newDate,
-          notes: reason,
-        },
-        update: {
-          status: newDate ? "postponed" : "cancelled",
-          postponedTo: newDate,
-          notes: reason,
-        },
+        create: { branchId, level, date, timeSlot: slot, batch: "", ...change },
+        update: change,
+      });
+      // …and any batch that DOES have its own row for that day must follow it,
+      // or its own row would quietly keep the class running.
+      await prisma.classSession.updateMany({
+        where: { branchId, level, date, timeSlot: slot, NOT: { batch: "" } },
+        data: change,
       });
 
       let told = 0;

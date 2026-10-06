@@ -12,6 +12,7 @@ import { KIND, notifyInBackground } from '@/lib/notify';
 import { classesHaveBegun, explicitStatus } from '@/lib/attendance-guard';
 import { readIntakeStartDayOverrides } from '@/lib/intake-server';
 import { attributeTutorAction, tutorPhrase } from '@/lib/tutor-attribution';
+import { batchOfAdmission } from '@/lib/class-batch';
 
 export async function GET(req: NextRequest) {
   try {
@@ -224,15 +225,18 @@ export async function POST(req: NextRequest) {
       if (!present) {
         const info = studentInfoById.get(entry.studentId);
         if (info?.branchId && info.level && info.sessionSlot) {
-          const daySession = await prisma.classSession.findUnique({
+          // The student's OWN batch's day (or the old shared row) — the other
+          // batch's live-started class is not this student's absence.
+          const studentBatch = batchOfAdmission(info.admission);
+          const daySession = await prisma.classSession.findFirst({
             where: {
-              branchId_level_date_timeSlot: {
-                branchId: info.branchId,
-                level: info.level.toUpperCase(),
-                date: day,
-                timeSlot: normalizeSlot(info.sessionSlot),
-              },
+              branchId: info.branchId,
+              level: info.level.toUpperCase(),
+              date: day,
+              timeSlot: normalizeSlot(info.sessionSlot),
+              batch: { in: studentBatch ? [studentBatch, ""] : [""] },
             },
+            orderBy: { batch: "desc" },
             select: { notes: true },
           });
           if (wasAutoAddedFromLiveStart(daySession?.notes)) {

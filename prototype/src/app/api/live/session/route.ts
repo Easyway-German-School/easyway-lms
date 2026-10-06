@@ -445,6 +445,8 @@ export async function GET(request: Request) {
             sessionSlot,
             date: new Date(),
             lecturerId: lecturer?.id ?? null,
+            // Recorded for THIS batch's calendar only.
+            batch,
           }).catch((err) => console.error("ensureClassSessionForLiveStart failed", err));
         }
       }

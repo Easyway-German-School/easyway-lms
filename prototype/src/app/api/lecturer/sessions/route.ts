@@ -9,6 +9,9 @@ import {
   readAssignment,
   type LecturerAssignment,
 } from "@/lib/lecturer-assignment";
+import { canonicalBatch } from "@/lib/class-batch";
+import { batchesForCohort } from "@/lib/class-batches-server";
+import { tutorTeachingGroups } from "@/lib/tutor-classes-server";
 
 /**
  * The tutor's control over their students' calendar.
@@ -32,6 +35,8 @@ type Staff = {
   role: string;
   lecturerId: string | null;
   assignment: LecturerAssignment | null;
+  /** The tutor's own row (null for an admin) — needed to list their classes by batch. */
+  lecturer: ({ id: string } & NonNullable<Parameters<typeof readAssignment>[0]>) | null;
 };
 
 async function requireStaff(): Promise<{ error: NextResponse } | { staff: Staff }> {
@@ -59,6 +64,7 @@ async function requireStaff(): Promise<{ error: NextResponse } | { staff: Staff 
       // An admin has no assignment and is not bounded by one — the office can
       // fix any branch's timetable, which is the whole point of the office.
       assignment: user?.lecturer ? readAssignment(user.lecturer) : null,
+      lecturer: user?.lecturer ?? null,
     },
   };
 }
@@ -70,19 +76,69 @@ async function requireStaff(): Promise<{ error: NextResponse } | { staff: Staff 
  * rule the roster uses — an admin who left the field blank gave the tutor all
  * three, so refusing them here would contradict the roster they can see.
  */
-function mayEdit(staff: Staff, branchId: string, level: string, slot: string): boolean {
+function mayEdit(staff: Staff, branchId: string, level: string, slot: string, batch = ""): boolean {
   if (staff.role === "admin") return true;
   const assignment = staff.assignment;
   if (!assignment || !isAssigned(assignment)) return false;
+  // A tutor the office pinned to the September batch may not edit October's
+  // calendar — and may not write a batch-less row either, which would reach
+  // every batch of the sitting.
+  const wanted = canonicalBatch(batch);
+  const batchOk = (pinned: string | undefined | null) => {
+    const only = canonicalBatch(pinned);
+    return !only || only === wanted;
+  };
   if (assignment.groups.length) {
     return assignment.groups.some(
-      (group) => group.branchId === branchId && group.level.toUpperCase() === level.toUpperCase() && group.sessionSlot === slot,
+      (group) =>
+        group.branchId === branchId &&
+        group.level.toUpperCase() === level.toUpperCase() &&
+        group.sessionSlot === slot &&
+        batchOk(group.batch),
     );
   }
   if (!assignment.branchIds.includes(branchId)) return false;
   if (!assignment.levels.some((item) => item.toUpperCase() === level.toUpperCase())) return false;
   if (assignment.sessionSlots.length && !assignment.sessionSlots.includes(slot)) return false;
+  if (assignment.batches.length && !assignment.batches.some((item) => canonicalBatch(item) === wanted)) return false;
   return true;
+}
+
+/**
+ * Which batch a write is for — and whether the caller is allowed to touch it.
+ *
+ * A class day belongs to ONE batch. When the class has more than one batch in it
+ * (September and October, say) a write that does not say which is refused rather
+ * than guessed: guessing is how a postponement for one batch lands on the other's
+ * calendar. The timetable always sends the batch; this is the net under a stale
+ * tab or an old client.
+ */
+async function resolveWriteBatch(
+  staff: Staff,
+  branchId: string,
+  level: string,
+  slot: string,
+  requested: unknown,
+): Promise<{ batch: string } | { error: NextResponse }> {
+  const batch = canonicalBatch(requested);
+  if (!mayEdit(staff, branchId, level, slot, batch)) {
+    return { error: NextResponse.json({ error: "That class is not yours to edit" }, { status: 403 }) };
+  }
+  if (!batch) {
+    const { batches } = await batchesForCohort({ branchId, level, sessionSlot: slot });
+    if (batches.length > 1) {
+      return {
+        error: NextResponse.json(
+          {
+            error: `This class has more than one batch in it (${batches.map((b) => b.batch).join(", ")}). Choose which batch you are changing.`,
+            batches,
+          },
+          { status: 400 },
+        ),
+      };
+    }
+  }
+  return { batch };
 }
 
 /** GET — the merged timetable for one branch+level, so the tutor edits in context. */
@@ -151,8 +207,7 @@ export async function GET(req: NextRequest) {
         group.level.toUpperCase() === String(level).toUpperCase() &&
         group.sessionSlot.toLowerCase() === slot.toLowerCase(),
     )?.batch;
-    const batch =
-      req.nextUrl.searchParams.get("batch") ?? pinnedGroupBatch ?? assignment?.batches[0] ?? null;
+    const requestedBatch = req.nextUrl.searchParams.get("batch");
 
     if (!branchId) {
       return NextResponse.json(
@@ -166,7 +221,22 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    if (!mayEdit(staff, branchId, level, slot)) {
+    // The batches this class really has students in, so the editor can say
+    // "September batch · 14 students" next to "October batch · 9 students".
+    const cohort = await batchesForCohort({ branchId, level, sessionSlot: slot });
+
+    // Which batch the editor opens on: the one asked for, else the one the office
+    // pinned this tutor to, else the longest-running batch in the class. Never
+    // left blank when the class has batches — a blank batch is the shared
+    // calendar, which is exactly what must not be edited by accident.
+    const batch =
+      canonicalBatch(requestedBatch) ||
+      canonicalBatch(pinnedGroupBatch) ||
+      canonicalBatch(assignment?.batches[0]) ||
+      cohort.batches[0]?.batch ||
+      "";
+
+    if (!mayEdit(staff, branchId, level, slot, batch)) {
       return NextResponse.json({ error: "That class is not yours to edit" }, { status: 403 });
     }
 
@@ -179,6 +249,21 @@ export async function GET(req: NextRequest) {
       months: sessionDurationMonths(slot),
     });
 
+    // A tutor picks among THEIR classes, one per batch (an admin picks freely).
+    const classes =
+      staff.role === "lecturer" && staff.lecturer
+        ? (await tutorTeachingGroups(staff.lecturer, new Map(branches.map((b) => [b.id, b.name])))).map((group) => ({
+            key: group.key,
+            branchId: group.branchId,
+            branchName: group.branchName,
+            level: group.level,
+            sessionSlot: group.sessionSlot,
+            batch: group.batch,
+            label: group.label,
+            batchRange: group.batchRange,
+          }))
+        : [];
+
     return NextResponse.json({
       ...schedule,
       branches,
@@ -187,6 +272,11 @@ export async function GET(req: NextRequest) {
       assignment,
       /** What the editor is currently pointed at, echoed so the page can lock its controls. */
       context: { branchId, level, slot, batch },
+      /** The batches in the class being edited, with their student counts. */
+      batches: cohort.batches,
+      unplaced: cohort.unplaced,
+      /** A tutor's own classes, one per batch. */
+      classes,
       canChooseCohort: staff.role === "admin",
     });
   } catch (error) {
@@ -215,6 +305,7 @@ export async function PUT(req: NextRequest) {
       endTime,
       materialId,
       postponedTo,
+      batch: requestedBatch,
       // Admin-only: assign (or clear, with null) which tutor teaches this class.
       // Distinct from the `lecturerId` a tutor's own save stamps below — never
       // conflate the two, or a tutor moving their own class could silently
@@ -233,9 +324,9 @@ export async function PUT(req: NextRequest) {
     const day = dayKey(date);
     const normalisedLevel = String(level).toUpperCase();
 
-    if (!mayEdit(staff, branchId, normalisedLevel, slot)) {
-      return NextResponse.json({ error: "That class is not yours to edit" }, { status: 403 });
-    }
+    const resolved = await resolveWriteBatch(staff, branchId, normalisedLevel, slot, requestedBatch);
+    if ("error" in resolved) return resolved.error;
+    const { batch } = resolved;
 
     // A move without a new date is the thing students complain about: the
     // class disappears and nobody says when it is. Require the date.
@@ -252,9 +343,13 @@ export async function PUT(req: NextRequest) {
     // leaves its day free.
     if (status === "postponed" && postponedTo) {
       const target = dayKey(postponedTo);
+      // Only THIS batch's calendar can be crowded: its own rows and the old
+      // shared ones. The other batch having a class that day is not a clash.
+      const mine = { in: batch ? [batch, ""] : [""] };
       const [occupant, alsoMovingHere] = await Promise.all([
-        prisma.classSession.findUnique({
-          where: { branchId_level_date_timeSlot: { branchId, level: normalisedLevel, date: target, timeSlot: slot } },
+        prisma.classSession.findFirst({
+          where: { branchId, level: normalisedLevel, date: target, timeSlot: slot, batch: mine },
+          orderBy: { batch: "desc" },
           select: { status: true },
         }),
         prisma.classSession.findFirst({
@@ -262,6 +357,7 @@ export async function PUT(req: NextRequest) {
             branchId,
             level: normalisedLevel,
             timeSlot: slot,
+            batch: mine,
             status: "postponed",
             postponedTo: target,
             NOT: { date: day },
@@ -278,10 +374,17 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    const previous = await prisma.classSession.findUnique({
+    // What this batch's day said before the edit — its own row, or the old shared
+    // one it was inheriting — so the announcement only fires on a real change.
+    const previous = await prisma.classSession.findFirst({
       where: {
-        branchId_level_date_timeSlot: { branchId, level: normalisedLevel, date: day, timeSlot: slot },
+        branchId,
+        level: normalisedLevel,
+        date: day,
+        timeSlot: slot,
+        batch: { in: batch ? [batch, ""] : [""] },
       },
+      orderBy: { batch: "desc" },
       select: { status: true, postponedTo: true, materialId: true, startTime: true, endTime: true },
     });
 
@@ -314,7 +417,7 @@ export async function PUT(req: NextRequest) {
 
     const saved = await prisma.classSession.upsert({
       where: {
-        branchId_level_date_timeSlot: { branchId, level: normalisedLevel, date: day, timeSlot: slot },
+        branchId_level_date_timeSlot_batch: { branchId, level: normalisedLevel, date: day, timeSlot: slot, batch },
       },
       update: data,
       create: {
@@ -322,6 +425,7 @@ export async function PUT(req: NextRequest) {
         level: normalisedLevel,
         date: day,
         timeSlot: slot,
+        batch,
         ...data,
         // upsert-create needs concrete values, not the `undefined` no-ops above.
         topic: typeof topic === "string" ? topic.trim() || null : null,
@@ -340,6 +444,7 @@ export async function PUT(req: NextRequest) {
       level: normalisedLevel,
       slot,
       day,
+      batch,
     });
 
     return NextResponse.json({ session: saved });
@@ -365,7 +470,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { branchId, level, timeSlot, date, topic, startTime, endTime } = body;
+    const { branchId, level, timeSlot, date, topic, startTime, endTime, batch: requestedBatch } = body;
 
     if (!branchId || !level || !date) {
       return NextResponse.json({ error: "branchId, level and date are required" }, { status: 400 });
@@ -380,13 +485,13 @@ export async function POST(req: NextRequest) {
     const day = dayKey(date);
     const normalisedLevel = String(level).toUpperCase();
 
-    if (!mayEdit(staff, branchId, normalisedLevel, slot)) {
-      return NextResponse.json({ error: "That class is not yours to edit" }, { status: 403 });
-    }
+    const resolved = await resolveWriteBatch(staff, branchId, normalisedLevel, slot, requestedBatch);
+    if ("error" in resolved) return resolved.error;
+    const { batch } = resolved;
 
     const existing = await prisma.classSession.findUnique({
       where: {
-        branchId_level_date_timeSlot: { branchId, level: normalisedLevel, date: day, timeSlot: slot },
+        branchId_level_date_timeSlot_batch: { branchId, level: normalisedLevel, date: day, timeSlot: slot, batch },
       },
       select: { id: true },
     });
@@ -403,6 +508,7 @@ export async function POST(req: NextRequest) {
         level: normalisedLevel,
         date: day,
         timeSlot: slot,
+        batch,
         topic: typeof topic === "string" ? topic.trim() || null : null,
         startTime: typeof startTime === "string" ? startTime.trim() || null : null,
         endTime: typeof endTime === "string" ? endTime.trim() || null : null,
@@ -450,8 +556,10 @@ async function announceChange(args: {
   level: string;
   slot: string;
   day: Date;
+  /** The batch this change is for. Only its students are told. */
+  batch: string;
 }) {
-  const { previous, saved, branchId, level, day } = args;
+  const { previous, saved, branchId, level, day, batch } = args;
   const when = day.toLocaleDateString("en-GB", DATE_FORMAT);
 
   const statusChanged = previous?.status !== saved.status;
@@ -494,8 +602,12 @@ async function announceChange(args: {
     return;
   }
 
+  // Name the batch when there is one, so a student reads "your A1 class (September
+  // batch)" — and, the point of it, so the OTHER batch is not told theirs moved.
+  if (batch) title = title.replace(" class", ` class (${batch} batch)`);
+
   await notify({
-    to: { students: { branchId, level, sessionSlot: args.slot } },
+    to: { students: { branchId, level, sessionSlot: args.slot, ...(batch ? { batch } : {}) } },
     kind: saved.status === "postponed" || saved.status === "cancelled" ? KIND.classStarting : KIND.materialPublished,
     severity,
     title,
@@ -504,6 +616,6 @@ async function announceChange(args: {
     push: true,
     // One announcement per day per state. A tutor who saves the same
     // move twice does not send it twice.
-    dedupeKey: `session:${branchId}:${level}:${day.toISOString()}:${saved.status}:${saved.postponedTo?.toISOString() ?? ""}:${saved.materialId ?? ""}`,
+    dedupeKey: `session:${branchId}:${level}:${batch}:${day.toISOString()}:${saved.status}:${saved.postponedTo?.toISOString() ?? ""}:${saved.materialId ?? ""}`,
   }).catch((error) => console.error("Class change notification failed", error));
 }
