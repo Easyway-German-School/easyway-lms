@@ -9,8 +9,13 @@
  * The file's shape and limits are mirrored in the EduPrime-Recorder repository (src/fleet/control.ts), which has
  * the matching reader; a fixed example is asserted in both repositories' tests.
  *
- * What the controls can NOT do, on purpose: delete a server. Pausing only stops NEW servers from starting.
- * Killing a server mid-class would lose the recording, so there is no such button.
+ * What the controls do:
+ *  - PAUSE: no new servers start, and every server that is NOT recording is switched off at once (within about a
+ *    minute). A server recording a class stays until the class ends and then goes. Pausing never cuts a lesson.
+ *    (It used to stop only NEW servers, so running ones kept billing and the button looked dead.)
+ *  - POWER OFF: the one deliberate way to cut a recording. It deletes every recorder server that exists at that
+ *    moment, recording or not, and pauses. Classes then fall back to LiveKit recording (which costs money) until the
+ *    office presses Resume. Only the press itself counts, for an hour; servers started later are never touched.
  */
 
 export const CONTROL_KEY = "recordings/_recorder-release/control.json";
@@ -27,9 +32,11 @@ export type Control = {
   boost: { classes: number; until: string } | null;
   spareClasses: number | null;
   maxServers: number | null;
+  /** When POWER OFF was pressed (ISO), or null. The scheduler deletes every server created before it. */
+  stopAllAt: string | null;
 };
 
-export const NO_CONTROL: Control = { version: 1, updatedAt: "", updatedBy: "", paused: false, pauseNote: "", skipDates: [], boost: null, spareClasses: null, maxServers: null };
+export const NO_CONTROL: Control = { version: 1, updatedAt: "", updatedBy: "", paused: false, pauseNote: "", skipDates: [], boost: null, spareClasses: null, maxServers: null, stopAllAt: null };
 
 export const MAX_BOOST_CLASSES = 12;
 export const MAX_BOOST_HOURS = 12;
@@ -55,12 +62,16 @@ export function parseStoredControl(value: unknown): Control {
     boost: b && Number.isInteger(b.classes) && (b.classes as number) >= 1 && Number.isFinite(until) ? { classes: Math.min(b.classes as number, MAX_BOOST_CLASSES), until: new Date(until).toISOString() } : null,
     spareClasses: bounded(v.spareClasses, 0, 5),
     maxServers: bounded(v.maxServers, 1, 12),
+    stopAllAt: typeof v.stopAllAt === "string" && Number.isFinite(Date.parse(v.stopAllAt)) ? new Date(Date.parse(v.stopAllAt)).toISOString() : null,
   };
 }
 
 /** What the page may ask for. Each field is optional; absent means "leave as it is". */
 export type ControlRequest = {
+  /** Pause (true) switches off every server that is not recording; Resume (false) also clears a power-off. */
   paused?: boolean;
+  /** POWER OFF: delete every recorder server now, even one recording, and pause. */
+  stopAllNow?: boolean;
   pauseNote?: string;
   addSkipDate?: string;
   removeSkipDate?: string;
@@ -83,6 +94,15 @@ export function applyControlRequest(current: Control, request: unknown, by: stri
     if (typeof r.paused !== "boolean") return { ok: false, error: "paused must be true or false." };
     next.paused = r.paused;
     next.pauseNote = r.paused ? clean(r.pauseNote, 200) : "";
+    // Resuming also forgets an earlier power-off, so it can never be re-read as an instruction.
+    if (!r.paused) next.stopAllAt = null;
+    changed = true;
+  }
+  if ("stopAllNow" in r) {
+    if (r.stopAllNow !== true) return { ok: false, error: "stopAllNow must be true." };
+    next.paused = true;
+    next.pauseNote = clean(r.pauseNote, 200) || `Powered off by ${next.updatedBy}`;
+    next.stopAllAt = now.toISOString();
     changed = true;
   }
   if (typeof r.addSkipDate !== "undefined") {

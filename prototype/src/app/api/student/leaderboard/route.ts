@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateStreak, summarizeGamification } from "@/lib/gamification";
+import { batchOfAdmission, studentIsInBatch } from "@/lib/class-batch";
 
 export const dynamic = "force-dynamic";
 
@@ -49,11 +50,11 @@ export async function GET() {
 
     const me = await prisma.student.findUnique({
       where: { userId },
-      select: { id: true, branchId: true, level: true, sessionSlot: true },
+      select: { id: true, branchId: true, level: true, sessionSlot: true, admission: true },
     });
     if (!me) return NextResponse.json({ error: "Student not found" }, { status: 404 });
 
-    const cohort = await prisma.student.findMany({
+    const sameSitting = await prisma.student.findMany({
       where: {
         branchId: me.branchId,
         level: me.level,
@@ -64,6 +65,7 @@ export async function GET() {
       },
       select: {
         id: true,
+        admission: true,
         examReadiness: true,
         user: { select: { id: true, name: true } },
         attendances: { select: { date: true, status: true, present: true } },
@@ -75,6 +77,11 @@ export async function GET() {
       // mis-set branch pulling in the whole school, not a real page size.
       take: 200,
     });
+
+    // THE BATCH IS PART OF THE CLASS: the September and October groups overlap
+    // for a month on different timetables and have separate rooms, so a student is
+    // ranked against their own batch, not both. (Exact match — same as the chat.)
+    const cohort = sameSitting.filter((student) => studentIsInBatch(batchOfAdmission(me.admission), student.admission));
 
     /**
      * XP is computed with the SAME function the student's own dashboard uses.

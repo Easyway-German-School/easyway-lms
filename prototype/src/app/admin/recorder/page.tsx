@@ -75,7 +75,7 @@ export default function RecorderPage() {
       const response = await fetch("/api/admin/recorder/control", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(data.error || "That did not work.");
-      setNotice(`${done} It reaches the servers within about 5 minutes.`);
+      setNotice(`${done} It reaches the servers within about a minute.`);
       setError(null);
       await load();
     } catch (caught) {
@@ -158,16 +158,22 @@ export default function RecorderPage() {
               <section className="grid gap-6 lg:grid-cols-2">
                 <div className={card}>
                   <h2 className="text-lg font-semibold">Controls</h2>
-                  <p className="mt-1 text-xs text-[var(--muted)]">Servers start and stop by themselves from the timetable. Use these only to steer. Nothing here can stop a recording that is in progress.</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">Servers switch on 10 minutes before a class and off when nobody opens it (15 minutes after it starts) or when it ends. Use these only to steer.</p>
 
                   <div className="mt-4 space-y-2 border-t border-[var(--border)] pt-4">
-                    <p className="text-sm font-semibold">Automatic servers: {control.paused ? "PAUSED" : "running"}</p>
+                    <p className="text-sm font-semibold">Recording servers: {control.paused ? (control.stopAllAt ? "POWERED OFF" : "PAUSED") : "on (automatic)"}</p>
                     {control.paused ? (
-                      <button type="button" disabled={busy} className={button} onClick={() => change({ paused: false }, "Resumed.")}>Resume</button>
+                      <>
+                        <p className="text-xs text-[var(--muted)]">Nothing starts while this is on, so a class that goes live is recorded by LiveKit (about $1.20 per class-hour) until you resume. {control.stopAllAt ? "Every server was deleted when it was powered off." : "Servers that are not recording have been switched off; one still recording goes when its class ends."}</p>
+                        <button type="button" disabled={busy} className={button} onClick={() => change({ paused: false }, "Resumed.")}>Resume</button>
+                      </>
                     ) : (
-                      <div className="flex flex-wrap gap-2">
-                        <input value={pauseNote} onChange={(e) => setPauseNote(e.target.value)} maxLength={200} placeholder="Why? (optional)" className="min-w-0 flex-1 rounded-full border border-[var(--border)] bg-transparent px-4 py-2 text-sm" />
-                        <button type="button" disabled={busy} className={button} onClick={() => { if (window.confirm("Pause automatic servers? No new server will start, so classes will be recorded by LiveKit (which costs money) until you resume.")) change({ paused: true, pauseNote }, "Paused."); }}>Pause</button>
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          <input value={pauseNote} onChange={(e) => setPauseNote(e.target.value)} maxLength={200} placeholder="Why? (optional)" className="min-w-0 flex-1 rounded-full border border-[var(--border)] bg-transparent px-4 py-2 text-sm" />
+                          <button type="button" disabled={busy} className={button} onClick={() => { if (window.confirm("Pause the recording servers?\n\nNo new server will start, and every server that is NOT recording is switched off now. A class being recorded right now is not cut: its server goes when the class ends.\n\nClasses that go live meanwhile are recorded by LiveKit, which costs money, until you press Resume.")) change({ paused: true, pauseNote }, "Paused."); }}>Pause (switch off idle servers)</button>
+                        </div>
+                        <button type="button" disabled={busy} className="rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 disabled:opacity-50" onClick={() => { if (window.confirm("POWER OFF every recording server NOW?\n\nThis deletes all of them immediately, including any that is recording a class right now. That recording will be cut short and cannot be recovered.\n\nAfter this nothing starts until you press Resume, and classes that go live are recorded by LiveKit, which costs money.\n\nOnly do this to stop the billing.")) change({ stopAllNow: true, pauseNote }, "Powered off."); }}>Power off everything now</button>
                       </div>
                     )}
                   </div>

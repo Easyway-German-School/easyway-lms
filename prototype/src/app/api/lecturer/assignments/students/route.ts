@@ -2,6 +2,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { readAssignment, studentWhereForLecturerScope, belongsToLecturer } from "@/lib/lecturer-assignment";
+import { batchOfAdmission } from "@/lib/class-batch";
 
 /**
  * The names for the "who gets this?" picker.
@@ -68,6 +69,7 @@ export async function GET(req: NextRequest) {
       studentCode: true,
       sessionSlot: true,
       level: true,
+      admission: true,
       tutorId: true,
       coTutors: { select: { lecturerId: true } },
       user: { select: { name: true } },
@@ -86,6 +88,8 @@ export async function GET(req: NextRequest) {
       studentCode: student.studentCode,
       sessionSlot: student.sessionSlot,
       level: student.level,
+      // "September" — so the picker can say which batch each name is in and select a whole one.
+      batch: batchOfAdmission(student.admission),
       branchName: student.branch?.name ?? null,
     })),
   });

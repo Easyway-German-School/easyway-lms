@@ -113,3 +113,27 @@ export function compareBatches(a: unknown, b: unknown, now: Date = new Date()): 
   if (right === null) return -1;
   return left - right;
 }
+
+/**
+ * The batch a live room was opened for, read off its NAME — `ew-lagos-a1-morning-b-september-t-<tutor>`.
+ *
+ * A class recording remembers its room, not its batch, and the room name is the
+ * one place the batch is guaranteed to survive (see `cohortRoomName`). Returns ""
+ * for a room with no batch (an older class, a private room), which is "no batch
+ * restriction" everywhere a recording is shared.
+ */
+export function batchOfRoomName(roomName: unknown): string {
+  const match = /-b-([a-z]+)(?:-t-|$)/.exec(String(roomName ?? "").toLowerCase());
+  return match ? canonicalBatch(match[1]) : "";
+}
+
+/**
+ * May a student see something aimed at one batch? Something with no batch is for
+ * everyone; something with one is for that batch's students only. A student with
+ * no batch on record sees only the unrestricted things — content targeted at a
+ * batch is never guessed onto someone who may belong to another.
+ */
+export function studentSeesBatch(contentBatch: unknown, admission: unknown): boolean {
+  const wanted = canonicalBatch(contentBatch);
+  return !wanted || wanted === batchOfAdmission(admission);
+}

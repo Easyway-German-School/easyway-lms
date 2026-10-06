@@ -10,6 +10,7 @@ import { parseModelJson } from "@/lib/safe-json";
 import { profileFor } from "@/lib/learner-intelligence";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { formatClock } from "@/lib/video-library";
+import { batchOfRoomName } from "@/lib/class-batch";
 
 /**
  * The Happy-Scribe layer: recording → transcript → notes a student would
@@ -471,6 +472,7 @@ export async function generateTranscriptForRecording(
       level: true,
       sessionSlot: true,
       branchId: true,
+      roomName: true,
       status: true,
       privateClassId: true,
       durationSeconds: true,
@@ -673,7 +675,15 @@ export async function generateTranscriptForRecording(
       }
     } else if (recording.level) {
       notifyInBackground({
-        to: { students: { branchId: recording.branchId, level: recording.level, sessionSlot: recording.sessionSlot } },
+        to: {
+          students: {
+            branchId: recording.branchId,
+            level: recording.level,
+            sessionSlot: recording.sessionSlot,
+            // Only the batch whose class it was.
+            batch: batchOfRoomName(recording.roomName) || null,
+          },
+        },
         kind: KIND.classNotesReady,
         title: "Class notes are ready",
         message: `${recording.material.title} now has a summary, vocabulary and full transcript.`,

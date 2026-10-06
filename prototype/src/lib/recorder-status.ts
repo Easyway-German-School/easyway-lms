@@ -39,7 +39,7 @@ export const SCHEDULER_SILENT_SECONDS = 10 * 60;
 /** LiveKit Egress transcoding, per minute, as billed in September 2026. */
 export const LIVEKIT_USD_PER_MINUTE = 0.02;
 
-const NO_CONTROL_VALUE: Control = { version: 1, updatedAt: "", updatedBy: "", paused: false, pauseNote: "", skipDates: [], boost: null, spareClasses: null, maxServers: null };
+const NO_CONTROL_VALUE: Control = { version: 1, updatedAt: "", updatedBy: "", paused: false, pauseNote: "", skipDates: [], boost: null, spareClasses: null, maxServers: null, stopAllAt: null };
 
 export function buildRecorderStatus(input: {
   mode: RecorderStatus["mode"];

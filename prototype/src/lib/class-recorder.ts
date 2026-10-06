@@ -30,6 +30,7 @@ import { classDayBounds, heldParts, otherPartsOf, otherPartsSeconds, type PartRo
 import { schedulerHint } from "@/lib/recorder-control";
 import { decideFallback, fallbackPolicy, liveKitMinutes, monthStartUtc, type FallbackDecision } from "@/lib/recording-fallback";
 import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
+import { batchOfRoomName } from "@/lib/class-batch";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
@@ -574,6 +575,10 @@ export async function finaliseRecording(egress: {
         // every other student's shelf at the same level, which is exactly
         // the leak this whole private-capture feature must not create.
         level: isPrivate ? null : row.level,
+        // THE BATCH THE CLASS WAS FOR. September and October of one sitting are
+        // separate classes, so the October class's tape is not on the September
+        // students' shelf. Read off the room name; null = no batch restriction.
+        batch: isPrivate ? null : batchOfRoomName(row.roomName) || null,
         durationSeconds,
         thumbnailPath,
         recordedAt,
@@ -624,7 +629,15 @@ export async function finaliseRecording(egress: {
       // Tell the cohort whose class it was, and only them. A student who
       // missed Tuesday should not have to go looking.
       notifyInBackground({
-        to: { students: { branchId: row.branchId, level: row.level, sessionSlot: row.sessionSlot } },
+        to: {
+          students: {
+            branchId: row.branchId,
+            level: row.level,
+            sessionSlot: row.sessionSlot,
+            // Only the batch whose class it was.
+            batch: batchOfRoomName(row.roomName) || null,
+          },
+        },
         kind: KIND.materialPublished,
         title: "Your class recording is ready",
         message: `${material.title} is now on the Watch shelf in Materials.`,

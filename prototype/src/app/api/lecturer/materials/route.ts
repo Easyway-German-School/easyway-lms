@@ -4,7 +4,17 @@ import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
 import { groupStudentsByTutorPhrase } from '@/lib/tutor-attribution';
-import { assignmentBatches, belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
+import {
+  assignmentBatches,
+  assignmentHasGroup,
+  belongsToLecturer,
+  isAssigned,
+  parseGroupKey,
+  readAssignment,
+  studentWhereForLecturer,
+} from '@/lib/lecturer-assignment';
+import { tutorTeachingGroups } from '@/lib/tutor-classes-server';
+import { batchOfAdmission, canonicalBatch } from '@/lib/class-batch';
 import { deriveMaterialKind } from '@/lib/video-library';
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import { generateForMaterial } from '@/lib/material-ai';
@@ -31,10 +41,14 @@ function serialise(
     aiState: string;
     lecturerId: string | null;
     uploadedBy: string | null;
+    batch?: string | null;
   },
   lecturerId: string,
 ) {
   return {
+    // Which batch this is for ("September"), or null = every batch. Shown on the
+    // tutor's list so an October handout is never mistaken for a September one.
+    batch: material.batch ?? null,
     id: material.id,
     aiState: material.aiState,
     title: material.title,
@@ -131,6 +145,23 @@ export async function GET(req: NextRequest) {
       // tutor assigned to more than one level gets the first — still right
       // more often than blank, and the dropdown stays editable.
       assignedLevel: assignment.levels[0] ?? null,
+      // The classes this tutor can aim an upload at — one per BATCH they teach —
+      // so the form can offer "A1 · Morning · October batch" instead of leaving
+      // every upload to reach the whole level.
+      classes: lecturer
+        ? (
+            await tutorTeachingGroups(
+              lecturer,
+              new Map((await prisma.branch.findMany({ select: { id: true, name: true } })).map((b) => [b.id, b.name])),
+            )
+          ).map((group) => ({
+            key: group.key,
+            label: group.label,
+            level: group.level,
+            batch: group.batch,
+            branchName: group.branchName,
+          }))
+        : [],
     });
   } catch (error) {
     console.error('Materials GET error:', error);
@@ -213,18 +244,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Please choose the level this material is for' }, { status: 400 });
     }
 
+    /**
+     * WHICH CLASS IS THIS FOR.
+     *
+     * A tutor with September AND October students must say which: an upload aimed
+     * at "the level" reaches both batches and buzzes both phones. `classKey` is
+     * one of their own classes (branchId:LEVEL:slot:Batch, the same key the
+     * Go-live button uses) or "all" for every class they teach. Omitting it is
+     * refused when the tutor has more than one class — the form always sends it —
+     * and is the old level-wide behaviour for a tutor with a single class.
+     */
+    const lecturerRow = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
+    const assignmentForUpload = readAssignment(lecturerRow);
+    const branchRows = await prisma.branch.findMany({ select: { id: true, name: true } });
+    const branchNames = new Map(branchRows.map((b) => [b.id, b.name]));
+    const classKey = String(body.classKey ?? '').trim();
+    let targetBatch = '';
+    let targetLevel = level;
+    if (classKey && classKey !== 'all') {
+      const parsed = parseGroupKey(classKey);
+      const group = parsed ? assignmentHasGroup(assignmentForUpload, branchNames, parsed, lecturerId) : null;
+      if (!group) {
+        return NextResponse.json({ error: 'That is not one of your classes.' }, { status: 403 });
+      }
+      targetBatch = canonicalBatch(group.batch);
+      targetLevel = group.level;
+    } else if (!classKey && lecturerRow) {
+      const mine = await tutorTeachingGroups(lecturerRow, branchNames);
+      if (mine.length > 1) {
+        return NextResponse.json(
+          { error: 'Choose which class this material is for, or "all my classes". It would otherwise reach every batch.' },
+          { status: 400 },
+        );
+      }
+    }
+
     const material = await prisma.material.create({
       data: {
         title,
         description: description || null,
         courseId: courseId || null,
         lecturerId,
+        // Aimed at one batch: the student's Materials and Watch shelf only show
+        // it to that batch. null = every batch, as before.
+        batch: targetBatch || null,
         fileName,
         filePath: fileUrl,
         fileType,
         fileSize,
         kind,
-        level,
+        level: targetLevel,
         series: series || null,
         episodeNumber: episodeRaw ? Number(episodeRaw) || null : null,
         durationSeconds: durationRaw ? Number(durationRaw) || null : null,
@@ -252,10 +321,16 @@ export async function POST(req: NextRequest) {
     if (audience) {
       const recipients = await prisma.student.findMany({
         where: audience as any,
-        select: { id: true, admission: true, tutorId: true, coTutors: { select: { lecturerId: true } } },
+        select: { id: true, level: true, admission: true, tutorId: true, coTutors: { select: { lecturerId: true } } },
       });
+      // Only the students the upload is FOR: at the chosen level, and — when the
+      // tutor aimed it at one class — in that batch (strict: a student with no
+      // batch on record is not guessed into it).
+      const aimedAtOneClass = Boolean(classKey) && classKey !== 'all';
       const studentIds = recipients
         .filter((student) => belongsToLecturer(assignment, lecturerId, student))
+        .filter((student) => !aimedAtOneClass || student.level.toUpperCase() === targetLevel.toUpperCase())
+        .filter((student) => !targetBatch || batchOfAdmission(student.admission) === targetBatch)
         .map((student) => student.id);
 
       if (studentIds.length) {

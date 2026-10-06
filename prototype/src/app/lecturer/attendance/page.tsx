@@ -6,12 +6,15 @@ import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import { AttendanceIcon, CheckIcon, CrossIcon, UsersIcon } from '@/components/icons';
 import LecturerStudentRoster from '@/components/LecturerStudentRoster';
+import { compareBatches } from '@/lib/class-batch';
 
 interface Student {
   id: string;
   name: string;
   email: string;
   branch: string;
+  /** The intake month ("September"), or "" when the student has none on record. */
+  batch?: string;
   /** null = nobody has marked this student. Never defaulted. */
   present: boolean | null;
   status: 'present' | 'late' | 'absent' | null;
@@ -45,6 +48,10 @@ export default function LecturerAttendance() {
   const [selectedCourse, setSelectedCourse] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
   const [studentFilter, setStudentFilter] = useState('all');
+  // Which BATCH's register is open. September and October of one sitting keep
+  // separate calendars, so the register is taken one batch at a time ("" = no
+  // split: the class has only one batch).
+  const [batch, setBatch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   /**
@@ -102,6 +109,8 @@ export default function LecturerAttendance() {
       const data = await res.json();
       setStudents(data);
       setStudentFilter('all');
+      const found = [...new Set<string>((data as Student[]).map((s) => s.batch || '').filter(Boolean))].sort((a, b) => compareBatches(a, b));
+      setBatch((current) => (found.length > 1 ? (found.includes(current) ? current : found[0]) : ''));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch students');
     }
@@ -120,10 +129,13 @@ export default function LecturerAttendance() {
     );
   }
 
-  // An explicit tutor action, never a default.
+  const inBatch = (s: Student) => !batch || (s.batch || '') === batch;
+
+  // An explicit tutor action, never a default — and only for the batch that is
+  // open, so marking September present never marks October.
   function markEveryonePresent() {
     setStudents((prev) =>
-      prev.map((s) => (s.notStarted || s.status ? s : { ...s, status: 'present', present: true })),
+      prev.map((s) => (s.notStarted || s.status || !inBatch(s) ? s : { ...s, status: 'present', present: true })),
     );
   }
 
@@ -175,8 +187,12 @@ export default function LecturerAttendance() {
     );
   }
 
+  const batchesHere = [...new Set(students.map((s) => s.batch || '').filter(Boolean))].sort((a, b) => compareBatches(a, b));
+  const unplacedCount = students.filter((s) => !s.batch).length;
+  // The students of the batch that is open (everyone when the class has one batch).
+  const roster = students.filter(inBatch);
   const visibleStudents =
-    studentFilter === 'all' ? students : students.filter((s) => s.id === studentFilter);
+    studentFilter === 'all' ? roster : roster.filter((s) => s.id === studentFilter);
 
   return (
     <LecturerShell>
@@ -251,6 +267,29 @@ export default function LecturerAttendance() {
             </div>
           )}
 
+          {/* WHICH BATCH. September and October of one sitting overlap for a month
+              and keep separate calendars, so the register is one batch at a time. */}
+          {batchesHere.length > 1 ? (
+            <div className="mb-4 rounded-lg border-2 border-[var(--accent)]/40 bg-[var(--accent-soft)] p-4">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">You are taking the register for</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {batchesHere.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => { setBatch(name); setStudentFilter('all'); }}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold ${batch === name ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]'}`}
+                  >
+                    {name} batch · {students.filter((s) => s.batch === name).length}
+                  </button>
+                ))}
+              </div>
+              {unplacedCount > 0 ? (
+                <p className="mt-2 text-xs text-amber-700">{unplacedCount} student{unplacedCount === 1 ? ' has' : 's have'} no batch on record and are not in either register. Ask the office to place them.</p>
+              ) : null}
+            </div>
+          ) : null}
+
           {/* Filters */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
             <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">Attendance Details</h2>
@@ -300,8 +339,8 @@ export default function LecturerAttendance() {
                   onChange={(e) => setStudentFilter(e.target.value)}
                   className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
                 >
-                  <option value="all">All students ({students.length})</option>
-                  {students.map((s) => (
+                  <option value="all">All students ({roster.length})</option>
+                  {roster.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -315,7 +354,7 @@ export default function LecturerAttendance() {
                 </label>
                 <div className="px-4 py-2 bg-[var(--surface-alt)] rounded-lg">
                   <p className="text-sm text-[var(--foreground)]">
-                    <strong>{students.filter((s) => s.status === 'present').length}</strong> present · {students.filter((s) => s.status === 'late').length} late · {students.filter((s) => s.status === 'absent').length} absent · {students.filter((s) => !s.status && !s.notStarted).length} not marked
+                    <strong>{roster.filter((s) => s.status === 'present').length}</strong> present · {roster.filter((s) => s.status === 'late').length} late · {roster.filter((s) => s.status === 'absent').length} absent · {roster.filter((s) => !s.status && !s.notStarted).length} not marked
                   </p>
                 </div>
               </div>

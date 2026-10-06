@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notify, KIND } from "@/lib/notify";
 import { canDownloadOffline } from "@/lib/delivery";
+import { batchOfRoomName, studentSeesBatch } from "@/lib/class-batch";
 
 /**
  * "This class disappears in 2 days — download it in the app."
@@ -43,6 +44,7 @@ export async function sendDueExpiryNudges() {
       level: true,
       sessionSlot: true,
       branchId: true,
+      roomName: true,
       privateClassId: true,
       startedAt: true,
       studentExpiresAt: true,
@@ -78,9 +80,12 @@ export async function sendDueExpiryNudges() {
           ...(rec.branchId ? { branchId: rec.branchId } : {}),
           ...(rec.sessionSlot ? { sessionSlot: rec.sessionSlot } : {}),
         },
-        select: { id: true, userId: true, deliveryMode: true, classType: true },
+        select: { id: true, userId: true, deliveryMode: true, classType: true, admission: true },
       });
+      // Only the batch whose class it was is told its tape is about to expire.
+      const classBatch = batchOfRoomName(rec.roomName);
       roster = cohort
+        .filter((s) => studentSeesBatch(classBatch, s.admission))
         .filter((s) => s.userId && canDownloadOffline(s))
         .map((s) => ({ id: s.id, userId: s.userId as string }));
     }
