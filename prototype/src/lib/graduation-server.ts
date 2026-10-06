@@ -4,7 +4,7 @@ import { notify } from "@/lib/notify";
 import { batchFromAdmission } from "@/lib/batch";
 import { buildLedger } from "@/lib/finance/ledger";
 import { naira } from "@/lib/finance/receivables";
-import { receivedPaymentFilter, requiredDepositFor } from "@/lib/payment";
+import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { nextLevelAfter } from "@/lib/levels";
 import { completeLevelForStudents } from "@/lib/germany-journey-server";
 import { issueCertificateForStudent } from "@/lib/certificates";
@@ -65,6 +65,9 @@ export type DeskStudent = {
   verdict: GraduationVerdict;
   /** Already invited to the next level (the invitation went out, they have not moved yet). */
   offered: boolean;
+  /** Everything received from them so far, and what is still to pay on the level they finished. */
+  paid: number;
+  balance: number;
 };
 
 export type DeskCohort = {
@@ -123,6 +126,8 @@ type Scanned = {
   tutorId: string | null;
   /** The office has already invited this learner to the next level. */
   offered: boolean;
+  paid: number;
+  balance: number;
   level: string;
   batch: string;
   sessionSlot: string;
@@ -284,9 +289,21 @@ async function scan(options: {
     const next = nextLevelAfter(student.level);
     // What blocks a move: owed on a level the learner has ALREADY been in —
     // never the new level's own charge, never legacy arrears (chased, not walled).
-    const priorLevelOwed = ledger.lines
+    const ledgerOwed = ledger.lines
       .filter((line) => line.outstanding > 0 && !line.legacyArrears && line.level !== next)
       .reduce((sum, line) => sum + line.outstanding, 0);
+    // PAID IN FULL is its own test. A learner with no charge row for the level they finished
+    // used to read as owing nothing even when they had paid only a part — so the balance falls
+    // back to the level's fee minus what they have paid whenever the ledger has no line for it.
+    const paidSoFar = paidBy.get(student.id) ?? 0;
+    const hasLevelLine = ledger.lines.some((line) => line.level === student.level);
+    const fee = tuitionFeeFor({
+      level: student.level,
+      branch: student.branch?.name ?? null,
+      classType: student.classType,
+      pathway: student.pathway,
+    });
+    const priorLevelOwed = ledgerOwed + (hasLevelLine ? 0 : Math.max(0, fee - paidSoFar));
     // The same test the certificate and the portal paywall use: at least the deposit paid.
     const paidDeposit =
       (paidBy.get(student.id) ?? 0) >=
@@ -305,6 +322,8 @@ async function scan(options: {
       branch: student.branch?.name ?? "Unassigned",
       tutorId: student.tutorId ?? null,
       offered: readJson(readJson(student.admission).nextLevel).manualOffer === true,
+      paid: paidSoFar,
+      balance: priorLevelOwed,
       level: student.level,
       batch,
       sessionSlot: student.sessionSlot,
@@ -423,6 +442,8 @@ export async function loadGraduationDesk(options: {
       sitting: row.sessionSlot,
       verdict: row.verdict,
       offered: row.offered,
+      paid: row.paid,
+      balance: row.balance,
     });
     if (row.verdict.state === "ready") cohort.ready += 1;
     else if (row.verdict.reason === "fees") cohort.owes += 1;
@@ -473,6 +494,11 @@ export async function graduateStudents(
     now?: Date;
     /** Only learners whose batch has actually ended (the automatic run). */
     endedOnly?: boolean;
+    /**
+     * Which of the two explicit buttons this is. "move" touches only learners who paid in
+     * full; "invite" touches only part-payers (it never moves anyone). Unset = both.
+     */
+    only?: "move" | "invite";
   } = {},
 ): Promise<GraduationRun> {
   const now = options.now ?? new Date();
@@ -501,6 +527,8 @@ export async function graduateStudents(
       continue;
     }
     const owesOnly = row.verdict.state === "blocked" && row.verdict.reason === "fees";
+    // The two buttons are separate on purpose: a press of one never does the other's job.
+    if ((options.only === "move" && owesOnly) || (options.only === "invite" && row.verdict.state === "ready")) continue;
     if (row.verdict.state !== "ready" && !owesOnly) {
       run.skipped.push({ studentId, name: row.name, reason: row.verdict.detail });
       continue;
@@ -794,8 +822,8 @@ export async function runAutoGraduation(
         ready += t.ready;
         owes += t.owes;
         const parts = [
-          t.ready ? `${t.ready} ready to move up` : "",
-          t.owes ? `${t.owes} owe on the finished level (would be invited)` : "",
+          t.ready ? `${t.ready} paid in full, ready to move up` : "",
+          t.owes ? `${t.owes} on part payment` : "",
           t.unpaid ? `${t.unpaid} have not paid the deposit` : "",
           t.held ? `${t.held} held back` : "",
           t.other ? `${t.other} need a look` : "",

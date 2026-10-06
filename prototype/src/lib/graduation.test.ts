@@ -159,7 +159,7 @@ describe("graduationVerdict", () => {
   it("blocks on money owed for a past level and says how much", () => {
     const verdict = graduationVerdict({ ...base, priorLevelOwed: 60_000, formatMoney: (v) => `₦${v}` });
     expect(verdict).toMatchObject({ state: "blocked", reason: "fees" });
-    expect((verdict as { detail: string }).detail).toBe("Owes ₦60000 on A1");
+    expect((verdict as { detail: string }).detail).toBe("Part payment — ₦60000 still to pay on A1");
   });
 
   it("has nowhere to send a C2 learner", () => {
