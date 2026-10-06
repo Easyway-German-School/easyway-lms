@@ -244,6 +244,19 @@ async function handleGET(request: NextRequest) {
     return backfillMissingStudentCodes();
   });
 
+  /**
+   * Students with no batch on record belong to no batch's class, calendar, chat or
+   * materials. Give each one the batch the evidence says — only where it is clear
+   * (an open enrolment row, a brand-new student in this intake, first attendance
+   * within the last few months) — and never change a batch that exists. Whoever is
+   * left is listed with the reason on /admin/cohorts. See lib/batch-placement.ts.
+   */
+  register("batch-placement", async () => {
+    const { placeUnplacedStudents } = await import("@/lib/batch-placement-server");
+    const report = await placeUnplacedStudents({ apply: true });
+    return { scanned: report.scanned, placed: report.placed.length, leftForAPerson: report.needsPerson.length };
+  });
+
   register("student-code-realign", async () => {
     const { realignUpcomingIntakeCodes } = await import("@/lib/student-code-backfill");
     return realignUpcomingIntakeCodes();
