@@ -103,7 +103,7 @@ export default function LookRolloutCard() {
         portal (with a WhatsApp/Facebook-style community) unless they say yes. Anyone can switch either way from their
         profile, and that always wins.{" "}
         <Link href="/admin/community" className="font-semibold text-[var(--accent)] underline">
-          See how each look is being used
+          Community → Insights and People
         </Link>
         .
       </p>

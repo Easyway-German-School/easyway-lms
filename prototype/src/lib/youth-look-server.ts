@@ -93,12 +93,21 @@ export async function recordLookEvent(input: {
   }
 }
 
+/** The full look decision for a roster row — look, why, cohort, and the age it was decided from. */
+export function lookDecisionOfRow(
+  row: { uiLook: string | null; admission: unknown; profile: { dateOfBirth: Date | null } | null },
+  wave: LookWave,
+  now = new Date(),
+): LookDecision & { age: number | null } {
+  const age = ageFromDob(dobOfStudent(row.profile, row.admission), now);
+  return { ...resolveLook({ age, choice: parseLookChoice(row.uiLook), wave }), age };
+}
+
 /** Which look each of these students is actually seeing — for analytics only, never shown by name. */
 export function lookOfRow(
   row: { uiLook: string | null; admission: unknown; profile: { dateOfBirth: Date | null } | null },
   wave: LookWave,
   now = new Date(),
 ): Look {
-  const age = ageFromDob(dobOfStudent(row.profile, row.admission), now);
-  return resolveLook({ age, choice: parseLookChoice(row.uiLook), wave }).look;
+  return lookDecisionOfRow(row, wave, now).look;
 }

@@ -5,6 +5,7 @@ import AdminShell from "@/components/AdminShell";
 import CommunityHub from "@/components/CommunityHub";
 import RemovedMessagesLog from "@/components/admin/RemovedMessagesLog";
 import CommunityInsights from "@/components/admin/CommunityInsights";
+import CommunityPeople from "@/components/admin/CommunityPeople";
 
 /**
  * The office's window on the community.
@@ -14,7 +15,7 @@ import CommunityInsights from "@/components/admin/CommunityInsights";
  * is monitored and that promise needs somebody who can be in every room at
  * once.
  *
- * Two tabs:
+ * Four tabs:
  *   - "Rooms" is the real chat, the same one students and tutors use
  *     (CommunityHub). An admin resolves to every room in the school, posts land
  *     tagged "Office", and each message carries the moderator controls —
@@ -22,13 +23,17 @@ import CommunityInsights from "@/components/admin/CommunityInsights";
  *   - "Removed" is the audit log: every message taken down anywhere in the
  *     school, with the reason and a way to put it back. Removal is always a
  *     hide, never a delete, so "what was actually said?" still has an answer.
+ *   - "Insights" is the two looks side by side: totals, invitation, what people
+ *     tap, daily activity. Counts only.
+ *   - "People" is the named roster — who is on which look, how they behave,
+ *     and a link into their remote file.
  *
  * There is deliberately no way here to edit what somebody wrote. Staff able to
  * silently rewrite a student's words would make every transcript worthless the
  * moment one was needed.
  */
 
-type Tab = "rooms" | "removed" | "insights";
+type Tab = "rooms" | "removed" | "insights" | "people";
 
 export default function AdminCommunityPage() {
   const [tab, setTab] = useState<Tab>("rooms");
@@ -39,8 +44,8 @@ export default function AdminCommunityPage() {
         <div>
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Community</h1>
           <p className="mt-1.5 text-sm text-[var(--muted)]">
-            Every class group in the school. Post as the office, or take a message down — it is hidden from students
-            and kept on the record.
+            Every class group in the school. Post as the office, take a message down, or see who is on each look and
+            how they use it.
           </p>
         </div>
 
@@ -49,6 +54,7 @@ export default function AdminCommunityPage() {
             { value: "rooms", label: "Rooms" },
             { value: "removed", label: "Removed messages" },
             { value: "insights", label: "Insights" },
+            { value: "people", label: "People" },
           ] as Array<{ value: Tab; label: string }>).map((option) => (
             <button
               key={option.value}
@@ -64,7 +70,15 @@ export default function AdminCommunityPage() {
           ))}
         </div>
 
-        {tab === "rooms" ? <CommunityHub /> : tab === "removed" ? <RemovedMessagesLog /> : <CommunityInsights />}
+        {tab === "rooms" ? (
+          <CommunityHub />
+        ) : tab === "removed" ? (
+          <RemovedMessagesLog />
+        ) : tab === "insights" ? (
+          <CommunityInsights />
+        ) : (
+          <CommunityPeople />
+        )}
       </div>
     </AdminShell>
   );
