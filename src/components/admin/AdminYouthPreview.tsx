@@ -45,21 +45,21 @@ export default function AdminYouthPreview() {
         )}
 
         <nav className="flex items-end border-t border-[var(--border)] bg-[var(--surface)] px-2 pb-2 pt-1">
-          {(
-            [
-              { id: "home", label: "Home", icon: <HomeIcon className="h-5 w-5" />, disabled: true },
-              { id: "campus", label: "Campus", icon: <MapIcon className="h-5 w-5" />, disabled: false, pane: "hint" as const },
-              { id: "chats", label: "Chats", icon: <CommunityIcon className="h-5 w-5" />, disabled: false, pane: "chats" as const },
-              { id: "learn", label: "Learn", icon: <BookOpenIcon className="h-5 w-5" />, disabled: true },
-            ] as const
-          ).map((tab) => {
-            const active = (tab.pane && pane === tab.pane) || (tab.id === "chats" && pane === "chats");
+          {([
+            { id: "home", label: "Home", icon: <HomeIcon className="h-5 w-5" />, pane: null },
+            { id: "campus", label: "Campus", icon: <MapIcon className="h-5 w-5" />, pane: "hint" as const },
+            { id: "chats", label: "Chats", icon: <CommunityIcon className="h-5 w-5" />, pane: "chats" as const },
+            { id: "learn", label: "Learn", icon: <BookOpenIcon className="h-5 w-5" />, pane: null },
+          ]).map((tab) => {
+            const active = tab.pane !== null && pane === tab.pane;
             return (
               <button
                 key={tab.id}
                 type="button"
-                disabled={tab.disabled}
-                onClick={() => tab.pane && setPane(tab.pane)}
+                disabled={tab.pane === null}
+                onClick={() => {
+                  if (tab.pane) setPane(tab.pane);
+                }}
                 className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px] font-semibold ${
                   active ? "text-[var(--accent)]" : "text-[var(--muted)]"
                 } disabled:opacity-40`}
