@@ -369,7 +369,17 @@ const SLOT_LABEL: Record<string, string> = {
  * shells as well as from /community, so putting it here means no caller has to
  * remember.
  */
-export default function CommunityHub({ compact = false }: { compact?: boolean }) {
+export default function CommunityHub({
+  compact = false,
+  previewLook = null,
+  observe = false,
+}: {
+  compact?: boolean;
+  /** Force the youth or classic face, even for staff — used by the office preview. */
+  previewLook?: "youth" | "classic" | null;
+  /** Watch without announcing yourself: no typing pings. Moderate and post as Office still work. */
+  observe?: boolean;
+}) {
   return (
     <Suspense
       fallback={
@@ -378,17 +388,26 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
         </div>
       }
     >
-      <CommunityHubInner compact={compact} />
+      <CommunityHubInner compact={compact} previewLook={previewLook} observe={observe} />
     </Suspense>
   );
 }
 
-function CommunityHubInner({ compact = false }: { compact?: boolean }) {
+function CommunityHubInner({
+  compact = false,
+  previewLook = null,
+  observe = false,
+}: {
+  compact?: boolean;
+  previewLook?: "youth" | "classic" | null;
+  observe?: boolean;
+}) {
   const searchParams = useSearchParams();
   const deepLinkChannel = searchParams?.get("channel") ?? null;
   // Classmates' cartoon avatars replace initials for students on the new look.
+  // The office preview can force that face even though staff have no look of their own.
   const lookState = useLook();
-  const youthLook = lookState.look === "youth";
+  const youthLook = previewLook === "youth" || (previewLook !== "classic" && lookState.look === "youth");
 
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [isStaff, setIsStaff] = useState(false);
@@ -477,7 +496,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
    * because `send` (below) needs `stopTyping` in its dependency list.
    */
   const { onDraftChange: onTypingDraftChange, stop: stopTyping } = useTypingSender(
-    activeId && canPost ? activeId : null,
+    activeId && canPost && !observe ? activeId : null,
     (typing) =>
       fetch("/api/community/typing", {
         method: "POST",

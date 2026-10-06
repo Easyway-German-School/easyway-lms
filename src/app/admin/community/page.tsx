@@ -6,6 +6,8 @@ import CommunityHub from "@/components/CommunityHub";
 import RemovedMessagesLog from "@/components/admin/RemovedMessagesLog";
 import CommunityInsights from "@/components/admin/CommunityInsights";
 import CommunityPeople from "@/components/admin/CommunityPeople";
+import AdminYouthPreview from "@/components/admin/AdminYouthPreview";
+import AdminCampusWatch from "@/components/admin/AdminCampusWatch";
 
 /**
  * The office's window on the community.
@@ -27,13 +29,16 @@ import CommunityPeople from "@/components/admin/CommunityPeople";
  *     tap, daily activity. Counts only.
  *   - "People" is the named roster — who is on which look, how they behave,
  *     and a link into their remote file.
+ *   - "Youth view" is the under-25 chat as they see it (avatars, phone frame),
+ *     watched without typing pings.
+ *   - "Campus" is their street of rooms, every age band, with no staff presence.
  *
  * There is deliberately no way here to edit what somebody wrote. Staff able to
  * silently rewrite a student's words would make every transcript worthless the
  * moment one was needed.
  */
 
-type Tab = "rooms" | "removed" | "insights" | "people";
+type Tab = "rooms" | "youth" | "campus" | "people" | "insights" | "removed";
 
 export default function AdminCommunityPage() {
   const [tab, setTab] = useState<Tab>("rooms");
@@ -52,9 +57,11 @@ export default function AdminCommunityPage() {
         <div className="flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm font-semibold">
           {([
             { value: "rooms", label: "Rooms" },
-            { value: "removed", label: "Removed messages" },
-            { value: "insights", label: "Insights" },
+            { value: "youth", label: "Youth view" },
+            { value: "campus", label: "Campus" },
             { value: "people", label: "People" },
+            { value: "insights", label: "Insights" },
+            { value: "removed", label: "Removed messages" },
           ] as Array<{ value: Tab; label: string }>).map((option) => (
             <button
               key={option.value}
@@ -72,12 +79,16 @@ export default function AdminCommunityPage() {
 
         {tab === "rooms" ? (
           <CommunityHub />
-        ) : tab === "removed" ? (
-          <RemovedMessagesLog />
+        ) : tab === "youth" ? (
+          <AdminYouthPreview />
+        ) : tab === "campus" ? (
+          <AdminCampusWatch />
+        ) : tab === "people" ? (
+          <CommunityPeople />
         ) : tab === "insights" ? (
           <CommunityInsights />
         ) : (
-          <CommunityPeople />
+          <RemovedMessagesLog />
         )}
       </div>
     </AdminShell>
