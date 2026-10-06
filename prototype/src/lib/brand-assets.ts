@@ -1,6 +1,6 @@
 /**
  * Brand artwork for the generated PDFs (receipts, enrolment letters), embedded
- * as base64 so a document never depends on a runtime fetch of /public — a slow
+ * as base64 so a document never depends on a runtime fetch of /public - a slow
  * or failed fetch must not quietly strip the logo or the stamp off a letter a
  * student is taking to a visa office. Regenerate from public/logo-mark.png and
  * the scanned stamp if either changes.
