@@ -64,6 +64,16 @@ type RunningBatch = {
 
 type Auto = { enabled: boolean; lastRunAt: string | null; lastRunSummary: string | null };
 
+type WrongMove = {
+  studentId: string;
+  name: string;
+  level: string;
+  previousLevel: string;
+  paid: number;
+  needed: number;
+  movedAt: string;
+};
+
 type Accounting = {
   total: number;
   onDesk: number;
@@ -226,6 +236,8 @@ export default function GraduationPage() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [showRunning, setShowRunning] = useState(false);
   const [accounting, setAccounting] = useState<Accounting | null>(null);
+  const [wrong, setWrong] = useState<WrongMove[]>([]);
+  const [fixed, setFixed] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -237,6 +249,7 @@ export default function GraduationPage() {
       setCohorts(json.cohorts);
       setRunning(json.running);
       setAccounting(json.accounting ?? null);
+      setWrong(json.wronglyMoved ?? []);
       setAuto(json.auto);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load");
@@ -303,6 +316,30 @@ export default function GraduationPage() {
       setResult(total);
       setBusy(false);
       setProgress(null);
+      await load();
+    }
+  }
+
+  async function undoMoves() {
+    if (wrong.length === 0) return;
+    if (
+      !window.confirm(
+        `Put ${plural(wrong.length, "learner")} back on the level they were moved up from?\n\nThey go back to their old level and batch. Nothing they paid and none of their results is touched. They have not paid the deposit for the level they left.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    setFixed("");
+    try {
+      const json = await post({ action: "undoMoves", studentIds: wrong.map((row) => row.studentId).slice(0, 25) });
+      setFixed(
+        `Put back ${json.restored.length}: ${json.restored.map((r: { name: string; level: string }) => `${r.name} (back on ${r.level})`).join(", ") || "nobody"}.${json.skipped.length ? ` Not changed: ${json.skipped.map((s: { name: string; reason: string }) => `${s.name} — ${s.reason}`).join("; ")}` : ""}`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work");
+    } finally {
+      setBusy(false);
       await load();
     }
   }
@@ -374,6 +411,37 @@ export default function GraduationPage() {
             {auto.enabled ? "Automatic is on" : "Turn automatic on"}
           </button>
         </section>
+
+        {fixed && <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">{fixed}</div>}
+
+        {wrong.length > 0 && (
+          <section className="space-y-3 rounded-3xl border border-rose-300 bg-rose-50 p-5">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-rose-700">Needs fixing</p>
+            <p className="text-lg font-bold text-rose-900">
+              {plural(wrong.length, "learner")} moved up without paying the deposit for the level they left
+            </p>
+            <ul className="divide-y divide-rose-200 rounded-2xl bg-white/70 text-sm">
+              {wrong.map((row) => (
+                <li key={row.studentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                  <Link href={`/admin/students/${row.studentId}`} className="font-medium text-[var(--foreground)] hover:underline">
+                    {row.name}
+                  </Link>
+                  <span className="text-xs text-rose-800">
+                    now {row.level} · paid ₦{row.paid.toLocaleString("en-NG")} of ₦{row.needed.toLocaleString("en-NG")} {row.previousLevel} deposit
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button
+              disabled={busy}
+              onClick={undoMoves}
+              className="rounded-full bg-rose-600 px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+            >
+              Put {wrong.length === 1 ? "this learner" : `these ${wrong.length}`} back
+            </button>
+            <p className="text-xs text-rose-800">Only recent moves (last two weeks) are listed. Nothing they paid and none of their results is touched.</p>
+          </section>
+        )}
 
         {progress && (
           <div className="space-y-2 rounded-2xl bg-[var(--surface)] p-4 shadow-sm">

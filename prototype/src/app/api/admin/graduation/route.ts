@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { graduateStudents, loadGraduationDesk, setBatchAutomatic } from "@/lib/graduation-server";
+import { undoWrongMoves } from "@/lib/graduation-repair-server";
 
 /**
  * The graduation desk.
@@ -15,6 +16,7 @@ import { graduateStudents, loadGraduationDesk, setBatchAutomatic } from "@/lib/g
  *                                        intake) and INVITE the ones who only owe on
  *                                        the level just finished; everyone gets
  *                                        Becca's next-level message, and tutors a note
+ *   POST {action:"undoMoves", studentIds}  put back learners moved up without paying the deposit
  *   POST {action:"setAuto", enabled}     one switch for the whole thing, run each morning
  *
  * The browser sends ids, never a verdict: readiness is recomputed here at the
@@ -73,6 +75,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Move at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
       }
       const result = await graduateStudents(ids, { where: fence(gate), tenantId });
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (action === "undoMoves") {
+      const ids: string[] = Array.isArray(body.studentIds)
+        ? (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        : [];
+      if (ids.length === 0) return NextResponse.json({ error: "Choose at least one learner" }, { status: 400 });
+      if (ids.length > MAX_PER_CALL) {
+        return NextResponse.json({ error: `Fix at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
+      }
+      const result = await undoWrongMoves(ids, { where: fence(gate), by: gate.session.user.email ?? undefined });
       return NextResponse.json({ ok: true, ...result });
     }
 

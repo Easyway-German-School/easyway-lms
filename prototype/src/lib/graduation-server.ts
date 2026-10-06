@@ -14,6 +14,7 @@ import type { IntakeStartDayOverrides } from "@/lib/intake";
 import { resolveJourneyAudience } from "@/lib/next-level-journey";
 import { markOffered, sendBeccaInvite } from "@/lib/next-level-manual-server";
 import { writeNextLevelAuto } from "@/lib/next-level-pipeline-server";
+import { findWronglyMoved, type WrongMove } from "@/lib/graduation-repair-server";
 import {
   cohortTiming,
   graduationVerdict,
@@ -108,6 +109,8 @@ export type GraduationDesk = {
   cohorts: DeskCohort[];
   running: RunningBatch[];
   accounting: DeskAccounting;
+  /** Moved up in the last two weeks without having paid the deposit for the level they left. */
+  wronglyMoved: WrongMove[];
   auto: GraduationAuto;
 };
 
@@ -436,7 +439,13 @@ export async function loadGraduationDesk(options: {
     }))
     .sort((a, b) => a.daysToEnd - b.daysToEnd || a.branch.localeCompare(b.branch) || a.level.localeCompare(b.level));
 
-  return { cohorts: ordered, running, accounting, auto: await readGraduationAuto(options.tenantId ?? null) };
+  return {
+    cohorts: ordered,
+    running,
+    accounting,
+    wronglyMoved: await findWronglyMoved({ where: options.where, now }),
+    auto: await readGraduationAuto(options.tenantId ?? null),
+  };
 }
 
 /* ------------------------------- graduating ------------------------------- */
