@@ -74,7 +74,8 @@ export async function POST(request: Request) {
       if (ids.length > MAX_PER_CALL) {
         return NextResponse.json({ error: `Move at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
       }
-      const result = await graduateStudents(ids, { where: fence(gate), tenantId });
+      const only = body.only === "move" || body.only === "invite" ? (body.only as "move" | "invite") : undefined;
+      const result = await graduateStudents(ids, { where: fence(gate), tenantId, only });
       return NextResponse.json({ ok: true, ...result });
     }
 

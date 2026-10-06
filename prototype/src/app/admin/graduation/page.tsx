@@ -31,7 +31,16 @@ type Verdict =
   | { state: "ready" }
   | { state: "blocked"; reason: "fees" | "unpaid" | "never_started" | "held_back" | "top_of_ladder"; detail: string };
 
-type DeskStudent = { studentId: string; name: string; email: string; sitting: string; verdict: Verdict; offered: boolean };
+type DeskStudent = {
+  studentId: string;
+  name: string;
+  email: string;
+  sitting: string;
+  verdict: Verdict;
+  offered: boolean;
+  paid: number;
+  balance: number;
+};
 
 type Cohort = {
   key: string;
@@ -215,14 +224,19 @@ function groupByBatch(cohorts: Cohort[]): BatchGroup[] {
 
 const batchTitle = (batch: { name: string; weekend: boolean }) => `${batch.name} batch${batch.weekend ? " · weekend sitting" : ""}`;
 
-/** Who a press will touch: everyone ready, plus the owing who have not been invited yet. */
+/**
+ * Who each of the two buttons touches. "Paid in full" learners are MOVED; "part payment"
+ * learners are only INVITED (once) — never moved. A part-payer who pays the rest is simply
+ * counted as paid in full the next time the page loads.
+ */
 function targetsOf(students: DeskStudent[]) {
   const move = students.filter((s) => s.verdict.state === "ready").map((s) => s.studentId);
-  const invite = students
-    .filter((s) => s.verdict.state === "blocked" && s.verdict.reason === "fees" && !s.offered)
-    .map((s) => s.studentId);
-  return { move, invite, ids: [...move, ...invite] };
+  const part = students.filter((s) => s.verdict.state === "blocked" && s.verdict.reason === "fees");
+  const invite = part.filter((s) => !s.offered).map((s) => s.studentId);
+  return { move, invite, partTotal: part.length, alreadyInvited: part.length - invite.length };
 }
+
+const money = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
 
 export default function GraduationPage() {
   const [cohorts, setCohorts] = useState<Cohort[]>([]);
@@ -277,16 +291,17 @@ export default function GraduationPage() {
 
   // Runs the given learners ten at a time, so a big batch never hangs on one
   // long request and the office sees it advance.
-  async function run(title: string, students: DeskStudent[]) {
-    const { move, invite, ids } = targetsOf(students);
+  async function run(title: string, students: DeskStudent[], mode: "move" | "invite") {
+    const { move, invite } = targetsOf(students);
+    const ids = mode === "move" ? move : invite;
     if (ids.length === 0) return;
-    const parts = [
-      move.length ? `move ${plural(move.length, "learner")} up to the next level (sign-off, certificate, new intake)` : "",
-      invite.length ? `invite ${plural(invite.length, "learner")} who still owe on this level (they are not moved)` : "",
-    ].filter(Boolean);
+    const what =
+      mode === "move"
+        ? `move ${plural(ids.length, "learner")} up to the next level (sign-off, certificate, new intake). They have all paid in full`
+        : `invite ${plural(ids.length, "learner")} on part payment to finish paying. They are NOT moved; once they have paid the rest they join the paid-in-full list`;
     if (
       !window.confirm(
-        `${title}\n\nThis will ${parts.join(" and ")}.\n\nEvery one of them gets Becca's next-level message — the pop on their dashboard, a notification and an email — and their tutors get a note. It cannot be recalled.`,
+        `${title}\n\nThis will ${what}.\n\nEvery one of them gets Becca's next-level message — the pop on their dashboard, a notification and an email${mode === "move" ? " — and their tutors get a note" : ""}. It cannot be recalled.`,
       )
     )
       return;
@@ -298,7 +313,7 @@ export default function GraduationPage() {
     try {
       for (let i = 0; i < ids.length; i += CHUNK) {
         setProgress({ done: i, total: ids.length });
-        const chunk: RunResult = await post({ action: "graduate", studentIds: ids.slice(i, i + CHUNK) });
+        const chunk: RunResult = await post({ action: "graduate", only: mode, studentIds: ids.slice(i, i + CHUNK) });
         total.graduated.push(...chunk.graduated);
         total.invited.push(...chunk.invited);
         total.skipped.push(...chunk.skipped);
@@ -376,9 +391,10 @@ export default function GraduationPage() {
             <h1 className="text-3xl font-bold text-[var(--foreground)]">Finished batches</h1>
           </div>
           <p className="text-[var(--muted)]">
-            When a batch ends, press its button. Learners who are ready move up to the next level; everyone in the batch
-            gets a pop-up, a notification and an email inviting them to confirm their seat — with a Pay button that works.
-            Their tutors are told too.
+            Each finished batch has two lists. <strong>Paid in full</strong> learners are moved up with one button.{" "}
+            <strong>Part payment</strong> learners are not moved: you can invite them to finish paying, and the moment they have paid
+            the rest they appear under Paid in full by themselves. Everyone you move or invite gets a pop-up, a notification and
+            an email with a Pay button that works. Same steps for every batch.
           </p>
         </div>
 
@@ -501,21 +517,20 @@ export default function GraduationPage() {
           </div>
         )}
 
-        {batches.length > 1 && everyone.ids.length > 0 && (
+        {batches.length > 1 && everyone.move.length > 0 && (
           <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-[#FF6600]/40 bg-[var(--surface)] p-5 shadow-sm">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#FF6600]">Everything at once</p>
               <p className="text-xl font-bold text-[var(--foreground)]">
-                {plural(everyone.move.length, "learner")} to move up
-                {everyone.invite.length ? `, ${everyone.invite.length} to invite` : ""} across {plural(batches.length, "batch")}
+                {plural(everyone.move.length, "learner")} paid in full, across {plural(batches.length, "batch")}
               </p>
             </div>
             <button
               disabled={busy}
-              onClick={() => run("Every batch on this page", batches.flatMap((batch) => batch.levels.flatMap((level) => level.students)))}
+              onClick={() => run("Every batch on this page — paid in full only", batches.flatMap((batch) => batch.levels.flatMap((level) => level.students)), "move")}
               className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
             >
-              Do every batch
+              Move up everyone who paid in full
             </button>
           </section>
         )}
@@ -526,36 +541,54 @@ export default function GraduationPage() {
             const todo = targetsOf(students);
             return (
               <section key={`${batch.name}|${batch.label}`} className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Batch</p>
-                    <h2 className="text-3xl font-bold text-[var(--foreground)]">{batchTitle(batch)}</h2>
-                    <p className="text-sm text-[var(--muted)]">
-                      {plural(batch.total, "learner")} · teaching {batch.label} · {timingLabel(batch)}
-                    </p>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Batch</p>
+                  <h2 className="text-3xl font-bold text-[var(--foreground)]">{batchTitle(batch)}</h2>
+                  <p className="text-sm text-[var(--muted)]">
+                    {plural(batch.total, "learner")} · teaching {batch.label} · {timingLabel(batch)}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Paid in full</p>
+                      <p className="text-3xl font-bold text-emerald-900">{todo.move.length}</p>
+                      <p className="text-xs text-emerald-800">Ready to move up to the next level.</p>
+                    </div>
+                    <button
+                      disabled={busy || todo.move.length === 0}
+                      onClick={() => run(`${batchTitle(batch)} — paid in full`, students, "move")}
+                      className="w-full rounded-full bg-[#FF6600] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-40"
+                    >
+                      {todo.move.length === 0 ? "Nobody has paid in full yet" : `Move up ${todo.move.length} who paid in full`}
+                    </button>
                   </div>
-                  <button
-                    disabled={busy || todo.ids.length === 0}
-                    onClick={() => run(batchTitle(batch), students)}
-                    className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-40"
-                  >
-                    {todo.ids.length === 0
-                      ? batch.owes > 0
-                        ? "Everyone has been invited"
-                        : "Nobody ready yet"
-                      : `Move up ${todo.move.length}${todo.invite.length ? ` · invite ${todo.invite.length}` : ""}`}
-                  </button>
+
+                  <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700">Part payment</p>
+                      <p className="text-3xl font-bold text-amber-900">{todo.partTotal}</p>
+                      <p className="text-xs text-amber-800">
+                        Not moved. When one of them pays the rest, they join &ldquo;Paid in full&rdquo; on their own.
+                        {todo.alreadyInvited > 0 ? ` ${todo.alreadyInvited} already invited.` : ""}
+                      </p>
+                    </div>
+                    <button
+                      disabled={busy || todo.invite.length === 0}
+                      onClick={() => run(`${batchTitle(batch)} — part payment`, students, "invite")}
+                      className="w-full rounded-full border border-amber-400 bg-white px-5 py-3 text-sm font-bold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:opacity-40"
+                    >
+                      {todo.partTotal === 0
+                        ? "Nobody is on part payment"
+                        : todo.invite.length === 0
+                          ? "Everyone has been invited"
+                          : `Invite ${todo.invite.length} to finish paying`}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-300">
-                    {batch.ready} ready to move up
-                  </span>
-                  {batch.owes > 0 && (
-                    <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-800 ring-1 ring-inset ring-amber-300">
-                      {batch.owes} owe on this level — invited, not moved
-                    </span>
-                  )}
                   {Object.entries(
                     students.reduce<Record<string, number>>((counts, student) => {
                       if (student.verdict.state === "blocked" && student.verdict.reason !== "fees") {
@@ -598,11 +631,11 @@ export default function GraduationPage() {
                             </button>
                             {batch.levels.length > 1 && (
                               <button
-                                disabled={busy || levelTodo.ids.length === 0}
-                                onClick={() => run(`${batchTitle(batch)} · ${level.level} only`, level.students)}
+                                disabled={busy || levelTodo.move.length === 0}
+                                onClick={() => run(`${batchTitle(batch)} · ${level.level} only — paid in full`, level.students, "move")}
                                 className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-bold text-[var(--foreground)] transition hover:bg-[var(--surface)] disabled:opacity-40"
                               >
-                                Just {level.level}
+                                Move up {level.level} ({levelTodo.move.length})
                               </button>
                             )}
                           </div>
@@ -625,13 +658,13 @@ export default function GraduationPage() {
                                     {level.branches.length > 1 && <span className="ml-2 text-xs text-[var(--muted)]">{student.branch}</span>}
                                   </span>
                                   {student.verdict.state === "ready" ? (
-                                    <span className="text-xs font-semibold text-emerald-700">Will move up</span>
+                                    <span className="text-xs font-semibold text-emerald-700">Paid in full ({money(student.paid)}) — will move up</span>
                                   ) : student.verdict.reason === "fees" ? (
                                     <span
                                       className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${REASON_STYLE.fees}`}
                                     >
-                                      {student.offered ? "Invited — " : "Will be invited — "}
-                                      {student.verdict.detail}
+                                      {student.offered ? "Invited — " : ""}
+                                      Paid {money(student.paid)} · {money(student.balance)} to go
                                     </span>
                                   ) : (
                                     <span

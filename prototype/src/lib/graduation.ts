@@ -197,7 +197,7 @@ export function graduationVerdict(input: {
   }
   if (input.priorLevelOwed > 0) {
     const money = input.formatMoney ? input.formatMoney(input.priorLevelOwed) : String(input.priorLevelOwed);
-    return { state: "blocked", reason: "fees", detail: `Owes ${money} on ${input.level}` };
+    return { state: "blocked", reason: "fees", detail: `Part payment — ${money} still to pay on ${input.level}` };
   }
   return { state: "ready" };
 }
