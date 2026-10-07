@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import AdminCampusWatch from "@/components/admin/AdminCampusWatch";
-import Avatar from "@/components/Avatar";
 import CommunityHub from "@/components/CommunityHub";
 import { CommunityIcon, CrossIcon, MapIcon } from "@/components/icons";
+import { YouthBlobs, YouthStoryStrip } from "@/components/youth/YouthMotion";
 
 /**
  * THE UNDER-25 COMMUNITY, AS THEY SEE IT — full screen, not a toy phone.
@@ -94,8 +94,9 @@ export default function AdminYouthPreview({
   if (!ready) return null;
 
   return createPortal(
-    <div className="look-youth app-canvas fixed inset-0 z-[80] flex flex-col text-[var(--foreground)]">
-      <header className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)]/90 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+    <div className="look-youth app-canvas fixed inset-0 z-[80] flex flex-col overflow-hidden text-[var(--foreground)]">
+      <YouthBlobs />
+      <header className="relative z-10 shrink-0 border-b border-[var(--border)] bg-[var(--surface)]/90 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
         <div className="flex items-center gap-3 px-3 py-2.5 sm:px-5">
           <button
             type="button"
@@ -141,29 +142,21 @@ export default function AdminYouthPreview({
         </div>
 
         {faces.length > 0 ? (
-          <div className="flex gap-3 overflow-x-auto px-4 pb-3 pt-1 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
-            {faces.map((person) => (
-              <button
-                key={person.userId}
-                type="button"
-                onClick={() => setPane("campus")}
-                className="flex w-14 shrink-0 flex-col items-center gap-1"
-              >
-                <span className="rounded-full bg-[linear-gradient(135deg,#FF6600,#0D7C7E)] p-[2px]">
-                  <span className="block rounded-full bg-[var(--surface)] p-[2px]">
-                    <Avatar config={person.avatar} seed={person.name} size={48} className="rounded-full" />
-                  </span>
-                </span>
-                <span className="w-full truncate text-center text-[10px] font-bold text-[var(--muted)]">
-                  {person.name.split(" ")[0]}
-                </span>
-              </button>
-            ))}
+          <div className="px-3 sm:px-5">
+            <YouthStoryStrip
+              people={faces.map((person) => ({
+                id: person.userId,
+                name: person.name,
+                avatar: person.avatar,
+                live: true,
+              }))}
+              onPick={() => setPane("campus")}
+            />
           </div>
         ) : null}
       </header>
 
-      <div className="min-h-0 flex-1">
+      <div className="relative z-10 min-h-0 flex-1">
         {pane === "chats" ? (
           <CommunityHub fill previewLook="youth" observe />
         ) : (

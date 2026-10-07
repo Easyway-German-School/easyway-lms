@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 
-import { FaceRow } from "@/components/campus/CampusParts";
-import Avatar from "@/components/Avatar";
-import { BookOpenIcon, LockIcon, TargetIcon, UsersIcon } from "@/components/icons";
-import { ROOMS, type Band, type CampusSnapshot, type PresencePerson, type RoomDef } from "@/lib/campus";
+import { CampusRoomCard } from "@/components/campus/CampusParts";
+import { YouthBlobs, YouthFace } from "@/components/youth/YouthMotion";
+import { ROOMS, type Band, type CampusSnapshot, type PresencePerson } from "@/lib/campus";
 
 const BANDS: Array<{ id: Band; label: string; hint: string }> = [
   { id: "minor", label: "Under 18", hint: "Their own street. Adults never appear here." },
@@ -13,59 +12,10 @@ const BANDS: Array<{ id: Band; label: string; hint: string }> = [
   { id: "unknown", label: "Age unknown", hint: "No birth date on file — kept apart on purpose." },
 ];
 
-const TINT: Record<string, { bg: string; ink: string; icon: React.ReactNode }> = {
-  library: { bg: "#E1F5EE", ink: "#085041", icon: <BookOpenIcon className="h-6 w-6" /> },
-  arena: { bg: "#EEEDFE", ink: "#3C3489", icon: <TargetIcon className="h-6 w-6" /> },
-  cafe: { bg: "#FAECE7", ink: "#712B13", icon: <UsersIcon className="h-6 w-6" /> },
-  exam: { bg: "#FAEEDA", ink: "#633806", icon: <BookOpenIcon className="h-6 w-6" /> },
-};
-
 type Payload = {
   enabled: boolean;
   bands: Record<Band, CampusSnapshot & { people: number }>;
 };
-
-function RoomTile({
-  room,
-  count,
-  people,
-  more,
-  tall = false,
-}: {
-  room: RoomDef;
-  count: number;
-  people: PresencePerson[];
-  more: number;
-  tall?: boolean;
-}) {
-  const tint = TINT[room.id];
-  return (
-    <div
-      className={`relative flex flex-col justify-between rounded-[1.75rem] p-5 ${tall ? "min-h-[12rem] sm:min-h-[14rem]" : "min-h-[8.5rem]"} ${room.open ? "" : "opacity-70"}`}
-      style={{ background: tint.bg, color: tint.ink }}
-    >
-      <div className="flex items-start justify-between">
-        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/60">{tint.icon}</span>
-        {!room.open ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
-      </div>
-      <div>
-        <p className="text-base font-extrabold leading-tight">{room.name}</p>
-        <p className="mt-0.5 text-xs opacity-80">{room.open ? room.blurb : "Opening soon"}</p>
-        {room.open ? (
-          <div className="mt-2 space-y-1.5">
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold">
-              <span className={`h-2 w-2 rounded-full ${count > 0 ? "bg-emerald-500" : "bg-black/20"}`} />
-              {count > 0 ? `${count} here` : "Empty"}
-            </span>
-            <div className="min-h-[24px]">
-              <FaceRow people={people} more={more} size={24} />
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
 
 /**
  * CAMPUS AS THE OFFICE SEES IT — the same street of rooms the youth look uses,
@@ -120,82 +70,85 @@ export default function AdminCampusWatch({ immersive = false }: { immersive?: bo
   }
 
   return (
-    <div className={immersive ? "look-youth mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-8 sm:py-7" : "look-youth space-y-4"}>
-      {immersive ? null : (
-        <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
-          You are watching. Students cannot see you, and you do not appear in any room. Age groups stay on separate
-          streets — pick one below. This is the same Campus they see (rooms and faces, not a walk-around map).
-        </p>
-      )}
+    <div className={`relative isolate look-youth ${immersive ? "mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-8 sm:py-7" : "space-y-4"}`}>
+      {immersive ? <YouthBlobs /> : null}
+      <div className="relative space-y-5">
+        {immersive ? null : (
+          <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+            You are watching. Students cannot see you, and you do not appear in any room. Age groups stay on separate
+            streets — pick one below. This is the same Campus they see (rooms and faces, not a walk-around map).
+          </p>
+        )}
 
-      <div className="flex flex-wrap gap-2">
-        {BANDS.map((b) => (
-          <button
-            key={b.id}
-            type="button"
-            onClick={() => setBand(b.id)}
-            className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
-              band === b.id ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--muted)]"
-            }`}
-          >
-            {b.label}
-            {data.bands[b.id].online ? ` · ${data.bands[b.id].online}` : ""}
-          </button>
-        ))}
-      </div>
-      <p className="text-xs text-[var(--muted)]">{BANDS.find((b) => b.id === band)?.hint}</p>
+        <div className="flex flex-wrap gap-2">
+          {BANDS.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => setBand(b.id)}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
+                band === b.id ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--muted)]"
+              }`}
+            >
+              {b.label}
+              {data.bands[b.id].online ? ` · ${data.bands[b.id].online}` : ""}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-[var(--muted)]">{BANDS.find((b) => b.id === band)?.hint}</p>
 
-      <div className={immersive ? "" : "rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6"}>
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Campus</h2>
-            <p className="text-sm text-[var(--muted)]">
-              {snap.online} online now · {snap.studying} studying
-            </p>
+        <div className={immersive ? "" : "rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6"}>
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Campus</h2>
+              <p className="text-sm text-[var(--muted)]">
+                {snap.online} online now · {snap.studying} studying
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className={`mt-4 grid grid-cols-2 gap-3 ${immersive ? "sm:gap-4 lg:grid-cols-4" : ""}`}>
-          {ROOMS.map((room) => {
-            const summary = snap.rooms[room.id];
-            return (
-              <RoomTile
-                key={room.id}
-                room={room}
-                count={summary?.count ?? 0}
-                people={summary?.people ?? []}
-                more={summary?.more ?? 0}
-                tall={immersive}
-              />
-            );
-          })}
-        </div>
+          <div className={`mt-4 grid grid-cols-2 gap-3 ${immersive ? "sm:gap-4 lg:grid-cols-4" : ""}`}>
+            {ROOMS.map((room) => {
+              const summary = snap.rooms[room.id];
+              return (
+                <CampusRoomCard
+                  key={room.id}
+                  room={room}
+                  count={summary?.count ?? 0}
+                  people={summary?.people ?? []}
+                  more={summary?.more ?? 0}
+                  tall={immersive}
+                />
+              );
+            })}
+          </div>
 
-        <section className="mt-7">
-          <h3 className="px-1 text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Who&apos;s around</h3>
-          {everyone.length === 0 ? (
-            <p className="mt-3 rounded-3xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
-              Nobody in this group is on Campus right now.
-            </p>
-          ) : (
-            <ul className={`mt-3 ${immersive ? "grid gap-2 sm:grid-cols-2" : "space-y-2"}`}>
-              {everyone.map((person) => (
-                <li
-                  key={person.userId}
-                  className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5"
-                >
-                  <Avatar config={person.avatar} seed={person.name} size={immersive ? 44 : 36} />
-                  <div className="min-w-0">
-                    <p className="truncate font-bold">{person.name}</p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {person.level} · {person.room === "lobby" ? "wandering" : person.room}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+          <section className="mt-7">
+            <h3 className="px-1 text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Who&apos;s around</h3>
+            {everyone.length === 0 ? (
+              <p className="mt-3 rounded-3xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
+                Nobody in this group is on Campus right now.
+              </p>
+            ) : (
+              <ul className={`mt-3 ${immersive ? "grid gap-2 sm:grid-cols-2" : "space-y-2"}`}>
+                {everyone.map((person) => (
+                  <li
+                    key={person.userId}
+                    className="youth-pop flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5"
+                  >
+                    <YouthFace config={person.avatar} seed={person.name} size={immersive ? 48 : 40} live />
+                    <div className="min-w-0">
+                      <p className="truncate font-bold">{person.name}</p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {person.level} · {person.room === "lobby" ? "wandering" : person.room}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );
