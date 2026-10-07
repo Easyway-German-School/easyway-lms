@@ -2,6 +2,7 @@
 import { PencilIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { PublicQuestion } from "@/lib/assignments";
 import { uploadFile, uploadErrorMessage } from "@/lib/upload";
 
@@ -69,6 +70,8 @@ function formatRemaining(ms: number) {
 }
 
 export default function AssignmentsPanel() {
+  const searchParams = useSearchParams();
+  const wantedId = searchParams.get("id") || searchParams.get("assignmentId");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -114,7 +117,7 @@ export default function AssignmentsPanel() {
       // exactly the bug that used to sit on /assignment?lessonId=…
       let filePath: string | undefined;
       let fileName: string | undefined;
-      if (active.type === "document" && docFile) {
+      if (active.type !== "quiz" && docFile) {
         setUploading(true);
         const uploaded = await uploadFile(docFile, "files");
         filePath = uploaded.url;
@@ -129,7 +132,7 @@ export default function AssignmentsPanel() {
           assignmentId: active.id,
           action: "submit",
           answers: active.type === "quiz" ? answers : undefined,
-          text: active.type === "document" ? docText : undefined,
+          text: active.type !== "quiz" ? docText : undefined,
           filePath,
           fileName,
         }),
@@ -192,6 +195,16 @@ export default function AssignmentsPanel() {
       setBusy(false);
     }
   }
+
+  const openedFromQuery = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!wantedId || loading || active || openedFromQuery.current === wantedId) return;
+    const match = assignments.find((row) => row.id === wantedId);
+    if (!match || match.submission?.submittedAt) return;
+    openedFromQuery.current = wantedId;
+    void open(match);
+  }, [wantedId, loading, assignments, active]);
 
   if (loading) {
     return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-24 animate-pulse rounded-3xl bg-[var(--surface-alt)]/60" />)}</div>;
@@ -342,7 +355,7 @@ export default function AssignmentsPanel() {
   }
 
   // ---- Handing in a document ----------------------------------------------
-  if (active && active.type === "document") {
+  if (active) {
     return (
       <div className="rounded-3xl cinematic-card p-6">
         <h2 className="text-lg font-bold">{active.title}</h2>
@@ -399,7 +412,7 @@ export default function AssignmentsPanel() {
 
   // ---- List ----------------------------------------------------------------
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-28">
       {error && <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">{error}</div>}
 
       {assignments.length === 0 ? (
@@ -412,7 +425,23 @@ export default function AssignmentsPanel() {
         assignments.map((a) => {
           const done = Boolean(a.submission?.submittedAt);
           return (
-            <div key={a.id} className="rounded-3xl cinematic-card p-5">
+            <div
+              key={a.id}
+              role={done ? undefined : "button"}
+              tabIndex={done ? undefined : 0}
+              className={`rounded-3xl cinematic-card p-5 ${done ? "" : "cursor-pointer"}`}
+              onKeyDown={(event) => {
+                if (done) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  if (!busy) void open(a);
+                }
+              }}
+              onClick={(event) => {
+                const fromButton = Boolean((event.target as HTMLElement | null)?.closest("button"));
+                if (!done && !busy && !fromButton) void open(a);
+              }}
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
