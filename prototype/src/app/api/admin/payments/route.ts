@@ -190,7 +190,7 @@ export async function POST(request: Request) {
 
     if (forNextLevel) {
       const levelBefore = student.level;
-      await promoteIfNextLevelPayment(studentId, { forNextLevel: "true" }, payment.id).catch((error) => {
+      await promoteIfNextLevelPayment(studentId, { forNextLevel: "true", reference: payment.id }).catch((error) => {
         console.error("Manual next-level payment: promotion failed", { studentId, error });
       });
       const moved = await prisma.student.findUnique({
