@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { isValidPaymentStatus, PAYMENT_STATUSES } from "@/lib/payment";
+import { resolvePaymentLevel } from "@/lib/payment-level";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
@@ -170,8 +171,16 @@ export async function GET(request: Request) {
     ? unpaidRows.length
     : search ? allRows.length : (await prisma.payment.count({ where })) + unpaidRows.length;
   const pageRows = search ? allRows.slice((page - 1) * pageSize, page * pageSize) : filtered;
+  const paymentsForDesk = pageRows.map((row) =>
+    row.status === "not_paid"
+      ? row
+      : {
+          ...row,
+          level: resolvePaymentLevel({ stamped: row.level, description: row.description }),
+        },
+  );
 
-  return NextResponse.json({ payments: pageRows, totalCount });
+  return NextResponse.json({ payments: paymentsForDesk, totalCount });
 }
 
 export async function PATCH(request: Request) {

@@ -179,6 +179,12 @@ export async function GET(request: Request) {
     const currentBatchYear =
       row.enrolments.find((enrolment) => enrolment.outcome === "ongoing")?.batchYear ?? null;
     const currentLine = ledger.lines.find((line) => line.level === row.level);
+    const currentFee = tuitionFeeFor({
+      level: row.level,
+      branch: row.branch?.name ?? null,
+      classType: row.classType,
+      pathway: row.pathway,
+    });
     const next = nextLevelAfter(row.level);
     const nextFee = next
       ? tuitionFeeFor({
@@ -189,8 +195,9 @@ export async function GET(request: Request) {
         })
       : 0;
     const previous = row.enrolments.filter((enrolment) => enrolment.outcome !== "ongoing");
-    const currentOutstanding = currentLine?.outstanding ?? 0;
-    const currentSettled = currentLine ? currentLine.settled : currentOutstanding === 0;
+    const missingCurrent = !currentLine;
+    const currentOutstanding = currentLine?.outstanding ?? currentFee;
+    const currentSettled = currentLine ? currentLine.settled : false;
 
     return {
       id: row.id,
@@ -215,14 +222,19 @@ export async function GET(request: Request) {
         branchName: enrolment.branch?.name ?? null,
       })),
       paid: ledger.lifetimePaid,
-      owed: ledger.lifetimeOutstanding,
-      lines: ledger.lines.map((line) => ({
-        level: line.level,
-        amount: line.net,
-        allocated: line.allocated,
-        outstanding: line.outstanding,
-        settled: line.settled,
-      })),
+      owed: ledger.lifetimeOutstanding + (missingCurrent ? currentFee : 0),
+      lines: [
+        ...ledger.lines.map((line) => ({
+          level: line.level,
+          amount: line.net,
+          allocated: line.allocated,
+          outstanding: line.outstanding,
+          settled: line.settled,
+        })),
+        ...(missingCurrent && row.level
+          ? [{ level: row.level, amount: currentFee, allocated: 0, outstanding: currentFee, settled: false }]
+          : []),
+      ],
       suggested: {
         current:
           !currentSettled || currentOutstanding > 0

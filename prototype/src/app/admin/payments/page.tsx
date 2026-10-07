@@ -728,7 +728,9 @@ function PaymentsLedger() {
                 ) : (
                   payments.map((payment) => {
                     const currentLevel = payment.student.level;
-                    const thisLevel = payment.level || currentLevel;
+                    // Never fall back to the student's CURRENT level — that is
+                    // how an A1 August payment showed as A2 after they moved.
+                    const thisLevel = payment.status === "not_paid" ? currentLevel : payment.level || null;
                     const previous = (payment.student.enrolments ?? []).filter(
                       (entry) => entry.outcome !== "ongoing" && entry.level !== thisLevel,
                     );
@@ -768,8 +770,8 @@ function PaymentsLedger() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex flex-col gap-1">
-                              <LevelBadge level={thisLevel || "—"} current={thisLevel === currentLevel} />
-                              {payment.level && currentLevel && payment.level !== currentLevel ? (
+                              <LevelBadge level={thisLevel || "—"} current={Boolean(thisLevel && thisLevel === currentLevel)} />
+                              {thisLevel && currentLevel && thisLevel !== currentLevel ? (
                                 <span className="text-[10px] text-[var(--muted)]">now {currentLevel}</span>
                               ) : null}
                             </div>
@@ -829,7 +831,7 @@ function PaymentsLedger() {
                                   Record payment
                                 </button>
                               ) : null}
-                              {payment.studentId && currentLevel && payment.level && payment.level !== currentLevel ? (
+                              {payment.studentId && currentLevel && thisLevel && thisLevel !== currentLevel ? (
                                 <button
                                   className="rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-semibold text-[var(--accent)]"
                                   onClick={() =>
@@ -907,7 +909,7 @@ function PaymentsLedger() {
                               <LevelHistory
                                 currentLevel={currentLevel}
                                 enrolments={payment.student.enrolments ?? []}
-                                paymentLevel={payment.level}
+                                paymentLevel={thisLevel}
                               />
                             </td>
                           </tr>
@@ -1172,7 +1174,7 @@ function EditPaymentModal({
   const [status, setStatus] = useState(payment.status);
   const [method, setMethod] = useState(payment.method);
   const [description, setDescription] = useState(payment.description ?? "");
-  const [level, setLevel] = useState(payment.level || payment.student.level || "");
+  const [level, setLevel] = useState(payment.level || "");
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onClick={() => !busy && onCancel()}>
