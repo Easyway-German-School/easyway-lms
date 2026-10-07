@@ -112,6 +112,22 @@ type LiveKitClassroomProps = {
 
 type Status = "connecting" | "connected" | "reconnecting" | "disconnected" | "failed";
 
+/** Short, calm copy when a join hangs or fails — not a stack trace. */
+function joinHelp(role: RoomRole): { title: string; why: string; next: string } {
+  if (role === "tutor") {
+    return {
+      title: "Could not get into the room",
+      why: "Your network is blocking the video path. The class is not cancelled.",
+      next: "Switch Wi‑Fi ↔ mobile data, then tap Try again. Students can wait.",
+    };
+  }
+  return {
+    title: "Could not get into the room",
+    why: "Your network is blocking the video path. Class is still on.",
+    next: "Switch Wi‑Fi ↔ mobile data, then tap Try again.",
+  };
+}
+
 /**
  * How big we render each remote tile, per quality mode.
  *
@@ -540,6 +556,7 @@ export default function LiveKitClassroom({
   const [error, setError] = useState<string | null>(null);
   /** Shown under the connecting spinner so a slow TURN fallback is not a silent hang. */
   const [connectHint, setConnectHint] = useState("Connecting you to your class.");
+  const [slowJoin, setSlowJoin] = useState(false);
   /**
    * Bumped to force the connect effect below to run again from scratch.
    *
@@ -814,6 +831,16 @@ export default function LiveKitClassroom({
         /* connect() should reject; the TURN attempt then runs */
       }
     }, 16_000);
+    setSlowJoin(false);
+    const slowTimer = window.setTimeout(() => {
+      if (cancelled || room.state === "connected") return;
+      setSlowJoin(true);
+      setConnectHint(
+        role === "tutor"
+          ? "Still trying. Switch Wi‑Fi ↔ mobile data if this stays — the class is not cancelled."
+          : "Still trying. Switch Wi‑Fi ↔ mobile data if this stays.",
+      );
+    }, 8_000);
     // #endregion
 
     room
@@ -1129,6 +1156,7 @@ export default function LiveKitClassroom({
       cancelled = true;
       // #region agent log
       window.clearTimeout(hangTimer);
+      window.clearTimeout(slowTimer);
       document.removeEventListener("securitypolicyviolation", onCspViolation);
       fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
         method: "POST",
@@ -1917,14 +1945,14 @@ export default function LiveKitClassroom({
 
       {status === "failed" ? (
         <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-6 text-sm text-rose-200">
-          <p className="font-semibold">Could not join the classroom</p>
-          <p className="mt-2">{error}</p>
-          <p className="mt-1 text-rose-300/80">
-            This is usually a single bad moment on the connection, not a dead one — worth trying again before assuming the worst.
-          </p>
+          <p className="font-semibold">{joinHelp(role).title}</p>
+          <p className="mt-2">{joinHelp(role).why}</p>
+          <p className="mt-1 text-rose-100/90">{joinHelp(role).next}</p>
           <button
             onClick={() => {
               setError(null);
+              setSlowJoin(false);
+              setConnectHint("Connecting you to your class.");
               setStatus("connecting");
               setRetryKey((key) => key + 1);
             }}
@@ -1935,7 +1963,16 @@ export default function LiveKitClassroom({
         </div>
       ) : status === "connecting" ? (
         <div className="grid aspect-video w-full place-items-center rounded-3xl bg-slate-900">
-          <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message={connectHint} />
+          <div className="flex flex-col items-center px-4">
+            <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message={connectHint} />
+            {slowJoin ? (
+              <p className="mt-4 max-w-sm text-center text-sm text-white/70">
+                {role === "tutor"
+                  ? "Not broken. Switch network, then wait or try again."
+                  : "Not broken. Switch network, then try again."}
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : (
         <div className={`flex min-h-0 flex-1 gap-3 ${panel && !focusMode ? "lg:flex-row" : ""} flex-col`}>
