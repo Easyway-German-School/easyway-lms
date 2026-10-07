@@ -538,6 +538,8 @@ export default function LiveKitClassroom({
   // Best-effort and silent on failure; see the hook for why.
   useWakeLock(status === "connected" || status === "reconnecting");
   const [error, setError] = useState<string | null>(null);
+  /** Shown under the connecting spinner so a slow TURN fallback is not a silent hang. */
+  const [connectHint, setConnectHint] = useState("Connecting you to your class.");
   /**
    * Bumped to force the connect effect below to run again from scratch.
    *
@@ -746,10 +748,119 @@ export default function LiveKitClassroom({
     });
 
     roomRef.current = room;
+    let urlHost = "";
+    try {
+      urlHost = new URL(url.replace(/^ws/i, "http")).host;
+    } catch {
+      urlHost = "unparseable";
+    }
+    const connectStartedAt = Date.now();
+    // #region agent log
+    fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+      body: JSON.stringify({
+        sessionId: "9fa38c",
+        hypothesisId: "A",
+        location: "LiveKitClassroom.tsx:connect.start",
+        message: "room.connect starting",
+        data: { role, retryKey, urlHost, roomName, publishesVideo: qualitySpec(initialQuality).publishesVideo },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    const onCspViolation = (event: SecurityPolicyViolationEvent) => {
+      fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+        body: JSON.stringify({
+          sessionId: "9fa38c",
+          hypothesisId: "C",
+          location: "LiveKitClassroom.tsx:csp",
+          message: "CSP blocked a live-class request",
+          data: {
+            role,
+            retryKey,
+            urlHost,
+            blockedURI: event.blockedURI,
+            violatedDirective: event.violatedDirective,
+            effectiveDirective: event.effectiveDirective,
+            disposition: event.disposition,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    };
+    document.addEventListener("securitypolicyviolation", onCspViolation);
+    const attemptLabelRef = { current: "default" as "default" | "relay" };
+    const hangTimer = window.setTimeout(() => {
+      if (cancelled || room.state === "connected") return;
+      if (attemptLabelRef.current !== "default") return;
+      fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+        body: JSON.stringify({
+          sessionId: "9fa38c",
+          runId: "post-fix",
+          hypothesisId: "A",
+          location: "LiveKitClassroom.tsx:connect.hang",
+          message: "still not connected after 16s — aborting this attempt",
+          data: { role, retryKey, urlHost, roomState: room.state, elapsedMs: Date.now() - connectStartedAt },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      try {
+        room.disconnect();
+      } catch {
+        /* connect() should reject; the TURN attempt then runs */
+      }
+    }, 16_000);
+    // #endregion
 
     room
+      .on(RoomEvent.SignalConnected, () => {
+        // #region agent log
+        fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+          body: JSON.stringify({
+            sessionId: "9fa38c",
+            hypothesisId: "A",
+            location: "LiveKitClassroom.tsx:SignalConnected",
+            message: "signaling websocket up, ICE not finished",
+            data: {
+              role,
+              retryKey,
+              elapsedMs: Date.now() - connectStartedAt,
+              roomState: room.state,
+              urlHost,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      })
       .on(RoomEvent.Connected, () => {
         if (cancelled) return;
+        // #region agent log
+        fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+          body: JSON.stringify({
+            sessionId: "9fa38c",
+            hypothesisId: "A",
+            location: "LiveKitClassroom.tsx:Connected",
+            message: "LiveKit room connected",
+            data: {
+              role,
+              retryKey,
+              elapsedMs: Date.now() - connectStartedAt,
+              roomState: room.state,
+              urlHost,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         // The clock the end screen reports starts here, not at mount: the
         // seconds spent negotiating a connection are not minutes of lesson.
         joinedAtRef.current = Date.now();
@@ -775,6 +886,16 @@ export default function LiveKitClassroom({
       .on(RoomEvent.Reconnecting, () => setStatus("reconnecting"))
       .on(RoomEvent.Reconnected, () => setStatus("connected"))
       .on(RoomEvent.Disconnected, (reason) => {
+        /**
+         * A first-join that is still negotiating (or being retried over TURN)
+         * also emits Disconnected when we abort it. That is not "you dropped
+         * out of class" — they were never in. Only a departure after we had
+         * actually connected should take over the end screen.
+         */
+        if (cancelled) return;
+        if (statusRef.current !== "connected" && statusRef.current !== "reconnecting") {
+          return;
+        }
         setStatus("disconnected");
         /**
          * `cancelled` is set by the cleanup below BEFORE it disconnects, so an
@@ -788,15 +909,13 @@ export default function LiveKitClassroom({
          * "your connection dropped" would be an outright lie, and
          * `DUPLICATE_IDENTITY` is the one case where "removed" would be.
          */
-        if (!cancelled) {
-          finishRef.current(
-            reason === DisconnectReason.PARTICIPANT_REMOVED
-              ? "removed"
-              : reason === DisconnectReason.DUPLICATE_IDENTITY
-                ? "switched"
-                : "dropped",
-          );
-        }
+        finishRef.current(
+          reason === DisconnectReason.PARTICIPANT_REMOVED
+            ? "removed"
+            : reason === DisconnectReason.DUPLICATE_IDENTITY
+              ? "switched"
+              : "dropped",
+        );
       })
       .on(RoomEvent.ParticipantConnected, bumpAll)
       .on(RoomEvent.ParticipantDisconnected, bumpAll)
@@ -831,12 +950,125 @@ export default function LiveKitClassroom({
       });
 
     (async () => {
-      try {
-        await room.connect(url, token);
-      } catch (connectError) {
+      const attempts: Array<{
+        label: "default" | "relay";
+        hint: string;
+        opts: { rtcConfig?: RTCConfiguration; websocketTimeout: number; peerConnectionTimeout: number; maxRetries: number };
+      }> = [
+        {
+          label: "default",
+          hint: "Connecting you to your class.",
+          opts: { websocketTimeout: 12_000, peerConnectionTimeout: 15_000, maxRetries: 1 },
+        },
+        {
+          label: "relay",
+          hint: "Your network is blocking a direct path — joining the way Zoom does, through a relay.",
+          opts: {
+            rtcConfig: { iceTransportPolicy: "relay" },
+            websocketTimeout: 12_000,
+            peerConnectionTimeout: 20_000,
+            maxRetries: 1,
+          },
+        },
+      ];
+      let lastError: unknown = null;
+      for (let i = 0; i < attempts.length; i += 1) {
         if (cancelled) return;
-        console.error("LiveKit connect failed", connectError);
-        setError(connectError instanceof Error ? connectError.message : "Could not join the classroom");
+        const attempt = attempts[i];
+        attemptLabelRef.current = attempt.label;
+        setConnectHint(attempt.hint);
+        // #region agent log
+        fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+          body: JSON.stringify({
+            sessionId: "9fa38c",
+            runId: "post-fix",
+            hypothesisId: "A",
+            location: "LiveKitClassroom.tsx:connect.attempt",
+            message: "room.connect attempt",
+            data: {
+              role,
+              retryKey,
+              urlHost,
+              attempt: attempt.label,
+              attemptIndex: i,
+              elapsedMs: Date.now() - connectStartedAt,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        try {
+          await room.connect(url, token, attempt.opts);
+          lastError = null;
+          // #region agent log
+          fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+            body: JSON.stringify({
+              sessionId: "9fa38c",
+              runId: "post-fix",
+              hypothesisId: "A",
+              location: "LiveKitClassroom.tsx:connect.resolved",
+              message: "room.connect resolved",
+              data: {
+                role,
+                retryKey,
+                urlHost,
+                attempt: attempt.label,
+                elapsedMs: Date.now() - connectStartedAt,
+                roomState: room.state,
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          break;
+        } catch (connectError) {
+          lastError = connectError;
+          console.error("LiveKit connect failed", connectError);
+          // #region agent log
+          fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+            body: JSON.stringify({
+              sessionId: "9fa38c",
+              runId: "post-fix",
+              hypothesisId: "A",
+              location: "LiveKitClassroom.tsx:connect.catch",
+              message: "room.connect rejected",
+              data: {
+                role,
+                retryKey,
+                attempt: attempt.label,
+                elapsedMs: Date.now() - connectStartedAt,
+                urlHost,
+                roomState: room.state,
+                errorName: connectError instanceof Error ? connectError.name : typeof connectError,
+                errorMessage: connectError instanceof Error ? connectError.message : String(connectError),
+                errorReason:
+                  connectError && typeof connectError === "object" && "reason" in connectError
+                    ? String((connectError as { reason?: unknown }).reason)
+                    : null,
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          if (cancelled) return;
+          if (i < attempts.length - 1) {
+            try {
+              room.disconnect();
+            } catch {
+              /* next attempt creates a fresh peer connection on this Room */
+            }
+          }
+        }
+      }
+      if (lastError) {
+        if (cancelled) return;
+        setError(lastError instanceof Error ? lastError.message : "Could not join the classroom");
         setStatus("failed");
         return;
       }
@@ -895,6 +1127,28 @@ export default function LiveKitClassroom({
 
     return () => {
       cancelled = true;
+      // #region agent log
+      window.clearTimeout(hangTimer);
+      document.removeEventListener("securitypolicyviolation", onCspViolation);
+      fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+        body: JSON.stringify({
+          sessionId: "9fa38c",
+          hypothesisId: "B",
+          location: "LiveKitClassroom.tsx:connect.cleanup",
+          message: "connect effect cleaning up (possible remount)",
+          data: {
+            role,
+            retryKey,
+            urlHost,
+            roomState: room.state,
+            elapsedMs: Date.now() - connectStartedAt,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       room.disconnect();
       roomRef.current = null;
     };
@@ -1681,7 +1935,7 @@ export default function LiveKitClassroom({
         </div>
       ) : status === "connecting" ? (
         <div className="grid aspect-video w-full place-items-center rounded-3xl bg-slate-900">
-          <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message="Connecting you to your class." />
+          <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message={connectHint} />
         </div>
       ) : (
         <div className={`flex min-h-0 flex-1 gap-3 ${panel && !focusMode ? "lg:flex-row" : ""} flex-col`}>

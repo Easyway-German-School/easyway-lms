@@ -103,37 +103,62 @@ export default function LiveCallDock() {
 
   const onMinimize = useCallback(() => setDockState("minimized"), [setDockState]);
 
+  useEffect(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
+      body: JSON.stringify({
+        sessionId: "9fa38c",
+        hypothesisId: "B",
+        location: "LiveCallDock.tsx:dockState",
+        message: "live dock parent may remount classroom",
+        data: {
+          dockState,
+          pathname,
+          hasCall: Boolean(activeCall),
+          role: activeCall?.session.role ?? null,
+          roomName: activeCall?.session.roomName ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [dockState, pathname, activeCall]);
+
   if (!activeCall || !activeCall.session.url || !activeCall.session.token) return null;
 
-  const classroom = (
-    <LiveKitClassroom
-      key={activeCall.session.roomName}
-      url={activeCall.session.url}
-      token={activeCall.session.token}
-      roomName={activeCall.session.roomName}
-      displayName={activeCall.session.displayName}
-      role={activeCall.session.role}
-      initialQuality={activeCall.mode}
-      liveSessionId={activeCall.session.liveSessionId}
-      minimized={dockState === "minimized"}
-      onExpand={onExpand}
-      onMinimize={onMinimize}
-      onDragHandlePointerDown={onDragPointerDown}
-      onLeave={reportLeave}
-    />
-  );
-
-  if (dockState === "full") {
-    return <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950 p-3 sm:p-4">{classroom}</div>;
-  }
+  const minimized = dockState === "minimized";
 
   return (
     <div
       ref={cardRef}
-      style={{ left: posRef.current.x, top: posRef.current.y, width: CARD_WIDTH, height: CARD_HEIGHT }}
-      className="fixed z-[70] shadow-2xl"
+      style={
+        minimized
+          ? { left: posRef.current.x, top: posRef.current.y, width: CARD_WIDTH, height: CARD_HEIGHT }
+          : { left: "", top: "", width: "", height: "" }
+      }
+      className={
+        minimized
+          ? "fixed z-[70] shadow-2xl"
+          : "fixed inset-0 z-[70] overflow-y-auto bg-slate-950 p-3 sm:p-4"
+      }
     >
-      {classroom}
+      <LiveKitClassroom
+        key={activeCall.session.roomName}
+        url={activeCall.session.url}
+        token={activeCall.session.token}
+        roomName={activeCall.session.roomName}
+        displayName={activeCall.session.displayName}
+        role={activeCall.session.role}
+        initialQuality={activeCall.mode}
+        liveSessionId={activeCall.session.liveSessionId}
+        minimized={minimized}
+        onExpand={onExpand}
+        onMinimize={onMinimize}
+        onDragHandlePointerDown={onDragPointerDown}
+        onLeave={reportLeave}
+      />
     </div>
   );
 }
