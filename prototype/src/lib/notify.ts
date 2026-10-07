@@ -8,6 +8,7 @@ import { renderNotificationEmail } from "@/lib/notification-email";
 import { planFor } from "@/lib/notification-routing";
 import { mutedChannelsFor, type MutedChannels } from "@/lib/notification-prefs";
 import { KIND as KINDS, type Severity } from "@/lib/notification-kinds";
+import { storedNotificationLink } from "@/lib/notification-destinations";
 import { readAssignment } from "@/lib/lecturer-assignment";
 import { batchFromAdmission } from "@/lib/batch";
 
@@ -345,6 +346,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   // What this kind is allowed to use. Resolved once for the whole batch: it is
   // a property of the kind, not of the recipient.
   const plan = await planFor(kind, shouldPush(input));
+  const link = storedNotificationLink(kind, input.link);
 
   /**
    * And what each RECIPIENT still accepts, which is the per-person half.
@@ -373,7 +375,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
         channel: "in-app",
         kind,
         severity,
-        link: input.link ?? null,
+        link,
         senderId: input.senderId ?? null,
         batchId,
         dedupeKey: input.dedupeKey ?? null,
@@ -392,7 +394,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
       const result = await sendPushToUsers(pushTargets, {
         title: input.title,
         body: input.message,
-        url: input.link,
+        url: link ?? undefined,
         tag: input.pushTag ?? kind,
       });
       pushed = result.sent;
@@ -447,7 +449,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
               name: person.name,
               title: input.title,
               body: input.emailBody ?? input.message,
-              link: input.link,
+              link,
               identity: plan.identity,
             }),
           type: kind,

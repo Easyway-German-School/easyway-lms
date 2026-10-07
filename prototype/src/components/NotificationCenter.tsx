@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { resolveNotificationHop } from "@/lib/notification-destinations";
 import {
   AlertIcon,
   BellIcon,
@@ -88,34 +89,6 @@ function iconFor(kind: string) {
   return <Glyph className="h-5 w-5" />;
 }
 
-/**
- * Where a notification goes when nobody set a link on it.
- *
- * Every notification is tappable, so one without a destination is a dead tap —
- * and the class notices are the ones students actually chase ("is today's class
- * still on?"). Anything about a class lands on the timetable, which is the page
- * that answers the question they opened the notification to ask.
- *
- * A real `link` on the row always wins; this only fills the gap.
- */
-const KIND_DESTINATIONS: Array<[string, string]> = [
-  ["class", "/calendar"],
-  ["attendance", "/calendar"],
-  ["material", "/materials"],
-  ["assignment", "/assignment"],
-  ["result", "/results"],
-  ["exam", "/exam-centre"],
-  ["certificate", "/certificates"],
-  ["payment", "/payments"],
-  ["tuition", "/payments"],
-  ["level.advance", "/programs"],
-];
-
-function destinationForKind(kind: string): string | null {
-  const match = KIND_DESTINATIONS.find(([prefix]) => kind === prefix || kind.startsWith(`${prefix}.`));
-  return match?.[1] ?? null;
-}
-
 const TONES: Record<string, { chip: string; dot: string; rail: string }> = {
   success: {
     chip: "bg-emerald-500/10 text-emerald-600",
@@ -162,6 +135,7 @@ export default function NotificationCenter({
   className?: string;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const reduceMotion = useReducedMotion();
   const push = usePushNotifications();
 
@@ -169,6 +143,7 @@ export default function NotificationCenter({
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [noteHint, setNoteHint] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -249,14 +224,21 @@ export default function NotificationCenter({
 
   const open = useCallback(
     (notification: Notification) => {
+      const hop = resolveNotificationHop({
+        kind: notification.kind,
+        link: notification.link,
+        currentPath: pathname,
+      });
       void markRead([notification.id]);
-      const destination = notification.link ?? destinationForKind(notification.kind);
-      if (destination) {
+      if (hop.clickable && hop.href) {
+        setNoteHint(null);
         setIsOpen(false);
-        router.push(destination);
+        router.push(hop.href);
+      } else {
+        setNoteHint(hop.hint ?? "This is just a note. Nothing else to open.");
       }
     },
-    [markRead, router],
+    [markRead, pathname, router],
   );
 
   const grouped = useMemo(() => {
@@ -303,6 +285,11 @@ export default function NotificationCenter({
           </div>
 
           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[var(--muted)]">{notification.message}</p>
+          {resolveNotificationHop({ kind: notification.kind, link: notification.link, currentPath: pathname }).clickable ? (
+            <p className="mt-1.5 text-[11px] font-semibold text-[var(--accent)]">Open this →</p>
+          ) : (
+            <p className="mt-1.5 text-[11px] text-[var(--muted)]">Just a note — nothing else to open</p>
+          )}
 
           <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--muted)]">
             <span>{relativeTime(notification.createdAt)}</span>
@@ -383,6 +370,9 @@ export default function NotificationCenter({
                     <p className="text-[11px] text-[var(--muted)]">
                       {unreadCount > 0 ? `${unreadCount} unread` : "You are all caught up"}
                     </p>
+                    {noteHint ? (
+                      <p className="mt-1 text-[11px] leading-relaxed text-[var(--muted)]">{noteHint}</p>
+                    ) : null}
                   </div>
                   {unreadCount > 0 && (
                     <button

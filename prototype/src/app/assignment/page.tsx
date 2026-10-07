@@ -18,6 +18,7 @@ function AssignmentContent() {
   const lessonId = searchParams.get("lessonId");
 
   const [lesson, setLesson] = useState<{ title: string; content: string } | null>(null);
+  const [lessonError, setLessonError] = useState(false);
   const [submission, setSubmission] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,9 +38,11 @@ function AssignmentContent() {
     try {
       const res = await fetch(`/api/lesson?lessonId=${lessonId}`);
       const data = await res.json();
-      setLesson(data.lesson);
+      if (data.lesson) setLesson(data.lesson);
+      else setLessonError(true);
     } catch (error) {
       console.error("Failed to load lesson:", error);
+      setLessonError(true);
     }
   }, [lessonId]);
 
@@ -134,7 +137,7 @@ function AssignmentContent() {
     );
   }
 
-  if (status === "loading" || !lesson) {
+  if (status === "loading" || (!lesson && !lessonError)) {
     return (
       <div className="min-h-screen bg-[var(--surface-alt)] flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -142,6 +145,23 @@ function AssignmentContent() {
           <p className="text-[var(--muted)]">Loading assignment...</p>
         </div>
       </div>
+    );
+  }
+
+  if (lessonError || !lesson) {
+    return (
+      <StudentShell>
+        <div className="px-6 py-8">
+          <div className="mb-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Your work</p>
+            <h1 className="mt-2 text-3xl font-bold">Assignments</h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              That lesson link did not open, so here is every assignment waiting for you instead.
+            </p>
+          </div>
+          <AssignmentsPanel />
+        </div>
+      </StudentShell>
     );
   }
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { resolveNotificationHop } from "@/lib/notification-destinations";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
 import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
@@ -36,6 +37,7 @@ type Update = {
   title: string;
   body: string;
   link: string | null;
+  kind?: string | null;
   at: string;
   severity: string;
   author: { name: string } | null;
@@ -104,6 +106,7 @@ function chime() {
 
 export default function PortalUpdates() {
   const router = useRouter();
+  const pathname = usePathname();
   const [visible, setVisible] = useState<Update[]>([]);
   const [tutorialLocked, setTutorialLocked] = useState(false);
   const heldRef = useRef<Update[]>([]);
@@ -213,10 +216,15 @@ export default function PortalUpdates() {
 
   const open = useCallback(
     (update: Update) => {
+      const hop = resolveNotificationHop({
+        kind: update.kind || (update.source === "chat" ? "community" : "general"),
+        link: update.link,
+        currentPath: pathname,
+      });
       dismiss(update.id);
-      if (update.link) router.push(update.link);
+      if (hop.clickable && hop.href) router.push(hop.href);
     },
-    [dismiss, router],
+    [dismiss, pathname, router],
   );
 
   return (
