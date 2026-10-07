@@ -100,44 +100,18 @@ export function resolveLook(input: {
 }
 
 /**
- * When the new look first reached students. An "announce" ("we gave the app a
- * fresh look") only makes sense to someone who knew the OLD one — a student who
- * joined after this date has only ever seen the new look, so there is nothing
- * to announce, and on a first visit they are already busy with the welcome
- * tour. They simply have the new look, quietly.
- */
-export const NEW_LOOK_LAUNCH_AT = new Date("2026-10-05T00:00:00Z");
-
-/**
- * An invitation waits until a student has found their feet — but only a day or
- * two. It used to be a week, which meant anyone signing in with a recent
- * account (a test login, a new joiner) never got to see it.
- */
-export const INVITE_MIN_ACCOUNT_DAYS = 2;
-
-/**
  * Whether Becca should say something, and what. Only ever for a student who has
  * not been told before, and anyone who already picked a look themselves has
  * already answered the question.
  *
- * It is a gentle banner, never a modal (see components/moment/NewLookMoment.tsx),
- * and these rules are the other half of keeping it out of the way: nobody on
- * their first days gets it, so it can never join the welcome tour's pile-up.
+ * Everyone else gets one quiet banner on their next visit: wave students hear
+ * that the look is theirs, everyone else is invited to try it. Join date and
+ * account age used to hide this from most of the roster — new joiners, unknown
+ * dates, anyone under two days — so the people who most needed the choice
+ * never saw it. The banner itself waits its turn in the moment queue and can
+ * be dismissed without a competing "skip" button.
  */
-export function promptFor(
-  decision: LookDecision,
-  promptedBefore: boolean,
-  student?: { createdAt: Date | null; now?: Date },
-): "announce" | "invite" | null {
+export function promptFor(decision: LookDecision, promptedBefore: boolean): "announce" | "invite" | null {
   if (promptedBefore || decision.reason === "chosen") return null;
-
-  const created = student?.createdAt ?? null;
-  const now = student?.now ?? new Date();
-  const accountDays = created ? (now.getTime() - created.getTime()) / 86_400_000 : null;
-
-  if (decision.cohort === "wave") {
-    // Joined after launch → never knew the old look. Unknown join date → say nothing rather than guess.
-    return created && created < NEW_LOOK_LAUNCH_AT ? "announce" : null;
-  }
-  return accountDays !== null && accountDays >= INVITE_MIN_ACCOUNT_DAYS ? "invite" : null;
+  return decision.cohort === "wave" ? "announce" : "invite";
 }

@@ -29,22 +29,24 @@ import { useLook } from "@/lib/useLook";
  *   YIELDS AT ONCE. If anything of higher rank claims a turn while she is up
  *                  (a tour, a payment, a level-up that arrived late), she steps
  *                  aside immediately rather than make it wait out her clock.
- *   LEAVES BY ITSELF. After ~14 seconds it slides away on its own. Hover or
- *                  touch pauses the clock; the X, a swipe up, or Escape dismiss
- *                  it at once.
+ *                  If she has not appeared yet, she withdraws instead of
+ *                  finishing, so she can try again once the screen is quiet.
+ *   ONE CLEAR ASK. The only button is the yes — try it, or make an avatar.
+ *                  Dismiss is the quiet X (or a swipe, or waiting her out).
+ *                  There is no "keep mine" / "skip" next to the yes, because
+ *                  that is recommending the way out.
  *   ONCE, EVER.    Marked as seen the moment it appears, so ignoring it, swiping
- *                  it, or closing the tab all count as an answer. And the
- *                  server never offers it to a brand-new student (they have
- *                  never known the old look and are busy with the tour) — see
- *                  promptFor in lib/youth-look.ts.
+ *                  it, or closing the tab all count as an answer. Anyone who
+ *                  has not been told yet is offered it on their next visit —
+ *                  see promptFor in lib/youth-look.ts.
  *
  * Two messages, picked by the server: "announce" (the student is in the first
- * wave and already has the new look — say so, with the way back) and "invite"
- * (a phone-heavy 25–34 — nothing has changed; just ask).
+ * wave and already has the new look) and "invite" (everyone else — nothing has
+ * changed; just ask).
  */
 
-const SHOW_AFTER_MS = 2500;
-const AUTO_HIDE_MS = 14000;
+const SHOW_AFTER_MS = 4000;
+const AUTO_HIDE_MS = 16000;
 
 export default function NewLookMoment() {
   const router = useRouter();
@@ -57,12 +59,13 @@ export default function NewLookMoment() {
   // she appeared.
   const [shown, setShown] = useState<"announce" | "invite" | null>(null);
   const [finished, setFinished] = useState(false);
+  const [yielding, setYielding] = useState(false);
   useEffect(() => {
     if (prompt && !shown) setShown(prompt);
   }, [prompt, shown]);
 
   // Never inside the live classroom, which is full-screen and has its own controls.
-  const due = shown !== null && !finished && !pathname.startsWith("/live");
+  const due = shown !== null && !finished && !yielding && !pathname.startsWith("/live");
   const { open, close: release } = useMoment("new-look", due);
 
   // Anything ranked above her that is waiting for the single active slot.
@@ -81,13 +84,26 @@ export default function NewLookMoment() {
     release();
   };
 
-  // Never make a more important moment wait for this one. Dismissing releases
-  // the slot; she simply does not come back this visit (and, if she had not
-  // yet appeared, she has not been "seen" either, so she can try again next time).
+  /** The quiet way out — X, swipe, Escape, or waiting her out. Not a button. */
+  const skipQuietly = () => {
+    if (shown === "invite") void declinePrompt("invite");
+    dismiss();
+  };
+
+  // Never make a more important moment wait. If she is already on screen she
+  // steps aside and stays gone this visit. If she has not appeared yet she
+  // only withdraws, so she can come back once the screen is quiet — finishing
+  // here would spend the day and they would never see her.
   useEffect(() => {
-    if (open && higherWaiting) dismiss();
+    if (!higherWaiting) {
+      if (yielding) setYielding(false);
+      return;
+    }
+    if (!open) return;
+    if (visible || seenRef.current) dismiss();
+    else setYielding(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dismiss only calls stable setters and `release`
-  }, [open, higherWaiting]);
+  }, [open, higherWaiting, visible, yielding]);
 
   // The queue has said it is our turn; give the page a beat to settle first.
   useEffect(() => {
@@ -107,20 +123,20 @@ export default function NewLookMoment() {
   // Leaves by herself — the clock pauses while a finger or cursor is on her.
   useEffect(() => {
     if (!visible || paused) return;
-    const timer = window.setTimeout(dismiss, AUTO_HIDE_MS);
+    const timer = window.setTimeout(skipQuietly, AUTO_HIDE_MS);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dismiss only calls stable setters and `release`
-  }, [visible, paused, release]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- skipQuietly only calls stable setters
+  }, [visible, paused, release, shown]);
 
   useEffect(() => {
     if (!visible) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") dismiss();
+      if (event.key === "Escape") skipQuietly();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  }, [visible, release]);
+  }, [visible, release, shown]);
 
   async function choose(look: "youth" | "classic") {
     setBusy(true);
@@ -156,7 +172,7 @@ export default function NewLookMoment() {
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.6, bottom: 0 }}
             onDragEnd={(_, info) => {
-              if (info.offset.y < -28 || info.velocity.y < -300) dismiss();
+              if (info.offset.y < -28 || info.velocity.y < -300) skipQuietly();
             }}
             onPointerEnter={() => setPaused(true)}
             onPointerLeave={() => setPaused(false)}
@@ -177,54 +193,32 @@ export default function NewLookMoment() {
                 <p className="mt-0.5 text-[13px] leading-snug text-[var(--muted)]">
                   {announce
                     ? "Everything's where you left it. Come and make your own avatar."
-                    : "Your own avatar and livelier class chats. Prefer things as they are? Keep them. You can switch any time from your profile."}
+                    : "Your own avatar and livelier class chats. You can switch any time from your profile."}
                 </p>
 
                 {error ? <p className="mt-1.5 text-xs font-semibold text-[var(--danger)]">{error}</p> : null}
 
-                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <div className="mt-2.5">
                   {announce ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          dismiss();
-                          router.push("/profile");
-                        }}
-                        className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-[13px] font-extrabold text-white transition active:scale-95"
-                      >
-                        Make my avatar
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => choose("classic")}
-                        className="rounded-full px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:text-[var(--foreground)] disabled:opacity-60"
-                      >
-                        {busy ? "Switching…" : "Switch back"}
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        dismiss();
+                        router.push("/profile");
+                      }}
+                      className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-[13px] font-extrabold text-white transition active:scale-95"
+                    >
+                      Make my avatar
+                    </button>
                   ) : (
-                    <>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => choose("youth")}
-                        className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-[13px] font-extrabold text-white transition active:scale-95 disabled:opacity-60"
-                      >
-                        {busy ? "One moment…" : "Try it"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void declinePrompt("invite");
-                          dismiss();
-                        }}
-                        className="rounded-full px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:text-[var(--foreground)]"
-                      >
-                        Keep mine
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => choose("youth")}
+                      className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-[13px] font-extrabold text-white transition active:scale-95 disabled:opacity-60"
+                    >
+                      {busy ? "One moment…" : "Try it"}
+                    </button>
                   )}
                 </div>
               </div>
@@ -232,8 +226,8 @@ export default function NewLookMoment() {
 
             <button
               type="button"
-              onClick={dismiss}
-              aria-label="Dismiss"
+              onClick={skipQuietly}
+              aria-label="Close"
               className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
             >
               <CrossIcon className="h-4 w-4" />

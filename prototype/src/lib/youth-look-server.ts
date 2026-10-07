@@ -53,7 +53,7 @@ export async function decideLookForStudent(
   const choice = parseLookChoice(student.uiLook);
 
   const decision = resolveLook({ age, choice, wave });
-  return { ...decision, prompt: promptFor(decision, student.lookPromptedAt !== null, { createdAt: student.createdAt }) };
+  return { ...decision, prompt: promptFor(decision, student.lookPromptedAt !== null) };
 }
 
 /**
