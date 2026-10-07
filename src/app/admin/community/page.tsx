@@ -7,7 +7,6 @@ import RemovedMessagesLog from "@/components/admin/RemovedMessagesLog";
 import CommunityInsights from "@/components/admin/CommunityInsights";
 import CommunityPeople from "@/components/admin/CommunityPeople";
 import AdminYouthPreview from "@/components/admin/AdminYouthPreview";
-import AdminCampusWatch from "@/components/admin/AdminCampusWatch";
 
 /**
  * The office's window on the community.
@@ -29,9 +28,9 @@ import AdminCampusWatch from "@/components/admin/AdminCampusWatch";
  *     tap, daily activity. Counts only.
  *   - "People" is the named roster — who is on which look, how they behave,
  *     and a link into their remote file.
- *   - "Youth view" is the under-25 chat as they see it (avatars, phone frame),
- *     watched without typing pings.
- *   - "Campus" is their street of rooms, every age band, with no staff presence.
+ *   - "Youth view" opens their community full screen — chats and Campus, Leave
+ *     always on screen, watched without typing pings.
+ *   - "Campus" opens the same full-screen watch on the street of rooms.
  *
  * There is deliberately no way here to edit what somebody wrote. Staff able to
  * silently rewrite a student's words would make every transcript worthless the
@@ -79,10 +78,11 @@ export default function AdminCommunityPage() {
 
         {tab === "rooms" ? (
           <CommunityHub />
-        ) : tab === "youth" ? (
-          <AdminYouthPreview />
-        ) : tab === "campus" ? (
-          <AdminCampusWatch />
+        ) : tab === "youth" || tab === "campus" ? (
+          <>
+            <p className="text-sm text-[var(--muted)]">Opening their community…</p>
+            <AdminYouthPreview start={tab === "campus" ? "campus" : "chats"} onLeave={() => setTab("rooms")} />
+          </>
         ) : tab === "people" ? (
           <CommunityPeople />
         ) : tab === "insights" ? (

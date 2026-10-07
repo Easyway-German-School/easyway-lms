@@ -371,10 +371,13 @@ const SLOT_LABEL: Record<string, string> = {
  */
 export default function CommunityHub({
   compact = false,
+  fill = false,
   previewLook = null,
   observe = false,
 }: {
   compact?: boolean;
+  /** Parent already owns the height (full-screen watch). No 30rem box, no page-card math. */
+  fill?: boolean;
   /** Force the youth or classic face, even for staff — used by the office preview. */
   previewLook?: "youth" | "classic" | null;
   /** Watch without announcing yourself: no typing pings. Moderate and post as Office still work. */
@@ -388,17 +391,19 @@ export default function CommunityHub({
         </div>
       }
     >
-      <CommunityHubInner compact={compact} previewLook={previewLook} observe={observe} />
+      <CommunityHubInner compact={compact} fill={fill} previewLook={previewLook} observe={observe} />
     </Suspense>
   );
 }
 
 function CommunityHubInner({
   compact = false,
+  fill = false,
   previewLook = null,
   observe = false,
 }: {
   compact?: boolean;
+  fill?: boolean;
   previewLook?: "youth" | "classic" | null;
   observe?: boolean;
 }) {
@@ -1344,10 +1349,12 @@ function CommunityHubInner({
       // iPhone `vh` includes the address bar, which pushed the message box below the fold),
       // minus the header and, on the new look, the tab bar. From `sm` up it is the card it was.
       data-community-open={compact ? undefined : ""}
-      className={`flex overflow-hidden bg-[var(--surface)] sm:rounded-2xl sm:border sm:border-[var(--border)] ${
-        compact
-          ? "h-[30rem] rounded-2xl border border-[var(--border)]"
-          : "h-[calc(100dvh-3.5rem-var(--bottom-chrome,0px))] border-y border-[var(--border)] sm:h-[calc(100vh-16rem)] sm:min-h-[32rem]"
+      className={`flex overflow-hidden bg-[var(--surface)] ${
+        fill
+          ? "h-full min-h-0"
+          : compact
+            ? "h-[30rem] rounded-2xl border border-[var(--border)]"
+            : "h-[calc(100dvh-3.5rem-var(--bottom-chrome,0px))] border-y border-[var(--border)] sm:h-[calc(100vh-16rem)] sm:min-h-[32rem] sm:rounded-2xl sm:border sm:border-[var(--border)]"
       }`}
     >
       {/* ------------------------------------------------------- channel rail */}

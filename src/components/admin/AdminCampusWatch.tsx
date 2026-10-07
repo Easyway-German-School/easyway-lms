@@ -25,11 +25,23 @@ type Payload = {
   bands: Record<Band, CampusSnapshot & { people: number }>;
 };
 
-function RoomTile({ room, count, people, more }: { room: RoomDef; count: number; people: PresencePerson[]; more: number }) {
+function RoomTile({
+  room,
+  count,
+  people,
+  more,
+  tall = false,
+}: {
+  room: RoomDef;
+  count: number;
+  people: PresencePerson[];
+  more: number;
+  tall?: boolean;
+}) {
   const tint = TINT[room.id];
   return (
     <div
-      className={`relative flex min-h-[8.5rem] flex-col justify-between rounded-3xl p-4 ${room.open ? "" : "opacity-70"}`}
+      className={`relative flex flex-col justify-between rounded-[1.75rem] p-5 ${tall ? "min-h-[12rem] sm:min-h-[14rem]" : "min-h-[8.5rem]"} ${room.open ? "" : "opacity-70"}`}
       style={{ background: tint.bg, color: tint.ink }}
     >
       <div className="flex items-start justify-between">
@@ -60,7 +72,7 @@ function RoomTile({ room, count, people, more }: { room: RoomDef; count: number;
  * every age band, and nobody on the street can tell you are looking. Waves and
  * challenges stay off: watching is not joining.
  */
-export default function AdminCampusWatch() {
+export default function AdminCampusWatch({ immersive = false }: { immersive?: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [band, setBand] = useState<Band>("minor");
@@ -108,11 +120,13 @@ export default function AdminCampusWatch() {
   }
 
   return (
-    <div className="look-youth space-y-4">
-      <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
-        You are watching. Students cannot see you, and you do not appear in any room. Age groups stay on separate
-        streets — pick one below. This is the same Campus they see (rooms and faces, not a walk-around map).
-      </p>
+    <div className={immersive ? "look-youth mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-8 sm:py-7" : "look-youth space-y-4"}>
+      {immersive ? null : (
+        <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+          You are watching. Students cannot see you, and you do not appear in any room. Age groups stay on separate
+          streets — pick one below. This is the same Campus they see (rooms and faces, not a walk-around map).
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {BANDS.map((b) => (
@@ -131,17 +145,17 @@ export default function AdminCampusWatch() {
       </div>
       <p className="text-xs text-[var(--muted)]">{BANDS.find((b) => b.id === band)?.hint}</p>
 
-      <div className="rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
+      <div className={immersive ? "" : "rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6"}>
         <div className="flex items-end justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-extrabold tracking-tight">Campus</h2>
+            <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Campus</h2>
             <p className="text-sm text-[var(--muted)]">
               {snap.online} online now · {snap.studying} studying
             </p>
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className={`mt-4 grid grid-cols-2 gap-3 ${immersive ? "sm:gap-4 lg:grid-cols-4" : ""}`}>
           {ROOMS.map((room) => {
             const summary = snap.rooms[room.id];
             return (
@@ -151,6 +165,7 @@ export default function AdminCampusWatch() {
                 count={summary?.count ?? 0}
                 people={summary?.people ?? []}
                 more={summary?.more ?? 0}
+                tall={immersive}
               />
             );
           })}
@@ -163,13 +178,13 @@ export default function AdminCampusWatch() {
               Nobody in this group is on Campus right now.
             </p>
           ) : (
-            <ul className="mt-3 space-y-2">
+            <ul className={`mt-3 ${immersive ? "grid gap-2 sm:grid-cols-2" : "space-y-2"}`}>
               {everyone.map((person) => (
                 <li
                   key={person.userId}
-                  className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2.5"
+                  className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5"
                 >
-                  <Avatar config={person.avatar} seed={person.name} size={36} />
+                  <Avatar config={person.avatar} seed={person.name} size={immersive ? 44 : 36} />
                   <div className="min-w-0">
                     <p className="truncate font-bold">{person.name}</p>
                     <p className="text-xs text-[var(--muted)]">
