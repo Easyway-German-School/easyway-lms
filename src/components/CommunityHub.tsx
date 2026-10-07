@@ -11,6 +11,7 @@ import CommunityWins from "@/components/CommunityWins";
 import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import StoryTour from "@/components/StoryTour";
 import Avatar from "@/components/Avatar";
+import { YouthFace, YouthStoryStrip } from "@/components/youth/YouthMotion";
 import { useLook } from "@/lib/useLook";
 import { CHAT_GREEN, CHAT_GREEN_AVATAR, SKIN_DEFAULT_THEME, communitySkin } from "@/lib/community-skin";
 import {
@@ -1094,6 +1095,23 @@ function CommunityHubInner({
     return !posted || Date.now() - posted > 3_000;
   });
 
+  const youthFaces = useMemo(() => {
+    if (!youthLook) return [];
+    const seen = new Set<string>();
+    const faces: Array<{ id: string; name: string; avatar?: unknown; live?: boolean }> = [];
+    for (const typer of roomTypers) {
+      if (seen.has(typer.id)) continue;
+      seen.add(typer.id);
+      faces.push({ id: typer.id, name: typer.name, live: true });
+    }
+    for (const message of messages) {
+      if (message.author.role !== "student" || seen.has(message.author.id)) continue;
+      seen.add(message.author.id);
+      faces.push({ id: message.author.id, name: message.author.name, avatar: message.author.avatar });
+    }
+    return faces.slice(0, 14);
+  }, [youthLook, roomTypers, messages]);
+
   // Somebody starts typing while I am at the bottom: keep the bubble in view.
   useEffect(() => {
     if (roomTypers.length === 0) return;
@@ -1349,6 +1367,7 @@ function CommunityHubInner({
       // iPhone `vh` includes the address bar, which pushed the message box below the fold),
       // minus the header and, on the new look, the tab bar. From `sm` up it is the card it was.
       data-community-open={compact ? undefined : ""}
+      data-youth-community={youthLook ? "" : undefined}
       className={`flex overflow-hidden bg-[var(--surface)] ${
         fill
           ? "h-full min-h-0"
@@ -1399,7 +1418,7 @@ function CommunityHubInner({
                   ) : null}
                 </div>
 
-                {space.channels.map((channel) => {
+                {space.channels.map((channel, row) => {
                   const selected = channel.id === activeId;
                   // Live, per room: "Anna is typing…" replaces the description on
                   // the row, the way a chat list does — a reason to open a room
@@ -1418,6 +1437,8 @@ function CommunityHubInner({
                         setShowRail(false);
                       }}
                       data-track="community.room-open"
+                      data-youth-row={youthLook ? "" : undefined}
+                      style={youthLook ? { animationDelay: `${row * 45}ms` } : undefined}
                       className={`flex w-full items-center gap-3 text-left transition active:scale-[0.99] ${
                         isChat
                           ? `border-b border-[var(--border)]/60 px-4 py-3 ${
@@ -1617,6 +1638,12 @@ function CommunityHubInner({
           </div>
         </header>
 
+        {youthLook && youthFaces.length > 0 ? (
+          <div className="border-b border-[var(--border)] bg-[var(--surface)] px-3 pt-2">
+            <YouthStoryStrip people={youthFaces} />
+          </div>
+        ) : null}
+
         {/* A thin band of good news from this cohort — finished stories,
             certificates, levels passed. Ambient and dismissible; hides itself
             when there is nothing to show. */}
@@ -1712,7 +1739,7 @@ function CommunityHubInner({
                       <div className="w-8 shrink-0">
                         {!grouped ? (
                           youthLook && message.author.role === "student" ? (
-                            <Avatar config={message.author.avatar} seed={message.author.name} size={32} />
+                            <YouthFace config={message.author.avatar} seed={message.author.name} size={34} />
                           ) : (
                           <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-[var(--accent)]">
                             {initials(message.author.name)}
@@ -2323,7 +2350,7 @@ function CommunityHubInner({
                   aria-label="Send"
                   data-track="community.send"
                   style={isChat ? { background: CHAT_GREEN } : undefined}
-                  className="ew-pop grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white shadow-md transition hover:brightness-110 active:scale-90 disabled:opacity-30"
+                  className={`ew-pop grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white shadow-md transition hover:brightness-110 active:scale-90 disabled:opacity-30 ${youthLook ? "youth-send" : ""}`}
                 >
                   <SendIcon className="h-4 w-4" />
                 </button>

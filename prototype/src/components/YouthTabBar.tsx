@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { motion } from "framer-motion";
+
+import { youthSpring } from "@/components/youth/YouthMotion";
 
 import Avatar from "@/components/Avatar";
 import { BookOpenIcon, BroadcastIcon, CommunityIcon, HomeIcon, MapIcon } from "@/components/icons";
@@ -83,10 +86,17 @@ export default function YouthTabBar({
       >
         <span
           className={`relative grid h-8 w-14 place-items-center rounded-full transition-colors ${
-            active ? "bg-[var(--accent-strong)]/15 text-[var(--accent-strong)]" : "text-[var(--muted)]"
+            active ? "text-[var(--accent-strong)]" : "text-[var(--muted)]"
           }`}
         >
-          {tab.icon}
+          {active ? (
+            <motion.span
+              layoutId="youth-tab-pill"
+              className="absolute inset-0 rounded-full bg-[var(--accent-strong)]/15"
+              transition={youthSpring}
+            />
+          ) : null}
+          <span className="relative">{tab.icon}</span>
           {tab.href === "/community" && unreadChats > 0 && !active && (
             <span className="absolute right-2 top-0 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white ring-2 ring-[var(--surface)]">
               {unreadChats > 99 ? "99+" : unreadChats}
