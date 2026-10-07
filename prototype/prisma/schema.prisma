@@ -2272,6 +2272,14 @@ model Payment {
   status             String    @default("pending")
   method             String
   description        String?
+  /**
+   * Which CEFR level this payment was recorded against, e.g. "A2".
+   * Null on older rows and on the ₦5,000 registration fee. `Student.level`
+   * is the CURRENT pointer and moves on promotion; this stamp is the
+   * historical record so an August A1 payment still reads as A1 after
+   * they sit A2 in October.
+   */
+  level              String?
   stripeSessionId    String?
   paymentIntentId    String?
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent
@@ -2291,6 +2299,7 @@ model Payment {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+  @@index([studentId, level])
 }
 
 /// ONE ROW PER LEVEL A STUDENT PASSES THROUGH — the debit side of tuition.

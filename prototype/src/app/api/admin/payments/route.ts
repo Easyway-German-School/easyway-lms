@@ -13,6 +13,9 @@ import {
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
+import { nextLevelAfter } from "@/lib/levels";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { promoteIfNextLevelPayment } from "@/lib/promotion";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -48,9 +51,12 @@ export async function POST(request: Request) {
   const amount = typeof body.amount === "number" ? body.amount : Number(body.amount);
   const currency = typeof body.currency === "string" ? body.currency : "usd";
   const method = typeof body.method === "string" ? body.method.trim() : "";
-  const description = typeof body.description === "string" ? body.description.trim() : null;
+  const descriptionRaw = typeof body.description === "string" ? body.description.trim() : "";
   const invoiceId = typeof body.invoiceId === "string" && body.invoiceId.trim() ? body.invoiceId : null;
   const status = typeof body.status === "string" ? body.status : "pending";
+  const forNextLevel = body.forNextLevel === true;
+  const requestedLevel =
+    typeof body.level === "string" && body.level.trim() ? body.level.trim().toUpperCase() : "";
 
   if (!studentId || !amount || !method) {
     return NextResponse.json({ error: "studentId, amount, and method are required" }, { status: 400 });
@@ -64,6 +70,47 @@ export async function POST(request: Request) {
   }
 
   try {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        level: true,
+        classType: true,
+        pathway: true,
+        branch: { select: { name: true } },
+        user: { select: { name: true, email: true } },
+        // `description` is needed to tell a tuition payment from the ₦5,000
+        // registration fee, which the paywall does not count.
+        payments: { select: { amount: true, status: true, description: true } },
+      },
+    });
+    if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    let paymentLevel = requestedLevel;
+    if (forNextLevel) {
+      const next = nextLevelAfter(student.level);
+      if (!next) {
+        return NextResponse.json(
+          { error: `${student.user?.name || "This student"} is already at the top of the ladder.` },
+          { status: 400 },
+        );
+      }
+      paymentLevel = next;
+      try {
+        await ensureChargeForLevel({ studentId, level: next, origin: "next_level_payment" });
+      } catch (chargeError) {
+        console.error("Manual next-level payment: charge create failed", { studentId, next, chargeError });
+      }
+    } else if (!paymentLevel && !isRegistrationFeePayment(descriptionRaw || null)) {
+      paymentLevel = student.level;
+    }
+
+    const description =
+      descriptionRaw ||
+      (forNextLevel ? `${paymentLevel} tuition — next level` : `${paymentLevel} tuition`);
+
     const payment = await prisma.payment.create({
       data: {
         studentId,
@@ -73,20 +120,7 @@ export async function POST(request: Request) {
         description,
         invoiceId,
         status,
-      },
-    });
-
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: {
-        level: true,
-        classType: true,
-        pathway: true,
-        branch: { select: { name: true } },
-        user: { select: { name: true, email: true } },
-        // `description` is needed to tell a tuition payment from the ₦5,000
-        // registration fee, which the paywall does not count.
-        payments: { select: { amount: true, status: true, description: true } },
+        level: paymentLevel || null,
       },
     });
 
@@ -120,9 +154,10 @@ export async function POST(request: Request) {
     let warning: string | null = null;
     let notice: string | null = null;
     if (student && isReceivedPayment(status) && !isRegistrationFeePayment(description)) {
-      const receivedTuition = student.payments
-        .filter((p) => isTuitionPayment({ status: p.status, description: p.description }))
-        .reduce((sum, p) => sum + p.amount, 0);
+      const receivedTuition =
+        student.payments
+          .filter((p) => isTuitionPayment({ status: p.status, description: p.description }))
+          .reduce((sum, p) => sum + p.amount, 0) + Math.round(amount);
       const deposit = requiredDepositFor({
         level: student.level,
         branch: student.branch?.name ?? null,
@@ -152,6 +187,25 @@ export async function POST(request: Request) {
     // back-dated entry that should not email anyone.
     if (body.sendReceipt !== false) await sendPaymentReceiptEmail(payment.id);
     await notifyEnrolmentLetterIfSettled(studentId);
+
+    if (forNextLevel) {
+      const levelBefore = student.level;
+      await promoteIfNextLevelPayment(studentId, { forNextLevel: "true" }, payment.id).catch((error) => {
+        console.error("Manual next-level payment: promotion failed", { studentId, error });
+      });
+      const moved = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: { level: true, user: { select: { name: true, email: true } } },
+      });
+      if (moved && moved.level !== levelBefore) {
+        const who = moved.user?.name || moved.user?.email || "This student";
+        notice = `Recorded. ${who} has moved from ${levelBefore} to ${moved.level}.`;
+        warning = null;
+      } else if (!notice && !warning) {
+        const who = student.user?.name || student.user?.email || "This student";
+        notice = `Recorded as ${paymentLevel} tuition. ${who} stays in ${student.level} until that level is signed off.`;
+      }
+    }
 
     return NextResponse.json({ payment, warning, notice }, { status: 201 });
   } catch (error) {
@@ -204,10 +258,20 @@ export async function PATCH(request: Request) {
 
   const isGateway = Boolean(existing.paymentIntentId || existing.stripeSessionId);
 
-  const data: { amount?: number; status?: string; method?: string; description?: string | null } = {};
+  const data: {
+    amount?: number;
+    status?: string;
+    method?: string;
+    description?: string | null;
+    level?: string | null;
+  } = {};
 
   if (body.description !== undefined) {
     data.description = typeof body.description === "string" && body.description.trim() ? body.description.trim() : null;
+  }
+  if (body.level !== undefined) {
+    const level = typeof body.level === "string" ? body.level.trim().toUpperCase() : "";
+    data.level = level || null;
   }
 
   if (!isGateway) {

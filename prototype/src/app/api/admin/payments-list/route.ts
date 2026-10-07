@@ -18,30 +18,80 @@ export async function GET(request: Request) {
   const where: any = {};
   if (status && status !== "not_paid") where.status = status;
   if (method) where.method = method;
-  if (classType === "private" || classType === "group") where.student = { classType };
+  const studentFilter: Record<string, unknown> = {};
+  if (classType === "private" || classType === "group") studentFilter.classType = classType;
+  const level = url.searchParams.get("level");
+  if (level) {
+    where.OR = [
+      { level },
+      { AND: [{ level: null }, { student: { level } }] },
+    ];
+  }
   if (search) {
     // No `mode: "insensitive"`: SQLite does not support it and Prisma rejects
     // the whole query, so every payment search returned a 500. SQLite's LIKE is
     // already case-insensitive for ASCII.
-    where.OR = [
+    const searchOr = [
       { student: { user: { name: { contains: search, mode: "insensitive" as const } } } },
       { student: { user: { email: { contains: search, mode: "insensitive" as const } } } },
+      { student: { studentCode: { contains: search, mode: "insensitive" as const } } },
     ];
+    if (where.OR) {
+      where.AND = [{ OR: where.OR }, { OR: searchOr }];
+      delete where.OR;
+    } else {
+      where.OR = searchOr;
+    }
+  }
+  if (Object.keys(studentFilter).length) {
+    where.student = { ...(where.student ?? {}), ...studentFilter };
   }
 
   const payments = status === "not_paid"
     ? []
     : await prisma.payment.findMany({
     where,
-    include: { student: { include: { user: true } }, invoice: true },
+    include: {
+      student: {
+        select: {
+          id: true,
+          level: true,
+          classType: true,
+          studentCode: true,
+          user: { select: { name: true, email: true } },
+          enrolments: {
+            where: { deletedAt: null },
+            orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }],
+            select: {
+              id: true,
+              level: true,
+              batchMonth: true,
+              batchYear: true,
+              outcome: true,
+            },
+          },
+        },
+      },
+      invoice: true,
+    },
     orderBy: { createdAt: "desc" },
     ...(search ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
   });
 
   let unpaidStudents: Array<{
     id: string;
+    level: string;
+    classType: string;
+    studentCode: string | null;
     user: { name: string | null; email: string };
     createdAt: Date;
+    enrolments: Array<{
+      id: string;
+      level: string;
+      batchMonth: string | null;
+      batchYear: number | null;
+      outcome: string;
+    }>;
   }> = [];
 
   if (search) {
@@ -59,6 +109,7 @@ export async function GET(request: Request) {
           OR: [
             { user: { name: { contains: search, mode: "insensitive" as const } } },
             { user: { email: { contains: search, mode: "insensitive" as const } } },
+            { studentCode: { contains: search, mode: "insensitive" as const } },
           ],
         },
         ...(classType === "private" || classType === "group" ? [{ classType }] : []),
@@ -67,7 +118,25 @@ export async function GET(request: Request) {
     };
     unpaidStudents = await prisma.student.findMany({
       where: studentWhere,
-      select: { id: true, createdAt: true, user: { select: { name: true, email: true } } },
+      select: {
+        id: true,
+        level: true,
+        classType: true,
+        studentCode: true,
+        createdAt: true,
+        user: { select: { name: true, email: true } },
+        enrolments: {
+          where: { deletedAt: null },
+          orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            level: true,
+            batchMonth: true,
+            batchYear: true,
+            outcome: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -80,7 +149,15 @@ export async function GET(request: Request) {
     status: "not_paid",
     method: "—",
     description: "No payment recorded",
-    student: { id: student.id, user: student.user },
+    level: student.level,
+    student: {
+      id: student.id,
+      level: student.level,
+      classType: student.classType,
+      studentCode: student.studentCode,
+      user: student.user,
+      enrolments: student.enrolments,
+    },
     invoice: null,
     createdAt: student.createdAt,
   }));
