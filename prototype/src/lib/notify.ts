@@ -449,7 +449,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
               name: person.name,
               title: input.title,
               body: input.emailBody ?? input.message,
-              link,
+              link: link ?? undefined,
               identity: plan.identity,
             }),
           type: kind,
