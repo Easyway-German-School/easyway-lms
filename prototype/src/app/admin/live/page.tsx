@@ -219,7 +219,6 @@ export default function AdminLivePage() {
                     </div>
                     <p className="mt-1 text-sm text-[var(--muted)]">
                       {session.lecturerName ?? "No tutor on record"} · live {elapsed(session.startedAt)}
-                      {session.kind === "cohort" ? ` · ${session.joined}/${session.invited} joined` : ""}
                       {session.declined > 0 ? ` · ${session.declined} declined` : ""}
                       {session.observers > 0
                         ? ` · ${session.observers} watching silently`
