@@ -1,9 +1,10 @@
 import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { NextResponse } from "next/server";
 import { mayAutoCreateStudent } from "@/lib/candidates";
+import { getStudentAccess } from "@/lib/student-access";
 
 export async function GET() {
   try {
@@ -108,21 +109,18 @@ export async function GET() {
       .map((row) => ({ id: row.lecturer.id, name: row.lecturer.user?.name ?? null, role: row.role }));
 
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-    const tuitionFee = tuitionFeeFor(feeLookup);
+    const access = await getStudentAccess(student.id);
+    const tuitionFee = access?.tuitionFee ?? tuitionFeeFor(feeLookup);
     const registrationFee = REGISTRATION_FEE;
-    const requiredDeposit = requiredDepositFor(feeLookup);
-    // Tuition money only. The ₦5,000 registration fee is recorded as its own
-    // Payment so the portal never re-charges it, but it is not tuition and must
-    // not net down the balance or count toward the 60% deposit.
-    const totalPaid = student.payments
+    const requiredDeposit = access?.requiredDeposit ?? requiredDepositFor(feeLookup);
+    const totalPaid = access?.totalPaid ?? student.payments
       .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const registrationPaid = true;
-    const paymentMeta = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
-    const depositPaid = paymentMeta.depositPaid;
-    const fullPaid = paymentMeta.fullPaid;
-    const accessLevel = paymentMeta.fullPaid ? "full" : paymentMeta.depositPaid ? "partial" : "registered";
-    const paymentProgressPercent = paymentMeta.paymentProgressPercent;
+    const depositPaid = access?.depositCleared ?? false;
+    const fullPaid = Boolean(access?.depositCleared && access.outstandingBalance <= 0);
+    const accessLevel = fullPaid ? "full" : depositPaid ? "partial" : "registered";
+    const paymentProgressPercent = access?.feeProgressPercent ?? 0;
     const gradeCount = grades.length;
     const averageGrade = gradeCount > 0 ? Math.round(grades.reduce((sum, grade) => sum + grade.score, 0) / gradeCount) : null;
     const recentGrades = grades.map((grade) => ({

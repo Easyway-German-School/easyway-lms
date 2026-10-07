@@ -166,3 +166,65 @@ describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
     expect(access.hasAccess).toBe(true);
   });
 });
+
+describe("deriveStudentAccess — August money must not open October", () => {
+  const a1 = {
+    id: "chg-a1",
+    level: "A1",
+    amount: 155_000,
+    waivedAmount: 0,
+    legacyArrears: false,
+    createdAt: new Date("2026-08-01T00:00:00Z"),
+  };
+
+  it("keeps A2 locked when the only tuition paid is the finished A1 fee", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 155_000,
+      tuitionFee: 155_000,
+      requiredDeposit: 93_000,
+      level: "A2",
+      charges: [a1],
+    });
+
+    expect(access.hasAccess).toBe(false);
+    expect(access.depositCleared).toBe(false);
+    expect(access.lockReason).toBe("unpaid_deposit");
+    expect(access.outstanding).toBe(93_000);
+  });
+
+  it("keeps A2 locked even when an A2 charge exists and FIFO already sat the A1 fee", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 155_000,
+      tuitionFee: 155_000,
+      requiredDeposit: 93_000,
+      level: "A2",
+      charges: [
+        a1,
+        {
+          id: "chg-a2",
+          level: "A2",
+          amount: 155_000,
+          waivedAmount: 0,
+          legacyArrears: false,
+          createdAt: new Date("2026-10-01T00:00:00Z"),
+        },
+      ],
+    });
+
+    expect(access.hasAccess).toBe(false);
+    expect(access.depositCleared).toBe(false);
+  });
+
+  it("still opens A1 when that level's own deposit is on the ledger", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 155_000,
+      tuitionFee: 155_000,
+      requiredDeposit: 93_000,
+      level: "A1",
+      charges: [a1],
+    });
+
+    expect(access.hasAccess).toBe(true);
+    expect(access.depositCleared).toBe(true);
+  });
+});

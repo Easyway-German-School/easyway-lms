@@ -172,6 +172,8 @@ export type StudentAccess = {
   classType: ClassType;
   /** False while a registration-only student still owes the deposit. */
   hasAccess: boolean;
+  /** True once the CURRENT level's 60% deposit is cleared. Previous-level money does not count. */
+  depositCleared: boolean;
   /** True once anything at all has been paid — the registration fee. */
   registrationPaid: boolean;
   totalPaid: number;
@@ -308,21 +310,33 @@ export function deriveStudentAccess({
       ? Math.min(currentLine.net, deposit)
       : Math.round(currentLine.net * DEPOSIT_RATE)
     : deposit;
-  const depositPaid = ledger
-    ? currentLine
-      ? currentLine.allocated >= currentLevelDeposit
-      // Ledger exists but has no row for the current level (mid-rollout gap) —
-      // fall back rather than lock everyone out.
-      : deposit > 0 ? paid >= deposit : paid >= fee
-    : deposit > 0
-      ? paid >= deposit
-      : paid >= fee;
+  // Paid a previous level, then moved up, and this level has no charge yet:
+  // August A1 money must not clear the October A2 gate. An empty ledger
+  // (mid-rollout, no charges at all) still falls back to the raw sum.
+  const paidOtherLevelsOnly = Boolean(ledger && ledger.lines.length > 0 && !currentLine);
+  const depositPaid = paidOtherLevelsOnly
+    ? false
+    : ledger
+      ? currentLine
+        ? currentLine.allocated >= currentLevelDeposit
+        : deposit > 0 ? paid >= deposit : paid >= fee
+      : deposit > 0
+        ? paid >= deposit
+        : paid >= fee;
 
   // What must be cleared to lift the balance lock. Legacy arrears are excluded.
-  const outstandingBalance = ledger
-    ? ledger.goForwardOutstanding
-    : Math.max(0, fee - paid);
-  const fullPaid = ledger ? outstandingBalance <= 0 : fee > 0 ? paid >= fee : depositPaid;
+  const outstandingBalance = paidOtherLevelsOnly
+    ? Math.max(0, fee)
+    : ledger
+      ? ledger.goForwardOutstanding
+      : Math.max(0, fee - paid);
+  const fullPaid = paidOtherLevelsOnly
+    ? false
+    : ledger
+      ? outstandingBalance <= 0
+      : fee > 0
+        ? paid >= fee
+        : depositPaid;
 
   // Waiting for an intake that has not opened yet.
   const upcomingBatch = resolveUpcomingBatch(batch, {
@@ -378,7 +392,7 @@ export function deriveStudentAccess({
 
   // Deposit-gate figures: against the CURRENT level's charge when the ledger is
   // driving, against the raw payment sum otherwise.
-  const towardDeposit = currentLine ? currentLine.allocated : paid;
+  const towardDeposit = currentLine ? currentLine.allocated : paidOtherLevelsOnly ? 0 : paid;
   const outstandingDeposit = Math.max(0, currentLevelDeposit - towardDeposit);
   const progressPercent = currentLevelDeposit > 0
     ? Math.min(100, Math.round((towardDeposit / currentLevelDeposit) * 100))
@@ -398,6 +412,7 @@ export function deriveStudentAccess({
     deliveryMode: normaliseDeliveryMode(deliveryMode),
     classType: normaliseClassType(classType),
     hasAccess,
+    depositCleared: depositPaid,
     registrationPaid: paid > 0,
     totalPaid: paid,
     tuitionFee: fee,

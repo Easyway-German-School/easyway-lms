@@ -5,17 +5,16 @@ import {
   isValidPaymentStatus,
   isReceivedPayment,
   isRegistrationFeePayment,
-  isTravelPackagePathway,
-  isTuitionPayment,
   PAYMENT_STATUSES,
-  requiredDepositFor,
 } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 import { nextLevelAfter } from "@/lib/levels";
+import { levelFromDescription } from "@/lib/payment-level";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
+import { getStudentAccess } from "@/lib/student-access";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -104,7 +103,7 @@ export async function POST(request: Request) {
         console.error("Manual next-level payment: charge create failed", { studentId, next, chargeError });
       }
     } else if (!paymentLevel && !isRegistrationFeePayment(descriptionRaw || null)) {
-      paymentLevel = student.level;
+      paymentLevel = levelFromDescription(descriptionRaw) || student.level;
     }
 
     const description =
@@ -139,47 +138,8 @@ export async function POST(request: Request) {
       console.error("Travel Package reconcile failed after manual payment", { studentId, reconcileError });
     }
 
-    /**
-     * Did this payment just open the student's classes?
-     *
-     * The office can record any amount at any status (cash and bank-transfer
-     * desks need that freedom), but the paywall gates on the cumulative
-     * RECEIVED TUITION total reaching the 60% deposit — not on the status
-     * label, and NOT counting the ₦5,000 registration fee (see
-     * `isTuitionPayment` / `deriveStudentAccess`). So for a hand-entered
-     * tuition payment we say plainly whether the student is now unlocked, or —
-     * if it is still short — that it is not, with the figures. A registration
-     * fee recorded here says nothing (it was never going to unlock anything).
-     */
     let warning: string | null = null;
     let notice: string | null = null;
-    if (student && isReceivedPayment(status) && !isRegistrationFeePayment(description)) {
-      const receivedTuition =
-        student.payments
-          .filter((p) => isTuitionPayment({ status: p.status, description: p.description }))
-          .reduce((sum, p) => sum + p.amount, 0) + Math.round(amount);
-      const deposit = requiredDepositFor({
-        level: student.level,
-        branch: student.branch?.name ?? null,
-        classType: student.classType,
-        pathway: student.pathway,
-      });
-      const who = student.user?.name || student.user?.email || "This student";
-      const money = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
-      const gateLabel = isTravelPackagePathway(student.pathway)
-        ? `${money(deposit)} minimum first payment for the Travel Package`
-        : `60% tuition deposit (${money(deposit)})`;
-      if (deposit > 0 && receivedTuition >= deposit) {
-        notice =
-          `Recorded. ${who} has met the ${gateLabel} — received tuition is now ${money(receivedTuition)}, ` +
-          `so their classes are unlocked. If their portal still shows a lock it is the missing-photo step, ` +
-          `which only they can clear from their profile.`;
-      } else {
-        warning =
-          `Recorded, but received tuition is ${money(receivedTuition)} — still below the ${gateLabel}. ` +
-          `${who}'s classes will NOT unlock until it reaches that.`;
-      }
-    }
 
     // A transfer or cash payment entered at the desk is a real payment the
     // student is waiting to hear about, so they get the same designed receipt
@@ -201,9 +161,32 @@ export async function POST(request: Request) {
         const who = moved.user?.name || moved.user?.email || "This student";
         notice = `Recorded. ${who} has moved from ${levelBefore} to ${moved.level}.`;
         warning = null;
-      } else if (!notice && !warning) {
-        const who = student.user?.name || student.user?.email || "This student";
-        notice = `Recorded as ${paymentLevel} tuition. ${who} stays in ${student.level} until that level is signed off.`;
+      }
+    }
+
+    /**
+     * Unlock copy uses the same gate as the student portal. Summing every
+     * payment this student ever made against the CURRENT level's deposit is
+     * how an August A1 transfer was announced as opening October A2.
+     */
+    if (student && isReceivedPayment(status) && !isRegistrationFeePayment(description) && !notice) {
+      const access = await getStudentAccess(studentId);
+      const live = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: { level: true, user: { select: { name: true, email: true } } },
+      });
+      const who = live?.user?.name || live?.user?.email || student.user?.name || student.user?.email || "This student";
+      const currentLevel = live?.level || student.level;
+      const billedLevel = paymentLevel || currentLevel;
+      if (access?.hasAccess) {
+        notice =
+          `Recorded. ${who} has met the ${currentLevel} deposit — their classes are unlocked. ` +
+          `If their portal still shows a lock it is the missing-photo step, which only they can clear from their profile.`;
+      } else if (billedLevel && billedLevel !== currentLevel) {
+        notice = `Recorded as ${billedLevel} tuition. ${who} is in ${currentLevel} and that level stays locked until its own deposit is recorded.`;
+      } else {
+        warning =
+          `Recorded, but ${who}'s ${currentLevel} deposit is not met — classes stay locked until that level is paid (or unlocked at the desk).`;
       }
     }
 
