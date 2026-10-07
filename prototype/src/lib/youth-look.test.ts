@@ -77,42 +77,24 @@ describe("promptFor", () => {
   const older = resolveLook({ age: 29, choice: null });
   const senior = resolveLook({ age: 52, choice: null });
   const noBirthDate = resolveLook({ age: null, choice: null });
-  const now = new Date("2026-10-06T08:00:00Z");
-  const oldTimer = { createdAt: new Date("2026-08-01T00:00:00Z"), now };
-  const joinedAfterLaunch = { createdAt: new Date("2026-10-05T09:00:00Z"), now };
 
-  it("announces to existing wave students and offers the choice to everyone else, once", () => {
-    expect(promptFor(wave, false, oldTimer)).toBe("announce");
-    expect(promptFor(older, false, oldTimer)).toBe("invite");
+  it("announces to wave students and offers the choice to everyone else, once", () => {
+    expect(promptFor(wave, false)).toBe("announce");
+    expect(promptFor(older, false)).toBe("invite");
   });
 
   it("offers the choice at any age, and when no birth date is on file", () => {
-    expect(promptFor(senior, false, oldTimer)).toBe("invite");
-    expect(promptFor(noBirthDate, false, oldTimer)).toBe("invite");
+    expect(promptFor(senior, false)).toBe("invite");
+    expect(promptFor(noBirthDate, false)).toBe("invite");
   });
 
   it("never prompts the same student twice", () => {
-    expect(promptFor(wave, true, oldTimer)).toBeNull();
-    expect(promptFor(older, true, oldTimer)).toBeNull();
+    expect(promptFor(wave, true)).toBeNull();
+    expect(promptFor(older, true)).toBeNull();
   });
 
   it("never prompts someone who already picked a look themselves", () => {
-    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false, oldTimer)).toBeNull();
-    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false, oldTimer)).toBeNull();
-  });
-
-  it("does not announce a 'fresh look' to a student who joined after launch — they never knew the old one", () => {
-    expect(promptFor(wave, false, joinedAfterLaunch)).toBeNull();
-  });
-
-  it("does not guess when the join date is unknown", () => {
-    expect(promptFor(wave, false)).toBeNull();
-    expect(promptFor(wave, false, { createdAt: null })).toBeNull();
-    expect(promptFor(older, false)).toBeNull();
-  });
-
-  it("holds an offer back only for a student's very first day or two", () => {
-    expect(promptFor(older, false, { createdAt: new Date("2026-10-05T12:00:00Z"), now })).toBeNull();
-    expect(promptFor(older, false, { createdAt: new Date("2026-10-03T00:00:00Z"), now })).toBe("invite");
+    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false)).toBeNull();
+    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false)).toBeNull();
   });
 });
