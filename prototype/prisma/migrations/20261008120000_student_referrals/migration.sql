@@ -20,6 +20,12 @@ CREATE TABLE IF NOT EXISTS "ReferralRedemption" (
   CONSTRAINT "ReferralRedemption_pkey" PRIMARY KEY ("id")
 );
 
+-- Reconcile tables created by earlier partial deployments before adding indexes.
+ALTER TABLE "ReferralRedemption"
+ADD COLUMN IF NOT EXISTS "referredStudentId" TEXT;
+ALTER TABLE "ReferralRedemption"
+ALTER COLUMN "referredStudentId" SET NOT NULL;
+
 CREATE TABLE IF NOT EXISTS "ReferralHold" (
   "id" TEXT NOT NULL,
   "redemptionId" TEXT NOT NULL,
