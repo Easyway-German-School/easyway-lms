@@ -90,23 +90,23 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/recovery-venv"
           "$RUNNER_TEMP/recovery-venv/bin/python" -m pip install 'psycopg[binary]==3.2.9'
 
-      - name: Download Monday's encrypted database backup
+      - name: Download Sunday's encrypted database backup
         env:
           GH_TOKEN: ${{ github.token }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
-          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/37276956147")"
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/37221708569")"
           if [ "$(jq -r '.conclusion' <<< "$run_json")" != "success" ] || \
              [ "$(jq -r '.path' <<< "$run_json")" != ".github/workflows/backup-database.yml" ]; then
-            echo "::error::The selected Monday backup run is not a successful database backup."
+            echo "::error::The selected Sunday backup run is not a successful database backup."
             exit 1
           fi
 
-          artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/37276956147/artifacts")"
+          artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/37221708569/artifacts")"
           artifact_id="$(jq -r '[.artifacts[] | select(.name | startswith("database-backup-")) | select(.expired == false)] | sort_by(.created_at) | last | .id // empty' <<< "$artifact_json")"
           if [ -z "$artifact_id" ]; then
-            echo "::error::Monday's database backup artifact is no longer available."
+            echo "::error::Sunday's database backup artifact is no longer available."
             exit 1
           fi
 
@@ -114,7 +114,7 @@ jobs:
           unzip -q backup.zip -d encrypted
           encrypted_dump="$(find encrypted -type f -name '*.dump.enc' -print -quit)"
           if [ -z "$encrypted_dump" ]; then
-            echo "::error::Monday's artifact does not contain an encrypted database dump."
+            echo "::error::Sunday's artifact does not contain an encrypted database dump."
             exit 1
           fi
 

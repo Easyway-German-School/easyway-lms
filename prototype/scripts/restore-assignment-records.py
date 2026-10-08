@@ -112,27 +112,27 @@ def main():
         with snapshot.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT l.id, u.name
+                SELECT l.id, u.name, u.email
                 FROM "Lecturer" l
                 JOIN "User" u ON u.id = l."userId"
                 """
             )
             lecturer_names = {
-                lecturer_id: (name or "")
-                for lecturer_id, name in cursor.fetchall()
+                lecturer_id: f"{name or ''} {email or ''}"
+                for lecturer_id, name, email in cursor.fetchall()
             }
 
         with production.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT l.id, u.name
+                SELECT l.id, u.name, u.email
                 FROM "Lecturer" l
                 JOIN "User" u ON u.id = l."userId"
                 """
             )
             production_lecturer_names = {
-                lecturer_id: (name or "")
-                for lecturer_id, name in cursor.fetchall()
+                lecturer_id: f"{name or ''} {email or ''}"
+                for lecturer_id, name, email in cursor.fetchall()
             }
 
         live_assignment_ids = existing_ids(production, TABLES["assignments"])
@@ -235,6 +235,13 @@ def main():
             if "yemisi"
             in production_lecturer_names.get(row.get("lecturerId"), "").casefold()
         }
+        source_yemisi_lecturer_count = sum(
+            "yemisi" in name.casefold() for name in lecturer_names.values()
+        )
+        production_yemisi_lecturer_count = sum(
+            "yemisi" in name.casefold()
+            for name in production_lecturer_names.values()
+        )
         yemisi_assignment_count = sum(
             row["id"] not in live_assignment_ids
             for row in source_assignments
@@ -277,6 +284,8 @@ def main():
             )
         print(
             "  Frau Yemisi: "
+            f"tutor profiles snapshot={source_yemisi_lecturer_count}, "
+            f"production={production_yemisi_lecturer_count}; "
             f"assignments snapshot={len(yemisi_assignment_ids)}, "
             f"production={len(production_yemisi_assignment_ids)}, "
             f"missing={yemisi_assignment_count}; "
