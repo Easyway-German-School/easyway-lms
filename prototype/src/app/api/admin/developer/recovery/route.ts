@@ -4,9 +4,16 @@ import history from "@/lib/developer-history";
 import { requireCapability } from "@/lib/admin-roles";
 import { scrub } from "@/lib/incidents";
 import { guardedPrisma } from "@/lib/prisma";
-import { findRecoveryMatches, recoverySearchTerms, type RecoveryCandidate } from "@/lib/developer-recovery";
+import {
+  buildRiskRadar,
+  findRecoveryMatches,
+  recoverySearchTerms,
+  type RecoveryCandidate,
+  type RiskObservation,
+} from "@/lib/developer-recovery";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type HistoryRow = {
   id: string;
@@ -50,11 +57,104 @@ function historyCandidates(): HistoryRow[] {
   ];
 }
 
+async function riskRadar() {
+  const now = new Date();
+  const since = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const [incidents, feedback] = await Promise.all([
+    guardedPrisma.incident.findMany({
+      where: {
+        OR: [
+          { lastSeenAt: { gte: since } },
+          { status: { in: ["open", "acknowledged"] } },
+        ],
+      },
+      orderBy: [{ lastSeenAt: "desc" }, { id: "asc" }],
+      take: 500,
+      select: {
+        id: true,
+        kind: true,
+        severity: true,
+        status: true,
+        title: true,
+        message: true,
+        route: true,
+        occurrences: true,
+        reopenedCount: true,
+        resolutionNote: true,
+        lastSeenAt: true,
+      },
+    }),
+    guardedPrisma.betaFeedback.findMany({
+      where: {
+        kind: { in: ["bug", "improve"] },
+        createdAt: { gte: since },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      take: 500,
+      select: { id: true, kind: true, message: true, path: true, createdAt: true },
+    }),
+  ]);
+
+  const observations: RiskObservation[] = [
+    ...incidents.map((incident) => ({
+      id: incident.id,
+      source: "incident" as const,
+      title: scrub(incident.title),
+      detail: scrub([incident.message, incident.resolutionNote].filter(Boolean).join(" ")).slice(0, 1200),
+      route: incident.route ? scrub(incident.route) : null,
+      date: incident.lastSeenAt.toISOString(),
+      status: incident.status,
+      severity: incident.severity,
+      occurrences: incident.occurrences,
+      reopenedCount: incident.reopenedCount,
+    })),
+    ...feedback.map((report) => ({
+      id: report.id,
+      source: "user report" as const,
+      detail: scrub(report.message),
+      title: scrub(report.message).slice(0, 160) || `${report.kind === "bug" ? "Bug report" : "Improvement request"}`,
+      route: report.path ? scrub(report.path) : null,
+      date: report.createdAt.toISOString(),
+      status: "reported",
+      severity: "low",
+      occurrences: 1,
+      reopenedCount: 0,
+    })),
+  ];
+  const { predictions, patternsExamined } = buildRiskRadar(observations, now);
+  const repositoryHistory = historyCandidates();
+  const enriched = predictions.map((prediction) => ({
+    ...prediction,
+    history: findRecoveryMatches(
+      `${prediction.title} ${prediction.evidence[0]?.route ?? ""}`,
+      repositoryHistory,
+      3,
+    ),
+  }));
+
+  return NextResponse.json({
+    generatedAt: now.toISOString(),
+    windowDays: 90,
+    patternsExamined,
+    observations: { incidents: incidents.length, userReports: feedback.length },
+    observationLimitPerSource: 500,
+    predictions: enriched,
+    repositoryIndex: {
+      issues: history.issues.length,
+      pullRequests: history.pullRequests.length,
+      commits: history.commits.length,
+      generatedAt: history.generatedAt,
+    },
+  });
+}
+
 export async function POST(request: Request) {
   const gate = await requireCapability("security");
   if (!gate.ok) return gate.response;
 
-  const body = (await request.json().catch(() => ({}))) as { query?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { query?: unknown; action?: unknown };
+  if (body.action === "risk-radar") return riskRadar();
+
   const query = typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
   if (query.length < 3) {
     return NextResponse.json({ error: "Describe the problem in at least 3 characters." }, { status: 400 });

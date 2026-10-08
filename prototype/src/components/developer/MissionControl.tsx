@@ -7,6 +7,7 @@ import BackendMap from "./BackendMap";
 import DiagnosePanel, { type DiagnoseTarget } from "./DiagnosePanel";
 import PatternsPanel from "./PatternsPanel";
 import RecoveryPanel from "./RecoveryPanel";
+import RiskRadarPanel from "./RiskRadarPanel";
 import Sparkline from "./Sparkline";
 
 /* ------------------------------------------------------------------------ */
@@ -68,7 +69,7 @@ function whoIsAffected(info: IncidentDetail): DiagnoseTarget {
   return info.userId ? { userId: info.userId } : null;
 }
 
-type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns" | "recovery";
+type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns" | "recovery" | "risk-radar";
 
 const SEVERITY = {
   critical: { dot: "bg-red-500", text: "text-red-500", label: "Critical" },
@@ -554,6 +555,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "map", label: "Backend map" },
   { id: "patterns", label: "Patterns" },
   { id: "recovery", label: "Recovery library" },
+  { id: "risk-radar", label: "Risk radar" },
 ];
 
 export default function MissionControl() {
@@ -632,6 +634,9 @@ export default function MissionControl() {
           initialQuery={recoveryRequest?.text ?? ""}
           onOpenIncident={openIncident}
         />
+      )}
+      {tab === "risk-radar" && (
+        <RiskRadarPanel onInvestigate={findSimilar} onOpenIncident={openIncident} />
       )}
     </div>
   );
