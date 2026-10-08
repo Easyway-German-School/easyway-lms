@@ -8,6 +8,65 @@ WHERE student."referralCode" IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "Student_referralCode_key"
 ON "Student"("referralCode");
 
+DO $$
+BEGIN
+  IF to_regclass('"ReferralRedemption"') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'ReferralRedemption'
+        AND column_name = 'studentId'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'ReferralRedemption'
+        AND column_name = 'referredStudentId'
+    )
+  THEN
+    IF to_regclass('"ReferralRedemption_legacy_20261008"') IS NOT NULL THEN
+      RAISE EXCEPTION 'Legacy ReferralRedemption archive already exists; refusing to overwrite it';
+    END IF;
+    ALTER TABLE "ReferralRedemption" RENAME TO "ReferralRedemption_legacy_20261008";
+    ALTER INDEX IF EXISTS "ReferralRedemption_pkey" RENAME TO "ReferralRedemption_legacy_20261008_pkey";
+    ALTER INDEX IF EXISTS "ReferralRedemption_reference_key" RENAME TO "ReferralRedemption_legacy_20261008_reference_key";
+    ALTER INDEX IF EXISTS "ReferralRedemption_studentId_idx" RENAME TO "ReferralRedemption_legacy_20261008_studentId_idx";
+    ALTER INDEX IF EXISTS "ReferralRedemption_tenantId_idx" RENAME TO "ReferralRedemption_legacy_20261008_tenantId_idx";
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF to_regclass('"ReferralHold"') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'ReferralHold'
+        AND column_name = 'code'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'ReferralHold'
+        AND column_name = 'redemptionId'
+    )
+  THEN
+    IF to_regclass('"ReferralHold_legacy_20261008"') IS NOT NULL THEN
+      RAISE EXCEPTION 'Legacy ReferralHold archive already exists; refusing to overwrite it';
+    END IF;
+    ALTER TABLE "ReferralHold" RENAME TO "ReferralHold_legacy_20261008";
+    ALTER INDEX IF EXISTS "ReferralHold_pkey" RENAME TO "ReferralHold_legacy_20261008_pkey";
+    ALTER INDEX IF EXISTS "ReferralHold_reference_key" RENAME TO "ReferralHold_legacy_20261008_reference_key";
+    ALTER INDEX IF EXISTS "ReferralHold_code_idx" RENAME TO "ReferralHold_legacy_20261008_code_idx";
+    ALTER INDEX IF EXISTS "ReferralHold_email_idx" RENAME TO "ReferralHold_legacy_20261008_email_idx";
+    ALTER INDEX IF EXISTS "ReferralHold_tenantId_idx" RENAME TO "ReferralHold_legacy_20261008_tenantId_idx";
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS "ReferralRedemption" (
   "id" TEXT NOT NULL,
   "referralCode" TEXT NOT NULL,
