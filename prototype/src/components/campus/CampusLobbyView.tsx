@@ -106,7 +106,8 @@ export default function CampusLobbyView() {
                       count={summary?.count ?? 0}
                       people={summary?.people ?? []}
                       more={summary?.more ?? 0}
-                      href={`/campus/${room.id}`}
+                      href={room.open ? `/campus/${room.id}` : room.id === "cafe" ? "/community" : "/exams"}
+                      destinationLabel={room.open ? undefined : room.id === "cafe" ? "Open your class chats" : "Open your exams"}
                     />
                   </motion.div>
                 );

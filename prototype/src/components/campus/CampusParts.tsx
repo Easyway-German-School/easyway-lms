@@ -86,6 +86,7 @@ export function CampusRoomCard({
   more,
   tall = false,
   href,
+  destinationLabel,
 }: {
   room: RoomDef;
   count: number;
@@ -93,26 +94,28 @@ export function CampusRoomCard({
   more: number;
   tall?: boolean;
   href?: string;
+  destinationLabel?: string;
 }) {
   const tint = ROOM_TINT[room.id] ?? ROOM_TINT.library;
+  const isCampusRoomOpen = room.open;
   const body = (
     <motion.div
-      whileHover={room.open ? { y: -5, scale: 1.02 } : undefined}
-      whileTap={room.open ? { scale: 0.97 } : undefined}
+      whileHover={href ? { y: -5, scale: 1.02 } : undefined}
+      whileTap={href ? { scale: 0.97 } : undefined}
       transition={youthSpring}
-      className={`youth-room relative flex flex-col justify-between rounded-[1.75rem] p-5 ${
+      className={`youth-room relative flex h-full flex-col justify-between rounded-[1.75rem] p-5 ${
         tall ? "min-h-[12rem] sm:min-h-[14rem]" : "min-h-[9.5rem]"
-      } ${count > 0 ? "youth-room-live" : ""} ${room.open ? "" : "opacity-70"}`}
+      } ${isCampusRoomOpen && count > 0 ? "youth-room-live" : ""} ${href ? "" : "opacity-70"}`}
       style={{ background: tint.bg, color: tint.ink }}
     >
       <div className="flex items-start justify-between">
         <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/60">{tint.icon}</span>
-        {!room.open ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
+        {!href ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
       </div>
       <div>
         <p className="text-base font-extrabold leading-tight">{room.name}</p>
-        <p className="mt-0.5 text-xs opacity-80">{room.open ? room.blurb : "Opening soon"}</p>
-        {room.open ? (
+        <p className="mt-0.5 text-xs opacity-80">{isCampusRoomOpen ? room.blurb : destinationLabel ?? "Opening soon"}</p>
+        {isCampusRoomOpen ? (
           <div className="mt-2 space-y-1.5">
             <span className="inline-flex items-center gap-1.5 text-xs font-bold">
               <span className={`h-2 w-2 rounded-full ${count > 0 ? "youth-glow bg-emerald-500" : "bg-black/20"}`} />
@@ -122,11 +125,19 @@ export function CampusRoomCard({
               <FaceRow people={people} more={more} size={24} />
             </div>
           </div>
-        ) : null}
+        ) : href ? <span className="mt-2 inline-flex text-xs font-extrabold">{destinationLabel} →</span> : null}
       </div>
     </motion.div>
   );
-  return href && room.open ? <Link href={href}>{body}</Link> : body;
+  return href ? (
+    <Link
+      href={href}
+      className="block h-full rounded-[1.75rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+      aria-label={`${room.name}: ${destinationLabel ?? room.blurb}`}
+    >
+      {body}
+    </Link>
+  ) : body;
 }
 
 /** Faces in a row, with a +N for the rest. */

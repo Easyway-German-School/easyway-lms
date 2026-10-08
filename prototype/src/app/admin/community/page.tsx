@@ -53,7 +53,10 @@ export default function AdminCommunityPage() {
           </p>
         </div>
 
-        <div className="flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm font-semibold">
+        <div
+          aria-label="Community sections"
+          className="grid grid-cols-2 gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1 text-sm font-semibold sm:grid-cols-3 xl:grid-cols-6"
+        >
           {([
             { value: "rooms", label: "Rooms" },
             { value: "youth", label: "Youth view" },
@@ -64,8 +67,10 @@ export default function AdminCommunityPage() {
           ] as Array<{ value: Tab; label: string }>).map((option) => (
             <button
               key={option.value}
+              type="button"
+              aria-pressed={tab === option.value}
               onClick={() => setTab(option.value)}
-              className={`rounded-full px-4 py-1.5 transition ${
+              className={`min-w-0 rounded-xl px-2 py-2 text-center leading-tight transition sm:px-3 ${
                 tab === option.value
                   ? "bg-[var(--accent)] text-white"
                   : "text-[var(--muted)] hover:text-[var(--foreground)]"
