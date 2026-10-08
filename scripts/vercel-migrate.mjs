@@ -56,7 +56,7 @@ if (
   result.output.includes(failedReferralMigration)
 ) {
   console.warn(
-    `Resolving the known failed migration ${failedReferralMigration} as rolled back before retrying its idempotent migration.`,
+    `Resolving the known failed migration ${failedReferralMigration} as rolled back before retrying its idempotent migration with legacy referral tables preserved.`,
   );
   const resolve = spawnSync(
     npm,
