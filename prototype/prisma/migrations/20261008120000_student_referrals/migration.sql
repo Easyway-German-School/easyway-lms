@@ -1,18 +1,14 @@
 ALTER TABLE "Student"
-ADD COLUMN "referralCode" TEXT;
+ADD COLUMN IF NOT EXISTS "referralCode" TEXT;
 
-WITH numbered_students AS (
-  SELECT "id", ROW_NUMBER() OVER (ORDER BY "id") AS sequence
-  FROM "Student"
-)
 UPDATE "Student" AS student
-SET "referralCode" = 'EW' || numbered_students.sequence::TEXT
-FROM numbered_students
-WHERE student."id" = numbered_students."id";
+SET "referralCode" = 'EW' || UPPER(MD5(student."id"))
+WHERE student."referralCode" IS NULL;
 
-CREATE UNIQUE INDEX "Student_referralCode_key" ON "Student"("referralCode");
+CREATE UNIQUE INDEX IF NOT EXISTS "Student_referralCode_key"
+ON "Student"("referralCode");
 
-CREATE TABLE "ReferralRedemption" (
+CREATE TABLE IF NOT EXISTS "ReferralRedemption" (
   "id" TEXT NOT NULL,
   "referralCode" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'registered',
@@ -24,7 +20,7 @@ CREATE TABLE "ReferralRedemption" (
   CONSTRAINT "ReferralRedemption_pkey" PRIMARY KEY ("id")
 );
 
-CREATE TABLE "ReferralHold" (
+CREATE TABLE IF NOT EXISTS "ReferralHold" (
   "id" TEXT NOT NULL,
   "redemptionId" TEXT NOT NULL,
   "reason" TEXT NOT NULL,
@@ -36,27 +32,59 @@ CREATE TABLE "ReferralHold" (
   CONSTRAINT "ReferralHold_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "ReferralRedemption_referredStudentId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "ReferralRedemption_referredStudentId_key"
 ON "ReferralRedemption"("referredStudentId");
-CREATE INDEX "ReferralRedemption_tenantId_idx" ON "ReferralRedemption"("tenantId");
-CREATE INDEX "ReferralRedemption_referrerStudentId_createdAt_idx"
+CREATE INDEX IF NOT EXISTS "ReferralRedemption_tenantId_idx" ON "ReferralRedemption"("tenantId");
+CREATE INDEX IF NOT EXISTS "ReferralRedemption_referrerStudentId_createdAt_idx"
 ON "ReferralRedemption"("referrerStudentId", "createdAt");
-CREATE INDEX "ReferralRedemption_status_createdAt_idx"
+CREATE INDEX IF NOT EXISTS "ReferralRedemption_status_createdAt_idx"
 ON "ReferralRedemption"("status", "createdAt");
-CREATE INDEX "ReferralHold_tenantId_idx" ON "ReferralHold"("tenantId");
-CREATE INDEX "ReferralHold_redemptionId_releasedAt_idx"
+CREATE INDEX IF NOT EXISTS "ReferralHold_tenantId_idx" ON "ReferralHold"("tenantId");
+CREATE INDEX IF NOT EXISTS "ReferralHold_redemptionId_releasedAt_idx"
 ON "ReferralHold"("redemptionId", "releasedAt");
-CREATE INDEX "ReferralHold_heldAt_idx" ON "ReferralHold"("heldAt");
+CREATE INDEX IF NOT EXISTS "ReferralHold_heldAt_idx" ON "ReferralHold"("heldAt");
 
-ALTER TABLE "ReferralRedemption"
-ADD CONSTRAINT "ReferralRedemption_referrerStudentId_fkey"
-FOREIGN KEY ("referrerStudentId") REFERENCES "Student"("id")
-ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ReferralRedemption"
-ADD CONSTRAINT "ReferralRedemption_referredStudentId_fkey"
-FOREIGN KEY ("referredStudentId") REFERENCES "Student"("id")
-ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ReferralHold"
-ADD CONSTRAINT "ReferralHold_redemptionId_fkey"
-FOREIGN KEY ("redemptionId") REFERENCES "ReferralRedemption"("id")
-ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'ReferralRedemption_referrerStudentId_fkey'
+      AND conrelid = '"ReferralRedemption"'::regclass
+  ) THEN
+    ALTER TABLE "ReferralRedemption"
+    ADD CONSTRAINT "ReferralRedemption_referrerStudentId_fkey"
+    FOREIGN KEY ("referrerStudentId") REFERENCES "Student"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'ReferralRedemption_referredStudentId_fkey'
+      AND conrelid = '"ReferralRedemption"'::regclass
+  ) THEN
+    ALTER TABLE "ReferralRedemption"
+    ADD CONSTRAINT "ReferralRedemption_referredStudentId_fkey"
+    FOREIGN KEY ("referredStudentId") REFERENCES "Student"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'ReferralHold_redemptionId_fkey'
+      AND conrelid = '"ReferralHold"'::regclass
+  ) THEN
+    ALTER TABLE "ReferralHold"
+    ADD CONSTRAINT "ReferralHold_redemptionId_fkey"
+    FOREIGN KEY ("redemptionId") REFERENCES "ReferralRedemption"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

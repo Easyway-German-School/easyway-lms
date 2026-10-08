@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const gate = await requireCapability("students");
+  const gate = await requireCapability("payments");
   if (!gate.ok) return gate.response;
 
   try {
