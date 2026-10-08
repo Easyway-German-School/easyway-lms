@@ -36,6 +36,104 @@ permissions:
   actions: read
 
 jobs:
+  assignment-recovery:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/wip/pwreset-plus-batch-move'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      scratch:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: recovery
+          POSTGRES_DB: recovery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SNAPSHOT_DATABASE_URL: postgresql://postgres:recovery@localhost:5432/recovery
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      APPLY_RESTORATION: "false"
+
+    steps:
+      - name: Check required secrets
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BACKUP_PASSPHRASE" ] || [ -z "$DIRECT_DATABASE_URL" ]; then
+            echo "::error::BACKUP_PASSPHRASE and DIRECT_DATABASE_URL must be configured."
+            exit 1
+          fi
+
+      - name: Check out recovery script
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL tools and Python driver
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          echo "PG_BIN=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
+          python3 -m venv "$RUNNER_TEMP/recovery-venv"
+          "$RUNNER_TEMP/recovery-venv/bin/python" -m pip install 'psycopg[binary]==3.2.9'
+
+      - name: Download Monday's encrypted database backup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/37276956147")"
+          if [ "$(jq -r '.conclusion' <<< "$run_json")" != "success" ] || \
+             [ "$(jq -r '.path' <<< "$run_json")" != ".github/workflows/backup-database.yml" ]; then
+            echo "::error::The selected Monday backup run is not a successful database backup."
+            exit 1
+          fi
+
+          artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/37276956147/artifacts")"
+          artifact_id="$(jq -r '[.artifacts[] | select(.name | startswith("database-backup-")) | select(.expired == false)] | sort_by(.created_at) | last | .id // empty' <<< "$artifact_json")"
+          if [ -z "$artifact_id" ]; then
+            echo "::error::Monday's database backup artifact is no longer available."
+            exit 1
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > backup.zip
+          unzip -q backup.zip -d encrypted
+          encrypted_dump="$(find encrypted -type f -name '*.dump.enc' -print -quit)"
+          if [ -z "$encrypted_dump" ]; then
+            echo "::error::Monday's artifact does not contain an encrypted database dump."
+            exit 1
+          fi
+
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -in "$encrypted_dump" -out snapshot.dump \
+            -pass env:BACKUP_PASSPHRASE
+          "$PG_BIN/pg_restore" --list snapshot.dump > /dev/null
+
+      - name: Restore snapshot into isolated scratch database
+        run: |
+          set -euo pipefail
+          "$PG_BIN/pg_restore" --dbname "$SNAPSHOT_DATABASE_URL" \
+            --no-owner --no-privileges --exit-on-error --jobs 4 snapshot.dump
+
+      - name: Dry-run missing assignment recovery
+        run: >-
+          "$RUNNER_TEMP/recovery-venv/bin/python"
+          prototype/scripts/restore-assignment-records.py
+
   drill:
     runs-on: ubuntu-latest
     timeout-minutes: 60

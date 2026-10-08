@@ -8,6 +8,7 @@ from collections import Counter
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 
 TABLES = {
@@ -83,7 +84,7 @@ def main():
     target_url = os.environ["DIRECT_DATABASE_URL"]
 
     with (
-        psycopg.connect(source_url, row_factory=dict_row) as snapshot,
+        psycopg.connect(source_url) as snapshot,
         psycopg.connect(target_url) as production,
     ):
         source_columns = {
@@ -274,8 +275,21 @@ def main():
                 )
                 for row in plan[name]:
                     with production.cursor() as cursor:
+                        values = [
+                            Jsonb(row[column])
+                            if column in {
+                                "attachments",
+                                "questions",
+                                "files",
+                                "answers",
+                                "questionScores",
+                            }
+                            and row[column] is not None
+                            else row[column]
+                            for column in columns
+                        ]
                         cursor.execute(
-                            insert_query, [row[column] for column in columns]
+                            insert_query, values
                         )
                         inserted[name] += cursor.rowcount
 
