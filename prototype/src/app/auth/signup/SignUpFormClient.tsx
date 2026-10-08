@@ -586,6 +586,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         photoFileName,
         termsAccepted,
         heardFrom,
+        referralCode: new URLSearchParams(window.location.search).get("ref")?.trim().toUpperCase() || undefined,
         emergencyContactName,
         emergencyContactInfo,
         // Access proof — re-validated server-side by /api/auth/signup.

@@ -501,6 +501,7 @@ model Student {
   // students created before the scheme existed are backfilled by
   // scripts/backfill-student-codes.mjs rather than blocked at read time.
   studentCode String? @unique
+  referralCode String? @unique
 
   status        String @default("active")
   level         String @default("A1") // A1, A2, B1, B2, C1, C2
@@ -808,6 +809,8 @@ model Student {
    * Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private.
    */
   tutorMessages         TutorMessage[]
+  referralsGiven        ReferralRedemption[]   @relation("ReferralReferrer")
+  referralReceived      ReferralRedemption?    @relation("ReferralReferred")
   /**
    * What the tutor wrote up after each private session.
    */
@@ -2300,6 +2303,40 @@ model Payment {
 
   @@index([tenantId])
   @@index([studentId, level])
+}
+
+model ReferralRedemption {
+  id                String         @id @default(cuid())
+  referralCode      String
+  status            String         @default("registered")
+  referrerStudentId String
+  referrerStudent   Student        @relation("ReferralReferrer", fields: [referrerStudentId], references: [id], onDelete: Cascade)
+  referredStudentId String         @unique
+  referredStudent   Student        @relation("ReferralReferred", fields: [referredStudentId], references: [id], onDelete: Cascade)
+  tenantId          String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  holds             ReferralHold[]
+
+  @@index([tenantId])
+  @@index([referrerStudentId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ReferralHold {
+  id           String             @id @default(cuid())
+  redemptionId String
+  redemption   ReferralRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
+  reason       String
+  heldAt       DateTime           @default(now())
+  releasedAt   DateTime?
+  resolvedById String?
+  tenantId     String?
+  createdAt    DateTime           @default(now())
+
+  @@index([tenantId])
+  @@index([redemptionId, releasedAt])
+  @@index([heldAt])
 }
 
 /// ONE ROW PER LEVEL A STUDENT PASSES THROUGH — the debit side of tuition.
