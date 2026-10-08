@@ -122,6 +122,19 @@ def main():
                 for lecturer_id, name in cursor.fetchall()
             }
 
+        with production.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT l.id, u.name
+                FROM "Lecturer" l
+                JOIN "User" u ON u.id = l."userId"
+                """
+            )
+            production_lecturer_names = {
+                lecturer_id: (name or "")
+                for lecturer_id, name in cursor.fetchall()
+            }
+
         live_assignment_ids = existing_ids(production, TABLES["assignments"])
         live_target_ids = existing_ids(production, TABLES["targets"])
         live_submission_ids = existing_ids(production, TABLES["submissions"])
@@ -211,6 +224,17 @@ def main():
             for row in source_assignments
             if "yemisi" in lecturer_names.get(row.get("lecturerId"), "").casefold()
         }
+        production_assignments = rows(
+            production,
+            TABLES["assignments"],
+            ["id", "lecturerId"],
+        )
+        production_yemisi_assignment_ids = {
+            row["id"]
+            for row in production_assignments
+            if "yemisi"
+            in production_lecturer_names.get(row.get("lecturerId"), "").casefold()
+        }
         yemisi_assignment_count = sum(
             row["id"] not in live_assignment_ids
             for row in source_assignments
@@ -221,6 +245,19 @@ def main():
             and unique_key(row, ("assignmentId", "studentId")) not in submission_pairs
             for row in source_submissions
             if row["assignmentId"] in yemisi_assignment_ids
+        )
+        production_submissions = rows(
+            production,
+            TABLES["submissions"],
+            ["id", "assignmentId"],
+        )
+        yemisi_snapshot_submission_count = sum(
+            row["assignmentId"] in yemisi_assignment_ids
+            for row in source_submissions
+        )
+        yemisi_production_submission_count = sum(
+            row["assignmentId"] in production_yemisi_assignment_ids
+            for row in production_submissions
         )
 
         plan = {
@@ -239,8 +276,13 @@ def main():
                 f"missing={len(candidates)}, eligible={len(plan[name])}"
             )
         print(
-            f"  Frau Yemisi: missing assignments={yemisi_assignment_count}, "
-            f"missing submissions={yemisi_submission_count}"
+            "  Frau Yemisi: "
+            f"assignments snapshot={len(yemisi_assignment_ids)}, "
+            f"production={len(production_yemisi_assignment_ids)}, "
+            f"missing={yemisi_assignment_count}; "
+            f"submissions snapshot={yemisi_snapshot_submission_count}, "
+            f"production={yemisi_production_submission_count}, "
+            f"missing={yemisi_submission_count}"
         )
         for reason, count in sorted(blocked.items()):
             print(f"  blocked ({reason})={count}")
