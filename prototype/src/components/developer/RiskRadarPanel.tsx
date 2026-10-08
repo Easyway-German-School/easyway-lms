@@ -73,7 +73,8 @@ export default function RiskRadarPanel({
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Mission Controls · early warning</p>
             <h2 className="mt-1 text-xl font-bold">Risk radar</h2>
             <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-              This checks the last 90 days of recorded incidents and bug reports for recurring or accelerating patterns,
+              This checks recorded incidents and bug reports from the last 90 days, plus active incidents from any date,
+              for recurring or accelerating patterns,
               then compares the strongest signals with the repository&apos;s recorded fixes. It shows evidence and a transparent
               risk index—not a promise that a future event will happen.
             </p>
