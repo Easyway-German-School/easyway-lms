@@ -69,6 +69,7 @@ const MONEY_MATH_ALLOWLIST = {
   "src/app/api/student/tuition-offer/route.ts": "the full-payment bonus offer + a peer '% who paid in full' stat for a checkout nudge — informational, not a gate. Flagged for a follow-up look, not fixed here",
   "src/app/dashboard/page.tsx": "client component displaying fields already computed server-side by /api/student/access — a type shape, not a computation",
   "src/app/api/paystack/initialize/route.ts": "the checkout route itself — already reconciles through the real per-level ledger (loadStudentLedger) for the case that matters (advancing a level); the raw sum is only ever the same-level starting point. Deliberately not touched here — this is live payment-processing code and any change to it needs someone with full checkout context, not a drive-by edit",
+  "src/app/api/admin/students/[id]/dossier/route.ts": "the returning-student deposit label is a level-scoped report, not authorization; the actual class lock uses access.depositCleared from the canonical access helper",
 };
 
 const CALL_PATTERN = /\bderiveStudentAccess\s*\(/;
