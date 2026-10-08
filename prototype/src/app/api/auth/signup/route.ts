@@ -26,6 +26,7 @@ import { openEnrolment } from "@/lib/student-enrolment";
 import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
 import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
+import { resolveSignupReferralAttribution } from "@/lib/referral-attribution";
 
 /**
  * Whether there is a Branch table to select from.
@@ -175,7 +176,6 @@ export async function POST(request: NextRequest) {
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
     const normalizedName = typeof name === "string" ? name.trim() : "";
     const normalizedPassword = typeof password === "string" ? password : "";
-    const normalizedReferralCode = typeof referralCodeInput === "string" ? referralCodeInput.trim().toUpperCase() : "";
     // Public signup creates students and nothing else.
     //
     // This route used to mint a LECTURER on request. The admin console showed
@@ -568,26 +568,15 @@ export async function POST(request: NextRequest) {
       );
     }
     const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
-    let referrerStudentId: string | null = null;
-    if (normalizedReferralCode) {
-      if (revivedUserId) {
-        return NextResponse.json(
-          { error: "Referral codes can only be applied to a new student registration." },
-          { status: 400, headers: buildCorsHeaders(request) },
-        );
-      }
-      const referrer = await prisma.student.findUnique({
-        where: { referralCode: normalizedReferralCode },
-        select: { id: true },
-      });
-      if (!referrer) {
-        return NextResponse.json(
-          { error: "That referral code was not found." },
-          { status: 400, headers: buildCorsHeaders(request) },
-        );
-      }
-      referrerStudentId = referrer.id;
-    }
+    const referralAttribution = await resolveSignupReferralAttribution(
+      referralCodeInput,
+      !revivedUserId,
+      (referralCode) =>
+        prisma.student.findUnique({
+          where: { referralCode },
+          select: { id: true },
+        }),
+    );
     if (revivedUserId) {
       await reviveDeletedAccount(revivedUserId);
     }
@@ -614,12 +603,12 @@ export async function POST(request: NextRequest) {
       ...studentFields,
       referralCode: `EW${crypto.randomBytes(8).toString("hex").toUpperCase()}`,
       profile: { create: studentFields.profile },
-      ...(referrerStudentId
+      ...(referralAttribution
         ? {
             referralReceived: {
               create: {
-                referralCode: normalizedReferralCode,
-                referrerStudent: { connect: { id: referrerStudentId } },
+                referralCode: referralAttribution.referralCode,
+                referrerStudent: { connect: { id: referralAttribution.referrerStudentId } },
                 tenantId: currentTenantId(),
               },
             },
