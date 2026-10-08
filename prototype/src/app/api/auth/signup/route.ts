@@ -159,6 +159,7 @@ export async function POST(request: NextRequest) {
       allowParentLogin,
       transportRoute,
       heardFrom,
+      referralCode: referralCodeInput,
       // Signup access proof — see the gate below. One of: a returning-student
       // token, a paid Paystack ref (new student), or a first-party invite
       // signature.
@@ -174,6 +175,7 @@ export async function POST(request: NextRequest) {
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
     const normalizedName = typeof name === "string" ? name.trim() : "";
     const normalizedPassword = typeof password === "string" ? password : "";
+    const normalizedReferralCode = typeof referralCodeInput === "string" ? referralCodeInput.trim().toUpperCase() : "";
     // Public signup creates students and nothing else.
     //
     // This route used to mint a LECTURER on request. The admin console showed
@@ -566,6 +568,26 @@ export async function POST(request: NextRequest) {
       );
     }
     const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
+    let referrerStudentId: string | null = null;
+    if (normalizedReferralCode) {
+      if (revivedUserId) {
+        return NextResponse.json(
+          { error: "Referral codes can only be applied to a new student registration." },
+          { status: 400, headers: buildCorsHeaders(request) },
+        );
+      }
+      const referrer = await prisma.student.findUnique({
+        where: { referralCode: normalizedReferralCode },
+        select: { id: true },
+      });
+      if (!referrer) {
+        return NextResponse.json(
+          { error: "That referral code was not found." },
+          { status: 400, headers: buildCorsHeaders(request) },
+        );
+      }
+      referrerStudentId = referrer.id;
+    }
     if (revivedUserId) {
       await reviveDeletedAccount(revivedUserId);
     }
@@ -587,6 +609,22 @@ export async function POST(request: NextRequest) {
       // `normalizedAdmission` already carries every field under the same key
       // names the parser's aliases expect, so this is a straight reread.
       profile: normalizeProfileInput(normalizedAdmission),
+    };
+    const studentCreateFields = {
+      ...studentFields,
+      referralCode: `EW${crypto.randomBytes(8).toString("hex").toUpperCase()}`,
+      profile: { create: studentFields.profile },
+      ...(referrerStudentId
+        ? {
+            referralReceived: {
+              create: {
+                referralCode: normalizedReferralCode,
+                referrerStudent: { connect: { id: referrerStudentId } },
+                tenantId: currentTenantId(),
+              },
+            },
+          }
+        : {}),
     };
 
     let user;
@@ -610,7 +648,7 @@ export async function POST(request: NextRequest) {
               ...userFields,
               student: {
                 upsert: {
-                  create: ({ ...studentFields, profile: { create: studentFields.profile } } as any),
+                  create: (studentCreateFields as any),
                   update: ({
                     ...studentFields,
                     profile: { upsert: { create: studentFields.profile, update: studentFields.profile } },
@@ -623,7 +661,7 @@ export async function POST(request: NextRequest) {
             data: {
               ...userFields,
               student: {
-                create: ({ ...studentFields, profile: { create: studentFields.profile } } as any),
+                create: (studentCreateFields as any),
               },
             },
           });
