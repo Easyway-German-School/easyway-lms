@@ -161,10 +161,10 @@ export async function loadStudentLedger(studentId: string, now: Date = new Date(
     }),
     prisma.payment.findMany({
       where: { studentId, ...receivedPaymentFilter() },
-      select: { amount: true },
+      select: { amount: true, level: true, description: true, createdAt: true },
     }),
   ]);
 
   const paid = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-  return buildLedger(charges, paid, now);
+  return buildLedger(charges, paid, now, payments);
 }

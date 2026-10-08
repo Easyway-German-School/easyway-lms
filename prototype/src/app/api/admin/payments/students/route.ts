@@ -152,7 +152,7 @@ export async function GET(request: Request) {
         }),
         prisma.payment.findMany({
           where: { studentId: { in: ids }, ...receivedPaymentFilter() },
-          select: { studentId: true, amount: true },
+          select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
         }),
       ])
     : [[], []];
@@ -163,16 +163,20 @@ export async function GET(request: Request) {
     list.push(charge);
     chargesByStudent.set(charge.studentId, list);
   }
-  const paidByStudent = new Map<string, number>();
+  const paymentsByStudent = new Map<string, typeof payments>();
   for (const payment of payments) {
-    paidByStudent.set(payment.studentId, (paidByStudent.get(payment.studentId) ?? 0) + payment.amount);
+    const list = paymentsByStudent.get(payment.studentId) ?? [];
+    list.push(payment);
+    paymentsByStudent.set(payment.studentId, list);
   }
 
   const intake = defaultCurrentIntake();
   const intakeLabel = `${intake.month} ${intake.year}`;
 
   const students: PaymentStudentCard[] = rows.map((row) => {
-    const ledger = buildLedger(chargesByStudent.get(row.id) ?? [], paidByStudent.get(row.id) ?? 0);
+    const studentPayments = paymentsByStudent.get(row.id) ?? [];
+    const paid = studentPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    const ledger = buildLedger(chargesByStudent.get(row.id) ?? [], paid, undefined, studentPayments);
     const currentBatchMonth =
       row.enrolments.find((enrolment) => enrolment.outcome === "ongoing")?.batchMonth ??
       batchFromAdmission(row.admission);

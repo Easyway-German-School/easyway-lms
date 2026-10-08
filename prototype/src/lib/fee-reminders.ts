@@ -68,7 +68,10 @@ export async function sendDueFeeReminders(options: {
             where: { deletedAt: null },
             select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
           },
-          payments: { where: receivedPaymentFilter(), select: { amount: true } },
+          payments: {
+            where: receivedPaymentFilter(),
+            select: { amount: true, level: true, description: true, createdAt: true },
+          },
         },
       },
       payments: { where: receivedPaymentFilter() },
@@ -120,7 +123,7 @@ export async function sendDueFeeReminders(options: {
       // onto the oldest still-open GO-FORWARD charge and reports what is owed
       // across every level rather than just this invoice.
       const studentPaid = (student.payments || []).reduce((sum, p) => sum + p.amount, 0);
-      const ledger = buildLedger(student.tuitionCharges ?? [], studentPaid, new Date(now));
+      const ledger = buildLedger(student.tuitionCharges ?? [], studentPaid, new Date(now), student.payments);
       const hasLedger = ledgerIsPopulated(ledger);
 
       // The date portal access pauses for an unsettled balance — 30 days after

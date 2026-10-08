@@ -264,6 +264,7 @@ async function handlePOST(request: Request) {
     if (student.tenantId) setTenantScope(student.tenantId);
 
     const paymentReference = String(data.reference || "");
+    const paymentLevel = String(metadata.level || metadata.targetLevel || "").trim().toUpperCase();
 
     // Enrolment deliberately does NOT run before this point. It used to: an
     // unguarded upsert sat directly above, and a pathway id with no matching
@@ -292,6 +293,7 @@ async function handlePOST(request: Request) {
           currency: "NGN",
           method: "paystack",
           description: getPaymentDescription(effectivePaymentType, pathwayName),
+          ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
           paymentIntentId: paymentReference,
         },
       });
@@ -362,6 +364,7 @@ async function handlePOST(request: Request) {
         status: settledStatus,
         method: "paystack",
         description: getPaymentDescription(effectivePaymentType, pathwayName),
+        ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
         stripeSessionId: paymentReference,
         paymentIntentId: paymentReference,
       },

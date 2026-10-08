@@ -149,7 +149,10 @@ async function withOpenBalances(candidates: Candidate[]): Promise<Array<Candidat
           settledAt: true,
         },
       },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      payments: {
+        where: receivedPaymentFilter(),
+        select: { amount: true, level: true, description: true, createdAt: true },
+      },
     },
   });
 
@@ -160,7 +163,7 @@ async function withOpenBalances(candidates: Candidate[]): Promise<Array<Candidat
     const student = byStudent.get(candidate.studentId);
     if (!student) continue;
     const totalReceived = student.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-    const ledger = buildLedger(student.tuitionCharges as LedgerChargeInput[], totalReceived);
+    const ledger = buildLedger(student.tuitionCharges as LedgerChargeInput[], totalReceived, undefined, student.payments);
     const line = ledger.lines.find((l) => l.chargeId === candidate.chargeId);
     // Settled (or gone) — history, not a bill to reopen.
     if (!line || line.outstanding <= 0) continue;

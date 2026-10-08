@@ -1,5 +1,5 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
-import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
+import { buildLedger, type LedgerChargeInput, type LedgerPaymentInput } from "@/lib/finance/ledger";
 import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 import type { IntakeStartDayOverrides } from "@/lib/intake";
 
@@ -240,6 +240,7 @@ export function deriveStudentAccess({
   classType,
   level,
   charges,
+  payments,
   flatDeposit = false,
   classesStartedAt,
   enrolledAt,
@@ -258,6 +259,8 @@ export function deriveStudentAccess({
   level?: string | null;
   /** The student's TuitionCharge rows. When present, the ledger drives the gate. */
   charges?: LedgerChargeInput[] | null;
+  /** Received tuition transactions; level stamps keep payment intent with its charge. */
+  payments?: LedgerPaymentInput[] | null;
   /**
    * `requiredDeposit` is a FLAT FLOOR, not 60% of the fee — use it verbatim as
    * the deposit gate even when the ledger is driving, instead of recomputing
@@ -293,7 +296,7 @@ export function deriveStudentAccess({
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
   const deposit = Math.max(0, Math.round(Number(requiredDeposit) || 0));
 
-  const ledger = charges && charges.length ? buildLedger(charges, paid, now) : null;
+  const ledger = charges && charges.length ? buildLedger(charges, paid, now, payments ?? undefined) : null;
   const currentLevelKey = String(level ?? "").trim().toUpperCase();
   const currentLine = ledger && currentLevelKey
     ? ledger.lines.find((line) => line.level.toUpperCase() === currentLevelKey) ?? null

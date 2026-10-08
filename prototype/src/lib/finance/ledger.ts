@@ -1,4 +1,5 @@
 import { LEVELS } from "@/lib/levels";
+import { resolvePaymentLevel } from "@/lib/payment-level";
 
 /**
  * THE ONE PLACE PAYMENTS ARE RECONCILED AGAINST CHARGES.
@@ -60,6 +61,13 @@ export type LedgerChargeInput = {
   settledAt?: Date | string | null;
 };
 
+export type LedgerPaymentInput = {
+  amount: number;
+  level?: string | null;
+  description?: string | null;
+  createdAt?: Date | string | null;
+};
+
 export type LedgerLine = {
   chargeId: string;
   level: string;
@@ -115,12 +123,16 @@ export type Ledger = {
  *
  * `charges` may arrive in any order and may include soft-deleted rows filtered
  * out by the caller's `where`; this sorts what it is given by `createdAt` (then
- * ladder position) and walks it greedily.
+ * ladder position). Unlabelled payments are applied oldest-charge-first.
+ * Payments stamped for a level are applied to that level first, then any
+ * remainder flows FIFO. This preserves the customer's stated payment intent
+ * without changing the treatment of historical, unlabelled transactions.
  */
 export function buildLedger(
   charges: LedgerChargeInput[],
   totalPaid: number,
   now: Date = new Date(),
+  paymentDetails?: LedgerPaymentInput[],
 ): Ledger {
   const nowMs = now.getTime();
 
@@ -131,16 +143,11 @@ export function buildLedger(
     return ladderIndex(a.level) - ladderIndex(b.level);
   });
 
-  let remaining = toWholeNaira(totalPaid);
-  const paid = remaining;
-
+  const paid = toWholeNaira(totalPaid);
   const lines: LedgerLine[] = ordered.map((charge) => {
     const amount = toWholeNaira(charge.amount);
     const waived = Math.min(amount, toWholeNaira(charge.waivedAmount));
     const net = Math.max(0, amount - waived);
-    const allocated = Math.min(remaining, net);
-    remaining -= allocated;
-    const outstanding = net - allocated;
     const created = toDate(charge.createdAt);
     const ageDays = created ? Math.max(0, Math.floor((nowMs - created.getTime()) / DAY_MS)) : 0;
 
@@ -150,14 +157,53 @@ export function buildLedger(
       amount,
       waived,
       net,
-      allocated,
-      outstanding,
-      settled: outstanding === 0,
+      allocated: 0,
+      outstanding: net,
+      settled: net === 0,
       legacyArrears: Boolean(charge.legacyArrears),
       createdAt: created ? created.toISOString() : new Date(0).toISOString(),
       ageDays,
     };
   });
+
+  const allocate = (indices: number[], amount: number): number => {
+    let remaining = amount;
+    for (const index of indices) {
+      const line = lines[index];
+      const allocated = Math.min(remaining, line.outstanding);
+      line.allocated += allocated;
+      line.outstanding -= allocated;
+      line.settled = line.outstanding === 0;
+      remaining -= allocated;
+      if (remaining === 0) break;
+    }
+    return remaining;
+  };
+
+  const fifoIndices = lines.map((_, index) => index);
+  let remaining = paid;
+  if (paymentDetails) {
+    const chronological = [...paymentDetails].sort((a, b) => {
+      const at = toDate(a.createdAt)?.getTime() ?? 0;
+      const bt = toDate(b.createdAt)?.getTime() ?? 0;
+      return at - bt;
+    });
+    for (const payment of chronological) {
+      if (remaining <= 0) break;
+      const amount = Math.min(remaining, toWholeNaira(payment.amount));
+      remaining -= amount;
+      const level = resolvePaymentLevel({
+        stamped: payment.level,
+        description: payment.description,
+      });
+      const matchingIndices = level
+        ? lines.flatMap((line, index) => line.level.toUpperCase() === level ? [index] : [])
+        : [];
+      const afterLevel = allocate(matchingIndices, amount);
+      allocate(fifoIndices, afterLevel);
+    }
+  }
+  remaining = allocate(fifoIndices, remaining);
 
   const lifetimeCharged = lines.reduce((sum, line) => sum + line.net, 0);
   const lifetimeAllocated = lines.reduce((sum, line) => sum + line.allocated, 0);
