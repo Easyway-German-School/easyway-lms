@@ -208,13 +208,14 @@ async function persistIncident(input: IncidentInput, fingerprint: string, messag
     return;
   }
 
+  const severity = input.severity ?? severityFor(input);
   try {
     await guardedPrisma.incident.create({
       data: {
         fingerprint,
         kind: input.kind,
         source: input.source,
-        severity: input.severity ?? severityFor(input),
+        severity,
         title: titleOf({ ...input, message }),
         message,
         stack: input.stack ? scrub(input.stack).slice(0, 4000) : null,
@@ -230,6 +231,24 @@ async function persistIncident(input: IncidentInput, fingerprint: string, messag
         lastSeenAt: at,
       },
     });
+    if (severity === "high" || severity === "critical") {
+      try {
+        const { KIND, notify } = await import("@/lib/notify");
+        await notify({
+          to: { audience: "admin", capability: "security" },
+          kind: KIND.missionControlIncident,
+          severity: severity === "critical" ? "critical" : "warning",
+          title: `${severity === "critical" ? "Critical" : "High"} Mission Control incident`,
+          message: `${input.kind} incident on ${input.route ?? "the platform"}: ${message.slice(0, 180)}`,
+          link: "/admin/developer",
+          dedupeKey: `mission-control:${fingerprint}`,
+          push: true,
+          email: false,
+        });
+      } catch (error) {
+        console.warn("[incidents] could not notify Mission Control admins:", error);
+      }
+    }
   } catch (error) {
     // Two isolates raced to create the same fingerprint; the loser just counts.
     if ((error as { code?: string })?.code === "P2002") {

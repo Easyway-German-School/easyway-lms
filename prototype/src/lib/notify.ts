@@ -126,9 +126,9 @@ export type NotifyInput = {
   push?: boolean;
   /**
    * What replaces what on the lock screen. Pushes sharing a tag collapse into
-   * one entry. Defaults to the kind, which is right for "your streak ends
-   * today" but wrong for "Ada challenged you" followed by "Bola challenged
-   * you" — those must not overwrite each other, so Campus gives each its own.
+   * one entry. By default each notification batch gets its own tag, so two
+   * unrelated events of the same kind do not replace each other. Use an
+   * explicit tag only when successive notifications belong in one thread.
    */
   pushTag?: string;
   /**
@@ -395,7 +395,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
         title: input.title,
         body: input.message,
         url: link ?? undefined,
-        tag: input.pushTag ?? kind,
+        tag: input.pushTag ?? batchId,
       });
       pushed = result.sent;
     } catch (error) {
