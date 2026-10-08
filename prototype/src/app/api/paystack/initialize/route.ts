@@ -14,7 +14,7 @@ import {
 } from "@/lib/payment";
 import { nextLevelAfter } from "@/lib/levels";
 import { signOffForCheckout } from "@/lib/graduation-server";
-import { loadStudentLedger } from "@/lib/tuition-charges";
+import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 /**
@@ -204,6 +204,20 @@ export async function POST(request: Request) {
       );
     }
 
+    if (requestedStage !== "registration") {
+      const charge = await ensureChargeForLevel({
+        studentId: studentRecord.id,
+        level: billingLevel,
+        origin: forNextLevel ? "next_level_payment" : "signup",
+      });
+      if (!charge) {
+        return NextResponse.json(
+          { error: `We couldn't prepare the ${billingLevel} tuition balance. No payment has been started; please try again or contact your branch office.` },
+          { status: 503 },
+        );
+      }
+    }
+
     // What is genuinely still owed at each stage — never more, so a student who
     // has already deposited is charged the balance instead of the whole fee again.
     //
@@ -363,6 +377,7 @@ export async function POST(request: Request) {
           paymentStage: effectivePaymentType,
           forNextLevel: forNextLevel ? "true" : "false",
           targetLevel: billingLevel,
+          level: billingLevel,
         },
       }),
     });

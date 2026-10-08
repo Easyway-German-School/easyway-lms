@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     const payments = ids.length
       ? await prisma.payment.findMany({
           where: { studentId: { in: ids }, ...receivedPaymentFilter() },
-          select: { studentId: true, amount: true },
+        select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
         })
       : [];
     const chargesByStudent = new Map<string, typeof charges>();
@@ -64,9 +64,11 @@ export async function GET(req: NextRequest) {
       list.push(charge);
       chargesByStudent.set(charge.studentId, list);
     }
-    const paidByStudent = new Map<string, number>();
+    const paymentsByStudent = new Map<string, typeof payments>();
     for (const payment of payments) {
-      paidByStudent.set(payment.studentId, (paidByStudent.get(payment.studentId) ?? 0) + (payment.amount || 0));
+      const list = paymentsByStudent.get(payment.studentId) ?? [];
+      list.push(payment);
+      paymentsByStudent.set(payment.studentId, list);
     }
 
     const enriched = candidates.map((candidate) => {
@@ -74,9 +76,13 @@ export async function GET(req: NextRequest) {
       const courseworkAverage = weightedCourseworkAverage(
         marks ? [...marks.entries()].map(([type, score]) => ({ type, score })) : [],
       );
+      const studentPayments = paymentsByStudent.get(candidate.studentId) ?? [];
+      const paid = studentPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
       const ledger = buildLedger(
         chargesByStudent.get(candidate.studentId) ?? [],
-        paidByStudent.get(candidate.studentId) ?? 0,
+        paid,
+        undefined,
+        studentPayments,
       );
       // What blocks a promotion: owed on a level the student has already been in
       // (not the level they'd move into), legacy arrears excluded.

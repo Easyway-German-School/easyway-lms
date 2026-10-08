@@ -193,7 +193,10 @@ export async function issueCertificateForStudent(
         orderBy: { createdAt: "desc" },
         select: { score: true, type: true },
       },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      payments: {
+        where: receivedPaymentFilter(),
+        select: { amount: true, level: true, description: true, createdAt: true },
+      },
       tuitionCharges: {
         where: { deletedAt: null },
         select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
@@ -212,7 +215,7 @@ export async function issueCertificateForStudent(
 
   const feeLookup = { level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now);
+  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now, student.payments);
 
   const eligibility = certificateEligibility({
     batch,

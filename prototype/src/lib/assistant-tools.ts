@@ -1751,7 +1751,10 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
               settledAt: true,
             },
           },
-          payments: { where: receivedPaymentFilter(), select: { amount: true } },
+          payments: {
+            where: receivedPaymentFilter(),
+            select: { amount: true, level: true, description: true, createdAt: true },
+          },
         },
       });
 
@@ -1760,7 +1763,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       let totalOutstanding = 0;
       for (const student of students) {
         const paid = student.payments.reduce((t, p) => t + (p.amount ?? 0), 0);
-        const ledger = buildLedger(student.tuitionCharges, paid);
+        const ledger = buildLedger(student.tuitionCharges, paid, undefined, student.payments);
         for (const line of ledger.lines) {
           const bucket = (byLevel[line.level] ??= { charged: 0, outstanding: 0, legacyOutstanding: 0 });
           bucket.charged += line.net;

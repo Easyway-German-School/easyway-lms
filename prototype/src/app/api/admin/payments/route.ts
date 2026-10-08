@@ -97,11 +97,6 @@ export async function POST(request: Request) {
         );
       }
       paymentLevel = next;
-      try {
-        await ensureChargeForLevel({ studentId, level: next, origin: "next_level_payment" });
-      } catch (chargeError) {
-        console.error("Manual next-level payment: charge create failed", { studentId, next, chargeError });
-      }
     } else if (!paymentLevel && !isRegistrationFeePayment(descriptionRaw || null)) {
       paymentLevel = levelFromDescription(descriptionRaw) || student.level;
     }
@@ -109,6 +104,21 @@ export async function POST(request: Request) {
     const description =
       descriptionRaw ||
       (forNextLevel ? `${paymentLevel} tuition — next level` : `${paymentLevel} tuition`);
+
+    const charge = paymentLevel && !isRegistrationFeePayment(description)
+      ? await ensureChargeForLevel({
+          studentId,
+          level: paymentLevel,
+          origin: forNextLevel ? "next_level_payment" : "admin",
+        })
+      : null;
+    const chargeReady = !paymentLevel || isRegistrationFeePayment(description) || Boolean(charge);
+    if (!chargeReady) {
+      return NextResponse.json(
+        { error: `Could not prepare the ${paymentLevel} tuition balance, so the payment was not recorded. Please retry or contact support.` },
+        { status: 503 },
+      );
+    }
 
     const payment = await prisma.payment.create({
       data: {
@@ -182,6 +192,10 @@ export async function POST(request: Request) {
         notice =
           `Recorded. ${who} has met the ${currentLevel} deposit — their classes are unlocked. ` +
           `If their portal still shows a lock it is the missing-photo step, which only they can clear from their profile.`;
+      } else if (access?.depositCleared) {
+        notice = access.lockReason === "upcoming_batch"
+          ? `Recorded. ${who}'s ${currentLevel} deposit is met, but classes stay locked until their batch opens.`
+          : `Recorded. ${who}'s ${currentLevel} deposit is met, but classes stay locked until the remaining balance is paid (or unlocked at the desk).`;
       } else if (billedLevel && billedLevel !== currentLevel) {
         notice = `Recorded as ${billedLevel} tuition. ${who} is in ${currentLevel} and that level stays locked until its own deposit is recorded.`;
       } else {

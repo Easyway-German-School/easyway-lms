@@ -192,6 +192,84 @@ describe("deriveStudentAccess — August money must not open October", () => {
     expect(access.outstanding).toBe(93_000);
   });
 
+  it("opens B1 access when its payment clears the deposit and older debt is legacy arrears", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 180_000,
+      tuitionFee: 180_000,
+      requiredDeposit: 108_000,
+      level: "B1",
+      charges: [
+        {
+          id: "a2",
+          level: "A2",
+          amount: 180_000,
+          legacyArrears: true,
+          createdAt: daysAgo(60),
+        },
+        {
+          id: "b1",
+          level: "B1",
+          amount: 180_000,
+          legacyArrears: false,
+          createdAt: daysAgo(10),
+        },
+      ],
+      payments: [
+        {
+          amount: 180_000,
+          level: "B1",
+          description: "Tuition payment (recorded by office)",
+          createdAt: daysAgo(1),
+        },
+      ],
+      now: NOW,
+    });
+
+    expect(access.hasAccess).toBe(true);
+    expect(access.depositCleared).toBe(true);
+    expect(access.totalPaid).toBe(180_000);
+    expect(access.outstandingBalance).toBe(0);
+  });
+
+  it("reports B1 deposit met when older go-forward debt still locks portal access", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 180_000,
+      tuitionFee: 180_000,
+      requiredDeposit: 108_000,
+      level: "B1",
+      charges: [
+        {
+          id: "a2",
+          level: "A2",
+          amount: 180_000,
+          legacyArrears: false,
+          createdAt: daysAgo(60),
+        },
+        {
+          id: "b1",
+          level: "B1",
+          amount: 180_000,
+          legacyArrears: false,
+          createdAt: daysAgo(10),
+        },
+      ],
+      payments: [
+        {
+          amount: 180_000,
+          level: "B1",
+          description: "Tuition payment (recorded by office)",
+          createdAt: daysAgo(1),
+        },
+      ],
+      now: NOW,
+    });
+
+    expect(access.depositCleared).toBe(true);
+    expect(access.hasAccess).toBe(false);
+    expect(access.lockReason).toBe("unsettled_balance");
+    expect(access.outstandingBalance).toBe(180_000);
+  });
+
   it("keeps A2 locked even when an A2 charge exists and FIFO already sat the A1 fee", () => {
     const access = deriveStudentAccess({
       totalPaid: 155_000,

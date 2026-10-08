@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess, type StudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
+import {
+  isReceivedPayment,
+  isRegistrationFeePayment,
+  requiredDepositFor,
+  tuitionFeeFor,
+  receivedPaymentFilter,
+  isTravelPackagePathway,
+} from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { isOnlineBranch } from "@/lib/online-branch";
 import type { LedgerChargeInput } from "@/lib/finance/ledger";
@@ -32,7 +39,10 @@ export const STUDENT_ACCESS_SELECT = {
   // column was never set (an import, a half-filled add-student form) must
   // still be treated as online below — the branch having no campus is the tell.
   branch: { select: { name: true, mode: true } },
-  payments: { where: receivedPaymentFilter(), select: { amount: true } },
+  payments: {
+    where: receivedPaymentFilter(),
+    select: { amount: true, level: true, description: true, status: true, createdAt: true },
+  },
   tuitionCharges: {
     where: { deletedAt: null },
     select: {
@@ -62,7 +72,13 @@ export type StudentAccessFields = {
    */
   admission: unknown;
   branch: { name: string | null; mode?: string | null } | null;
-  payments: Array<{ amount: number }>;
+  payments: Array<{
+    amount: number;
+    level?: string | null;
+    description?: string | null;
+    status?: string | null;
+    createdAt?: Date | string | null;
+  }>;
   tuitionCharges: LedgerChargeInput[];
   tenantId?: string | null;
 };
@@ -90,7 +106,12 @@ export function accessFromStudent(
   paymentPlanOnTrack = false,
   startDayOverrides?: IntakeStartDayOverrides,
 ): StudentAccess {
-  const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const receivedTuitionPayments = student.payments.filter(
+    (payment) =>
+      (payment.status == null || isReceivedPayment(payment.status)) &&
+      !isRegistrationFeePayment(payment.description),
+  );
+  const totalPaid = receivedTuitionPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const feeLookup = {
     level: student.level,
     branch: student.branch?.name ?? null,
@@ -111,6 +132,7 @@ export function accessFromStudent(
     classType: student.classType,
     level: student.level,
     charges: student.tuitionCharges,
+    payments: receivedTuitionPayments,
     flatDeposit: isTravelPackagePathway(student.pathway),
     classesStartedAt: student.classesStartedAt,
     enrolledAt: student.createdAt,
