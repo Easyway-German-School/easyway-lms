@@ -6,6 +6,7 @@ import { verdictKeyLabel } from "@/lib/portal-verdict";
 import BackendMap from "./BackendMap";
 import DiagnosePanel, { type DiagnoseTarget } from "./DiagnosePanel";
 import PatternsPanel from "./PatternsPanel";
+import RecoveryPanel from "./RecoveryPanel";
 import Sparkline from "./Sparkline";
 
 /* ------------------------------------------------------------------------ */
@@ -67,7 +68,7 @@ function whoIsAffected(info: IncidentDetail): DiagnoseTarget {
   return info.userId ? { userId: info.userId } : null;
 }
 
-type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns";
+type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns" | "recovery";
 
 const SEVERITY = {
   critical: { dot: "bg-red-500", text: "text-red-500", label: "Critical" },
@@ -115,6 +116,7 @@ function IncidentList({
   limit,
   expandId,
   onDiagnose,
+  onFindSimilar,
   compact,
 }: {
   kind?: string;
@@ -122,6 +124,7 @@ function IncidentList({
   expandId?: string | null;
   compact?: boolean;
   onDiagnose?: (target: NonNullable<DiagnoseTarget>) => void;
+  onFindSimilar?: (description: string) => void;
 }) {
   const [status, setStatus] = useState<"active" | "resolved" | "ignored" | "all">("active");
   const [kindFilter, setKindFilter] = useState(kind ?? "");
@@ -275,6 +278,15 @@ function IncidentList({
                             className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-semibold text-white"
                           >
                             Diagnose the student this is about →
+                          </button>
+                        )}
+                        {onFindSimilar && (
+                          <button
+                            type="button"
+                            onClick={() => onFindSimilar([row.title, info.message, row.route].filter(Boolean).join(" ").slice(0, 500))}
+                            className="rounded-lg border border-[var(--border)] px-3 py-1.5 font-semibold"
+                          >
+                            Search similar past fixes →
                           </button>
                         )}
                       </>
@@ -541,12 +553,14 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "access", label: "Access drift" },
   { id: "map", label: "Backend map" },
   { id: "patterns", label: "Patterns" },
+  { id: "recovery", label: "Recovery library" },
 ];
 
 export default function MissionControl() {
   const [tab, setTab] = useState<Tab>("overview");
   const [expand, setExpand] = useState<string | null>(null);
   const [diagnoseTarget, setDiagnoseTarget] = useState<DiagnoseTarget>(null);
+  const [recoveryRequest, setRecoveryRequest] = useState<{ text: string; id: number } | null>(null);
 
   // A complaint or drift incident hands its student to the Diagnose tab in one click.
   const diagnoseWho = useMemo(
@@ -562,6 +576,14 @@ export default function MissionControl() {
     () => (id: string) => {
       setExpand(id);
       setTab("incidents");
+    },
+    [],
+  );
+
+  const findSimilar = useMemo(
+    () => (text: string) => {
+      setRecoveryRequest({ text, id: Date.now() });
+      setTab("recovery");
     },
     [],
   );
@@ -599,11 +621,18 @@ export default function MissionControl() {
       </nav>
 
       {tab === "overview" && <OverviewPanel onOpenIncident={openIncident} />}
-      {tab === "incidents" && <IncidentList expandId={expand} onDiagnose={diagnoseWho} />}
+      {tab === "incidents" && <IncidentList expandId={expand} onDiagnose={diagnoseWho} onFindSimilar={findSimilar} />}
       {tab === "diagnose" && <DiagnosePanel target={diagnoseTarget} onTargetUsed={clearTarget} />}
       {tab === "access" && <AccessPanel onDiagnose={diagnoseWho} />}
       {tab === "map" && <BackendMap />}
       {tab === "patterns" && <PatternsTab />}
+      {tab === "recovery" && (
+        <RecoveryPanel
+          key={recoveryRequest?.id ?? 0}
+          initialQuery={recoveryRequest?.text ?? ""}
+          onOpenIncident={openIncident}
+        />
+      )}
     </div>
   );
 }
