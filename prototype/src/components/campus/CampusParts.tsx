@@ -86,6 +86,7 @@ export function CampusRoomCard({
   more,
   tall = false,
   href,
+  onSelect,
   destinationLabel,
 }: {
   room: RoomDef;
@@ -94,23 +95,25 @@ export function CampusRoomCard({
   more: number;
   tall?: boolean;
   href?: string;
+  onSelect?: () => void;
   destinationLabel?: string;
 }) {
   const tint = ROOM_TINT[room.id] ?? ROOM_TINT.library;
   const isCampusRoomOpen = room.open;
+  const interactive = Boolean(href || onSelect);
   const body = (
     <motion.div
-      whileHover={href ? { y: -5, scale: 1.02 } : undefined}
-      whileTap={href ? { scale: 0.97 } : undefined}
+      whileHover={interactive ? { y: -5, scale: 1.02 } : undefined}
+      whileTap={interactive ? { scale: 0.97 } : undefined}
       transition={youthSpring}
       className={`youth-room relative flex h-full flex-col justify-between rounded-[1.75rem] p-5 ${
         tall ? "min-h-[12rem] sm:min-h-[14rem]" : "min-h-[9.5rem]"
-      } ${isCampusRoomOpen && count > 0 ? "youth-room-live" : ""} ${href ? "" : "opacity-70"}`}
+      } ${isCampusRoomOpen && count > 0 ? "youth-room-live" : ""} ${interactive ? "" : "opacity-70"}`}
       style={{ background: tint.bg, color: tint.ink }}
     >
       <div className="flex items-start justify-between">
         <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/60">{tint.icon}</span>
-        {!href ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
+        {!interactive ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
       </div>
       <div>
         <p className="text-base font-extrabold leading-tight">{room.name}</p>
@@ -119,17 +122,26 @@ export function CampusRoomCard({
           <div className="mt-2 space-y-1.5">
             <span className="inline-flex items-center gap-1.5 text-xs font-bold">
               <span className={`h-2 w-2 rounded-full ${count > 0 ? "youth-glow bg-emerald-500" : "bg-black/20"}`} />
-              {count > 0 ? `${count} here` : href ? "Be the first" : "Empty"}
+              {count > 0 ? `${count} here` : onSelect ? "Empty right now" : href ? "Be the first" : "Empty"}
             </span>
             <div className="min-h-[24px]">
               <FaceRow people={people} more={more} size={24} />
             </div>
           </div>
-        ) : href ? <span className="mt-2 inline-flex text-xs font-extrabold">{destinationLabel} →</span> : null}
+        ) : interactive ? <span className="mt-2 inline-flex text-xs font-extrabold">{destinationLabel ?? "Opening soon"} →</span> : null}
       </div>
     </motion.div>
   );
-  return href ? (
+  return onSelect ? (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="block h-full w-full rounded-[1.75rem] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+      aria-label={`Preview ${room.name}${room.open ? "" : ", not yet open to students"}`}
+    >
+      {body}
+    </button>
+  ) : href ? (
     <Link
       href={href}
       className="block h-full rounded-[1.75rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
