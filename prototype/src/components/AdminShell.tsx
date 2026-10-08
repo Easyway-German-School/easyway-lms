@@ -86,7 +86,6 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <DashboardIcon />, group: 'Main' },
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
-  { label: 'Referrals', href: '/admin/referrals', icon: <UserPlusIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
   { label: 'Issue logins', href: '/admin/students/issue-logins', icon: <UserPlusIcon />, group: 'Academics' },
   // The relocation track — its own console because ₦980,000 walk-in
@@ -144,6 +143,7 @@ const navItems: NavItem[] = [
   // transaction list is what you open from it rather than the other way round.
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
+  { label: 'Referrals', href: '/admin/referrals', icon: <UserPlusIcon />, group: 'Billing' },
   { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
   // Money going OUT to tutors — its own capability, separate from `payments`
   // (money coming in from students). See the note in admin-roles.ts.
