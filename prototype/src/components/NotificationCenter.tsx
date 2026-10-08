@@ -417,7 +417,7 @@ export default function NotificationCenter({
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-[var(--foreground)]">Get alerts on this device</p>
                         <p className="mt-0.5 text-[11px] leading-4 text-[var(--muted)]">
-                          Receive class, material and account notifications when the portal is closed.
+                          Receive important school and account updates when the portal is closed.
                         </p>
                       </div>
                       {push.permission === "denied" ? (

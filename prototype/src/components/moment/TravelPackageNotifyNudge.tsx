@@ -98,11 +98,10 @@ export default function TravelPackageNotifyNudge() {
   if (!open || !reply || typeof document === "undefined") return null;
 
   const accept = async () => {
-    await enable();
+    const enabled = await enable();
+    if (!enabled) return;
     recordAsk();
     setJustEnabled(true);
-    // If the browser prompt was blocked, `enabled` stays false and `error`
-    // carries the reason — the modal shows it rather than a false success.
   };
 
   const dismiss = (days: number) => {

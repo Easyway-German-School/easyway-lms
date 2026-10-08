@@ -605,6 +605,18 @@ export function announceLiveSession(session: LiveSessionRow, opts: { studentIds?
     push: true,
     emailBody: `${tutor} started ${session.title}.\n\nJoin from the portal, or enter the code ${session.joinCode} at the live class page.`,
   });
+
+  notifyInBackground({
+    to: { audience: "admin", capability: "classes" },
+    kind: KIND.classStarting,
+    severity: "info",
+    title: `Live class started: ${session.title}`,
+    message: `${session.lecturerName ?? "A tutor"} started a live class for ${session.level} (${session.sessionSlot}).`,
+    link: "/admin/live",
+    dedupeKey: `live-start-admin:${session.id}`,
+    push: true,
+    email: false,
+  });
 }
 
 /**

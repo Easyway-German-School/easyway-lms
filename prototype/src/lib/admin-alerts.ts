@@ -127,3 +127,26 @@ export async function notifyAdminsOfRegistration(input: RegistrationAlert): Prom
     console.error("Could not queue admin registration alert:", error);
   }
 }
+
+/** Alert the office when a prospective student submits a new enquiry. */
+export async function notifyAdminsOfLead(input: {
+  leadId: string;
+  name: string;
+  interestedLevel: string | null;
+  source: string;
+}): Promise<void> {
+  try {
+    await notify({
+      to: { audience: "admin", capability: "students" },
+      kind: KIND.leadCaptured,
+      severity: "info",
+      title: `New enquiry: ${input.name}`,
+      message: `${input.name} is interested in ${input.interestedLevel ?? "German classes"} (${input.source}).`,
+      link: "/admin/leads",
+      dedupeKey: `lead-captured:${input.leadId}`,
+      push: true,
+    });
+  } catch (error) {
+    console.error("Could not raise admin enquiry notification:", error);
+  }
+}
