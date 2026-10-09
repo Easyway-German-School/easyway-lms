@@ -4,6 +4,7 @@ import { Fragment, Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
+import { paymentLevelsForStudent } from "@/lib/payment-level";
 
 /**
  * AMOUNTS ARE WHOLE NAIRA.
@@ -612,18 +613,19 @@ function PaymentsLedger() {
                   value={paymentLevel}
                   onChange={(event) => {
                     setPaymentLevel(event.target.value);
-                    if (picked && event.target.value && event.target.value !== picked.level) {
-                      setForNextLevel(event.target.value === picked.nextLevel);
-                    } else {
-                      setForNextLevel(false);
-                    }
+                    setForNextLevel(Boolean(picked?.nextLevel && event.target.value === picked.nextLevel));
                   }}
+                  disabled={!picked}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="">Current level</option>
-                  {LEVELS.map((level) => (
-                    <option key={level} value={level}>{level}</option>
-                  ))}
+                  {!picked ? <option value="">Select a student first</option> : null}
+                  {picked
+                    ? paymentLevelsForStudent(picked.level).map((level) => (
+                        <option key={level} value={level}>
+                          {level}{level === picked.level ? " (current)" : level === picked.nextLevel ? " (next level)" : ""}
+                        </option>
+                      ))
+                    : null}
                 </select>
               </label>
               <label className="space-y-2 text-sm">

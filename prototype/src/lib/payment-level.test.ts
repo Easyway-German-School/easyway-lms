@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
+  isPaymentLevelAllowedForStudent,
   isReturningLevelStudent,
   levelFromDescription,
+  paymentLevelsForStudent,
   paymentCountsTowardLevel,
   resolvePaymentLevel,
   sumPaidTowardLevel,
 } from "./payment-level";
+
+describe("payment levels available to the payments desk", () => {
+  it("includes reached levels, the current level, and only the immediate next level", () => {
+    expect(paymentLevelsForStudent("A1")).toEqual(["A1", "A2"]);
+    expect(paymentLevelsForStudent("B1")).toEqual(["A1", "A2", "B1", "B2"]);
+  });
+
+  it("allows a next-level payment only when it is explicitly marked as such", () => {
+    expect(isPaymentLevelAllowedForStudent({ currentLevel: "A1", paymentLevel: "A1", forNextLevel: false })).toBe(true);
+    expect(isPaymentLevelAllowedForStudent({ currentLevel: "A1", paymentLevel: "A2", forNextLevel: true })).toBe(true);
+    expect(isPaymentLevelAllowedForStudent({ currentLevel: "A1", paymentLevel: "A2", forNextLevel: false })).toBe(false);
+    expect(isPaymentLevelAllowedForStudent({ currentLevel: "A1", paymentLevel: "B1", forNextLevel: true })).toBe(false);
+    expect(isPaymentLevelAllowedForStudent({ currentLevel: "A1", paymentLevel: "B1", forNextLevel: false })).toBe(false);
+  });
+
+  it("still permits accurately labelled payments for levels already reached", () => {
+    expect(isPaymentLevelAllowedForStudent({ currentLevel: "A2", paymentLevel: "A1", forNextLevel: false })).toBe(true);
+  });
+});
 
 describe("levelFromDescription", () => {
   it("reads A1 AUGUST as A1", () => {

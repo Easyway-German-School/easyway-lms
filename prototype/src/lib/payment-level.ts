@@ -39,6 +39,39 @@ export type LevelTaggedPayment = {
 };
 
 /**
+ * Levels the payments desk may assign to a student: levels already reached,
+ * their current level, and at most the immediate next level.
+ */
+export function paymentLevelsForStudent(currentLevel: string): string[] {
+  const current = String(currentLevel ?? "").trim().toUpperCase();
+  const currentIndex = (LEVELS as readonly string[]).indexOf(current);
+  if (currentIndex < 0) return [];
+  return LEVELS.slice(0, Math.min(currentIndex + 2, LEVELS.length));
+}
+
+/**
+ * Future tuition must be recorded as a next-level payment so it cannot be
+ * mistaken for current tuition or silently create a charge several levels
+ * ahead. Historical payments remain recordable for reconciliation.
+ */
+export function isPaymentLevelAllowedForStudent(input: {
+  currentLevel: string;
+  paymentLevel: string;
+  forNextLevel: boolean;
+}): boolean {
+  const current = String(input.currentLevel ?? "").trim().toUpperCase();
+  const payment = String(input.paymentLevel ?? "").trim().toUpperCase();
+  const currentIndex = (LEVELS as readonly string[]).indexOf(current);
+  const paymentIndex = (LEVELS as readonly string[]).indexOf(payment);
+  if (currentIndex < 0 || paymentIndex < 0) return false;
+
+  const nextLevelIndex = currentIndex + 1;
+  return input.forNextLevel
+    ? paymentIndex === nextLevelIndex
+    : paymentIndex <= currentIndex;
+}
+
+/**
  * Does this received tuition payment belong to `level`?
  *
  * Stamped / described payments follow `resolvePaymentLevel` — an August A1
