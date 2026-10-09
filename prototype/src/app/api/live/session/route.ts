@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { requireAuthSession } from "@/lib/auth";
+import { captureErrorInBackground } from "@/lib/capture-error";
 import { prisma } from "@/lib/prisma";
 import { canAttendLive } from "@/lib/access";
 import { getStudentAccess } from "@/lib/student-access";
@@ -34,6 +35,7 @@ import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
 import { ensureClassSessionForLiveStart } from "@/lib/class-sessions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 /**
  * Everything the classroom page needs to open a room, in one request:
@@ -375,6 +377,7 @@ export async function GET(request: Request) {
      * the tutor's browser actually connecting to the room instead.
      */
     if (role === "tutor") {
+      const privateStudentIds = privateClassId ? await studentIdsForPrivateClass(privateClassId) : [];
       const opened = await openLiveSession({
         roomName,
         title: displayName,
@@ -388,68 +391,64 @@ export async function GET(request: Request) {
         startedByUserId: session.user.id,
         // A private booking's own student is on the guest list automatically.
         // The tutor adding others is a separate, explicit act.
-        inviteStudentIds: privateClassId ? await studentIdsForPrivateClass(privateClassId) : undefined,
+        inviteStudentIds: privateClassId ? privateStudentIds : undefined,
       });
 
       liveSession = { ...opened, invited: false, inviteStatus: null };
 
-      // Only on the FIRST open — `announceLiveSession` dedupes on the session
-      // id, so a reload does not ring forty phones a second time.
-      announceLiveSession(
-        opened,
-        opened.kind === "private" ? { studentIds: await studentIdsForPrivateClass(privateClassId!) } : {},
-      );
-
-      /**
-       * The cohort broadcast above is pinned to branch+level+sitting, which
-       * misses the students the office NAMED onto this tutor whose cohort
-       * fields never lined up (the online-onboarding case — see
-       * `liveSessionForStudent`). Ring them by name off the same open event, on
-       * the same dedupe key so anyone caught by both is only buzzed once.
-       */
-      if (opened.kind === "cohort" && lecturer) {
-        const named = await prisma.student.findMany({
-          where: {
-            deletedAt: null,
-            OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
-          },
-          select: { id: true, admission: true },
-        });
-        // Only the ones who could actually answer it — a locked portal (unpaid
-        // deposit, or no profile photo) gets no "your class is live" push, the
-        // same way it gets no popup. See lib/live-eligibility.ts. And only this
-        // batch's: a tutor starting October must not ring their September students.
-        const reachable = await studentsWhoCanEnterLiveClass(
-          onlyBatchStudents(opened, named).map((s) => s.id),
-        );
-        announceLiveToNamedStudents(opened, reachable);
-
-        // And the hybrid / online students of this branch and level who sit a
-        // DIFFERENT slot — they can join any live room for their level, so this
-        // is their class too. Own-slot students and the payment/photo-locked
-        // are excluded inside; the dedupe key is shared so nobody is double-rung.
-        void announceLiveToVideoStudents(opened).catch((err) =>
-          console.error("announceLiveToVideoStudents failed", err),
-        );
-
-        // The calendar (`/api/lecturer/sessions`) is the only thing that puts a
-        // day on a student's timetable in advance — opening this room is not
-        // that, and skips it entirely. Backfill the row now so a class run
-        // straight from here (no advance notice, ever) at least becomes
-        // visible, and is honestly marked as never having been scheduled ahead
-        // of time. A no-op if the tutor already put this day on the calendar.
-        if (branch?.id && level && sessionSlot) {
-          void ensureClassSessionForLiveStart({
-            branchId: branch.id,
-            level,
-            sessionSlot,
-            date: new Date(),
-            lecturerId: lecturer?.id ?? null,
-            // Recorded for THIS batch's calendar only.
-            batch,
-          }).catch((err) => console.error("ensureClassSessionForLiveStart failed", err));
+      after(async () => {
+        try {
+          announceLiveSession(
+            opened,
+            opened.kind === "private" ? { studentIds: privateStudentIds } : {},
+          );
+        } catch (error) {
+          captureErrorInBackground("live-session-announcement", error, {
+            routePath: "/api/live/session",
+            method: "GET",
+          });
         }
-      }
+
+        if (opened.kind !== "cohort" || !lecturer) return;
+
+        const jobs = [
+          async () => {
+            const named = await prisma.student.findMany({
+              where: {
+                deletedAt: null,
+                OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
+              },
+              select: { id: true, admission: true },
+            });
+            const reachable = await studentsWhoCanEnterLiveClass(
+              onlyBatchStudents(opened, named).map((s) => s.id),
+            );
+            announceLiveToNamedStudents(opened, reachable);
+          },
+          () => announceLiveToVideoStudents(opened),
+          async () => {
+            if (!branch?.id || !level || !sessionSlot) return;
+            await ensureClassSessionForLiveStart({
+              branchId: branch.id,
+              level,
+              sessionSlot,
+              date: new Date(),
+              lecturerId: lecturer.id,
+              batch,
+            });
+          },
+        ];
+        const results = await Promise.allSettled(jobs.map((job) => job()));
+        results.forEach((result, index) => {
+          if (result.status === "rejected") {
+            captureErrorInBackground("live-session-start-followup", result.reason, {
+              routePath: "/api/live/session",
+              method: "GET",
+              task: ["named-student-announcement", "video-student-announcement", "calendar-backfill"][index],
+            });
+          }
+        });
+      });
     } else if (liveSession && student) {
       /**
        * Turning up answers the call, so the tutor's roster stops showing this
@@ -573,6 +572,10 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("Live session setup failed", error);
+    captureErrorInBackground("live-session-setup", error, {
+      routePath: "/api/live/session",
+      method: "GET",
+    });
     return NextResponse.json({ error: "Could not set up the classroom" }, { status: 500 });
   }
 }

@@ -136,6 +136,7 @@ function IncidentList({
   const [detail, setDetail] = useState<Record<string, IncidentDetail>>({});
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ take: String(limit ?? 60) });
@@ -166,14 +167,66 @@ function IncidentList({
 
   async function act(id: string, next: string) {
     setBusy(id);
+    setActionErrors((current) => ({ ...current, [id]: "" }));
     try {
-      await fetch("/api/admin/developer/incidents", {
+      const response = await fetch("/api/admin/developer/incidents", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, status: next, note }),
       });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || `Could not update incident (${response.status}).`);
       setNote("");
       await load();
+    } catch (error) {
+      setActionErrors((current) => ({
+        ...current,
+        [id]: error instanceof Error ? error.message : "Could not update incident.",
+      }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function isAuthSessionIncident(row: Pick<Incident, "route" | "title"> | null | undefined): boolean {
+    if (!row) return false;
+    const route = (row.route ?? "").toLowerCase();
+    const title = row.title.toLowerCase();
+    return route === "/api/auth/session"
+      || title.includes("/api/auth/session")
+      || /\b(sign[ -]?in|login|signed out)\b/.test(title);
+  }
+
+  async function recoverAuthIncident(id: string) {
+    setBusy(id);
+    setActionErrors((current) => ({ ...current, [id]: "" }));
+    try {
+      const health = await fetch("/api/auth/session", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(8_000),
+      });
+      const session = await health.json().catch(() => null);
+      if (!health.ok || !session?.user) {
+        throw new Error("Auth health check failed — the session endpoint is still unhealthy.");
+      }
+
+      const resolutionNote = note.trim()
+        || "Auth session endpoint is responding for the Mission Control operator. This check cannot refresh another person's browser session.";
+      const response = await fetch("/api/admin/developer/incidents", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status: "resolved", note: resolutionNote }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || `Could not resolve incident (${response.status}).`);
+      setNote("");
+      await load();
+    } catch (error) {
+      setActionErrors((current) => ({
+        ...current,
+        [id]: error instanceof Error ? error.message : "Could not verify auth health.",
+      }));
     } finally {
       setBusy(null);
     }
@@ -307,9 +360,19 @@ function IncidentList({
                       )}
                       {(row.status === "open" || row.status === "acknowledged") && (
                         <>
-                          <button disabled={busy === row.id} onClick={() => act(row.id, "resolved")} className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white">
-                            Resolve
-                          </button>
+                          {isAuthSessionIncident(row) ? (
+                            <button
+                              disabled={busy === row.id}
+                              onClick={() => void recoverAuthIncident(row.id)}
+                              className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white disabled:opacity-50"
+                            >
+                              {busy === row.id ? "Checking auth…" : "Check auth & resolve"}
+                            </button>
+                          ) : (
+                            <button disabled={busy === row.id} onClick={() => void act(row.id, "resolved")} className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white">
+                              Resolve
+                            </button>
+                          )}
                           <button disabled={busy === row.id} onClick={() => act(row.id, "ignored")} className="rounded-lg border border-[var(--border)] px-2.5 py-1 font-semibold text-[var(--muted)]">
                             Ignore
                           </button>
@@ -321,6 +384,12 @@ function IncidentList({
                         </button>
                       )}
                     </div>
+                    {isAuthSessionIncident(row) && (
+                      <p className="text-[11px] text-[var(--muted)]">
+                        This checks the current operator&apos;s auth endpoint before resolving the alert. It cannot remotely refresh the affected tutor&apos;s browser session.
+                      </p>
+                    )}
+                    {actionErrors[row.id] && <p role="alert" className="text-xs text-red-500">{actionErrors[row.id]}</p>}
                   </div>
                 )}
               </li>

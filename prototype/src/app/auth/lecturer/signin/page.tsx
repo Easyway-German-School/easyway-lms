@@ -21,13 +21,22 @@ function LecturerSignInContent() {
     setError("");
     setLoading(true);
 
+    let timeout: number | undefined;
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        role: "lecturer",
-        redirect: false,
-      });
+      const result = await Promise.race([
+        signIn("credentials", {
+          email,
+          password,
+          role: "lecturer",
+          redirect: false,
+        }),
+        new Promise<never>((_, reject) => {
+          timeout = window.setTimeout(
+            () => reject(new Error("Sign-in is taking too long. Check your connection and try again.")),
+            25_000,
+          );
+        }),
+      ]);
 
       if (!result?.ok) {
         throw new Error(result?.error || "Sign in failed");
@@ -37,6 +46,7 @@ function LecturerSignInContent() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
+      if (timeout !== undefined) window.clearTimeout(timeout);
       setLoading(false);
     }
   };

@@ -1095,6 +1095,16 @@ export default function LiveKitClassroom({
       }
       if (lastError) {
         if (cancelled) return;
+        void fetch("/api/client/live-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role,
+            attempts: attempts.length,
+            online: navigator.onLine,
+          }),
+          keepalive: true,
+        }).catch(() => {});
         setError(lastError instanceof Error ? lastError.message : "Could not join the classroom");
         setStatus("failed");
         return;
