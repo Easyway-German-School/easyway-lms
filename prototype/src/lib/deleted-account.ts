@@ -1,5 +1,5 @@
-import { unguardedPrisma } from "@/lib/prisma";
-import { writeAudit } from "@/lib/prisma-guard";
+import { Prisma } from "@prisma/client";
+import { guardedPrisma, unguardedPrisma } from "@/lib/prisma";
 
 /**
  * Re-using the email address of a student the office deleted.
@@ -16,20 +16,15 @@ import { writeAudit } from "@/lib/prisma-guard";
  *   2. past that check, `user.create({ data: { email } })` hit the email unique
  *      index against the tombstone and threw P2002.
  *
- * The fix is to notice the tombstone and revive it in place rather than trying
- * to create a second row. Callers ask {@link lookupEmailAccount} what is
- * holding the address, and — for a deleted student — call
- * {@link reviveDeletedAccount} and then UPDATE that same `User`/`Student` into
- * the new details instead of creating.
- *
- * Old related rows (payments, grades, enrolments) stay soft-deleted and out of
- * sight; the original deletion's audit entry can still put any of them back.
+ * A new enrolment reuses the tombstone because the email is globally unique.
+ * Old tuition charges and enrolments are archived, while payment transactions
+ * stay attached so real cash is not lost and can credit the new charge.
  */
 
 export type EmailAccountState =
   | { kind: "free" }
   | { kind: "live"; userId: string }
-  | { kind: "deleted"; userId: string; studentId: string | null };
+  | { kind: "deleted"; userId: string; studentId: string | null; tenantId: string | null };
 
 /**
  * What, if anything, currently holds this email address — asked on the
@@ -47,6 +42,7 @@ export async function lookupEmailAccount(email: string): Promise<EmailAccountSta
       id: true,
       role: true,
       adminRole: true,
+      tenantId: true,
       deletedAt: true,
       student: { select: { id: true } },
     },
@@ -58,37 +54,124 @@ export async function lookupEmailAccount(email: string): Promise<EmailAccountSta
   const wasPlainStudent = user.role === "STUDENT" && user.adminRole == null;
   if (!wasPlainStudent) return { kind: "live", userId: user.id };
 
-  return { kind: "deleted", userId: user.id, studentId: user.student?.id ?? null };
+  return {
+    kind: "deleted",
+    userId: user.id,
+    studentId: user.student?.id ?? null,
+    tenantId: user.tenantId,
+  };
 }
 
 /**
- * Clear `deletedAt` on a soft-deleted account's `User` and its `Student` so the
- * row can be updated into a new enrolment. No other field is touched here — the
- * caller owns that. No-op if the account is not actually soft-deleted.
+ * Archive rows that describe the former billing obligation or enrolment.
+ * Payment transactions are intentionally retained: they represent real cash
+ * and must remain visible to both accounting and the student's new ledger.
+ * The guarded delete operations write restorable audit entries. Small batches
+ * stay below the Prisma guard's destructive-write limit.
  */
-export async function reviveDeletedAccount(userId: string): Promise<void> {
-  const user = await unguardedPrisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, deletedAt: true, student: { select: { id: true } } },
-  });
-  if (!user || !user.deletedAt) return;
+async function archiveRows(
+  ids: string[],
+  remove: (batch: string[]) => Promise<unknown>,
+): Promise<void> {
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    await remove(ids.slice(offset, offset + 100));
+  }
+}
 
-  // The unguarded client on purpose: the guarded one filters out exactly the
-  // rows this is trying to reach, and would re-audit the update as a delete.
-  await unguardedPrisma.user.update({ where: { id: userId }, data: { deletedAt: null } });
-  if (user.student) {
-    await unguardedPrisma.student.update({
-      where: { id: user.student.id },
-      data: { deletedAt: null },
-    });
+async function archiveDeletedStudentHistory(studentId: string, tenantId: string | null): Promise<void> {
+  const [payments, charges, plans, enrolments] = await Promise.all([
+    guardedPrisma.payment.findMany({ where: { studentId }, select: { id: true, tenantId: true } }),
+    guardedPrisma.tuitionCharge.findMany({ where: { studentId }, select: { id: true } }),
+    guardedPrisma.paymentPlan.findMany({ where: { studentId }, select: { id: true } }),
+    guardedPrisma.studentEnrolment.findMany({
+      where: { studentId, deletedAt: null },
+      select: { id: true },
+    }),
+  ]);
+
+  if (tenantId) {
+    const unscopedPayments = payments.filter((payment) => payment.tenantId == null);
+    await archiveRows(unscopedPayments.map(({ id }) => id), (ids) =>
+      guardedPrisma.payment.updateMany({
+        where: { id: { in: ids }, studentId, tenantId: null },
+        data: { tenantId },
+      }),
+    );
   }
 
-  await writeAudit(unguardedPrisma, {
-    action: "restore",
-    model: "User",
-    recordId: userId,
-    affectedCount: 1,
-    severity: "notice",
-    summary: `Revived soft-deleted account ${user.email} for re-enrolment`,
+  await archiveRows(charges.map(({ id }) => id), (ids) =>
+    guardedPrisma.tuitionCharge.deleteMany({ where: { id: { in: ids } } }),
+  );
+  await archiveRows(plans.map(({ id }) => id), (ids) =>
+    guardedPrisma.paymentPlan.deleteMany({ where: { id: { in: ids } } }),
+  );
+  await archiveRows(enrolments.map(({ id }) => id), (ids) =>
+    guardedPrisma.studentEnrolment.deleteMany({ where: { id: { in: ids } } }),
+  );
+}
+
+/**
+ * State to reset when a soft-deleted student is reused. These fields are
+ * applied in the same nested User update that clears both tombstones.
+ */
+export const FRESH_ENROLMENT_STUDENT_RESET = {
+  deletedAt: null,
+  status: "active",
+  examReadiness: 0,
+  outcome: "C1 readiness + German work placement support",
+  nextLive: "No live session scheduled",
+  graduationDate: null,
+  advanceOfferedFor: null,
+  enrolmentLetterSentAt: null,
+  welcomeTourSeenAt: null,
+  storyTourSeenAt: null,
+  tutorialsPromoSeenAt: null,
+  classesStartedAt: null,
+  startConfirmedAt: null,
+  startConfirmedVia: null,
+  startPromptSnoozedUntil: null,
+  notStartedCount: 0,
+  notStartedReason: null,
+  levelCompletedAt: null,
+  levelCompletedFor: null,
+  heldBackAt: null,
+  heldBackReason: null,
+  journeyStages: Prisma.DbNull,
+  journeySeenAt: null,
+  journeyMomentPreference: "daily",
+  germanyGoal: null,
+  germanyGoalNote: null,
+  germanyGoalSetAt: null,
+  feeRemindersScheduled: Prisma.DbNull,
+  paymentGraceUntil: null,
+  tags: [],
+};
+
+/**
+ * Archive the old active billing and enrolment rows before a deleted student
+ * is reused. The caller revives User and Student together with the new details
+ * in one nested write. No-op if the account is no longer a tombstone.
+ */
+export async function archiveDeletedAccountHistory(
+  userId: string,
+  tenantId: string | null,
+): Promise<void> {
+  const user = await unguardedPrisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      tenantId: true,
+      deletedAt: true,
+      student: { select: { id: true, deletedAt: true } },
+    },
   });
+  if (!user) return;
+  if (user.tenantId !== tenantId) {
+    throw new Error("Refusing to archive a deleted student account outside the current school.");
+  }
+  if (!user.deletedAt) return;
+
+  if (user.student) {
+    await archiveDeletedStudentHistory(user.student.id, tenantId);
+  }
 }

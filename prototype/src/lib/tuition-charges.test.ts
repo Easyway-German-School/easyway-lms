@@ -15,21 +15,31 @@ vi.mock("@/lib/prisma", () => ({
     student: { findUnique: vi.fn() },
     tuitionCharge: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
   },
+  guardedPrisma: {
+    tuitionCharge: { update: vi.fn() },
+  },
+  unguardedPrisma: {
+    tuitionCharge: { findUnique: vi.fn() },
+  },
 }));
 
-import { prisma } from "@/lib/prisma";
+import { guardedPrisma, prisma, unguardedPrisma } from "@/lib/prisma";
 import { ensureChargeForLevel } from "./tuition-charges";
 
 const studentFindUnique = prisma.student.findUnique as unknown as ReturnType<typeof vi.fn>;
 const chargeFindUnique = prisma.tuitionCharge.findUnique as unknown as ReturnType<typeof vi.fn>;
 const chargeFindFirst = prisma.tuitionCharge.findFirst as unknown as ReturnType<typeof vi.fn>;
 const chargeCreate = prisma.tuitionCharge.create as unknown as ReturnType<typeof vi.fn>;
+const chargeUpdate = guardedPrisma.tuitionCharge.update as unknown as ReturnType<typeof vi.fn>;
+const archivedChargeFindUnique = unguardedPrisma.tuitionCharge.findUnique as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   studentFindUnique.mockReset();
   chargeFindUnique.mockReset();
   chargeFindFirst.mockReset();
   chargeCreate.mockReset();
+  chargeUpdate.mockReset();
+  archivedChargeFindUnique.mockReset();
 });
 
 suite("ensureChargeForLevel — Travel Package", () => {
@@ -43,6 +53,7 @@ suite("ensureChargeForLevel — Travel Package", () => {
     });
     chargeFindFirst.mockResolvedValue(null); // no existing charge at all yet
     chargeFindUnique.mockResolvedValue(null); // no charge for this exact level either
+    archivedChargeFindUnique.mockResolvedValue(null);
     chargeCreate.mockResolvedValue({ id: "charge_1" });
 
     const result = await ensureChargeForLevel({ studentId: "stu_1", level: "A1", origin: "signup" });
@@ -78,6 +89,7 @@ suite("ensureChargeForLevel — Travel Package", () => {
       branch: { name: "Lagos" },
     });
     chargeFindUnique.mockResolvedValue(null); // no charge yet for THIS level
+    archivedChargeFindUnique.mockResolvedValue(null);
     chargeCreate.mockResolvedValue({ id: "charge_2" });
 
     const result = await ensureChargeForLevel({ studentId: "stu_2", level: "A1", origin: "signup" });
@@ -85,5 +97,41 @@ suite("ensureChargeForLevel — Travel Package", () => {
     expect(result).toEqual({ created: true, chargeId: "charge_2", level: "A1", amount: 150000 });
     // The Travel Package any-level lookup must not run for an ordinary pathway.
     expect(chargeFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("reissues an archived same-level charge as a fresh current charge", async () => {
+    studentFindUnique.mockResolvedValue({
+      id: "stu_3",
+      classType: "group",
+      tenantId: "tenant_1",
+      pathway: "Language training",
+      branch: { name: "Lagos" },
+    });
+    chargeFindUnique.mockResolvedValue(null);
+    archivedChargeFindUnique.mockResolvedValue({
+      id: "charge_old_a1",
+      amount: 180000,
+      studentId: "stu_3",
+      deletedAt: new Date("2026-10-01T00:00:00Z"),
+    });
+    chargeUpdate.mockResolvedValue({ id: "charge_old_a1" });
+
+    const result = await ensureChargeForLevel({ studentId: "stu_3", level: "A1", origin: "signup" });
+
+    expect(result).toEqual({ created: true, chargeId: "charge_old_a1", level: "A1", amount: 150000 });
+    expect(chargeUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "charge_old_a1" },
+        data: expect.objectContaining({
+          amount: 150000,
+          origin: "signup",
+          waivedAmount: 0,
+          settledAt: null,
+          deletedAt: null,
+          tenantId: "tenant_1",
+        }),
+      }),
+    );
+    expect(chargeCreate).not.toHaveBeenCalled();
   });
 });

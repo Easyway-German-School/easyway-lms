@@ -47,6 +47,7 @@ export const SOFT_DELETE_MODELS = new Set<string>([
   "PaymentPlan",
   "Certificate",
   "RefundRequest",
+  "StudentEnrolment",
 ]);
 
 /**

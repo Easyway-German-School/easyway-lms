@@ -56,6 +56,20 @@ describe("buildLedger — FIFO allocation", () => {
     expect(ledger.lifetimeOutstanding).toBe(180_000);
   });
 
+  it("credits a recorded previous-level payment when the old charge is archived", () => {
+    const ledger = buildLedger(
+      [charge({ id: "new-a1", level: "A1", amount: 150_000 })],
+      150_000,
+      NOW,
+      [{ amount: 150_000, level: "B1", description: "Tuition payment", createdAt: NOW }],
+    );
+
+    expect(ledger.lines.map((line) => [line.level, line.allocated, line.outstanding])).toEqual([
+      ["A1", 150_000, 0],
+    ]);
+    expect(ledger.lifetimePaid).toBe(150_000);
+  });
+
   it("keeps unlabelled payments on the existing oldest-charge-first rule", () => {
     const ledger = buildLedger(
       [
