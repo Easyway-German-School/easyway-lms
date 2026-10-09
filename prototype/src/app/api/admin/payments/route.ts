@@ -11,7 +11,7 @@ import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 import { nextLevelAfter } from "@/lib/levels";
-import { levelFromDescription } from "@/lib/payment-level";
+import { isPaymentLevelAllowedForStudent, levelFromDescription } from "@/lib/payment-level";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { getStudentAccess } from "@/lib/student-access";
@@ -96,9 +96,34 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+      if (requestedLevel && requestedLevel !== next) {
+        return NextResponse.json(
+          { error: `A next-level payment for ${student.user?.name || "this student"} must be assigned to ${next}.` },
+          { status: 400 },
+        );
+      }
       paymentLevel = next;
     } else if (!paymentLevel && !isRegistrationFeePayment(descriptionRaw || null)) {
       paymentLevel = levelFromDescription(descriptionRaw) || student.level;
+    }
+
+    if (
+      paymentLevel &&
+      !isRegistrationFeePayment(descriptionRaw || null) &&
+      !isPaymentLevelAllowedForStudent({
+        currentLevel: student.level,
+        paymentLevel,
+        forNextLevel,
+      })
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `This payment cannot be assigned to ${paymentLevel}. Record tuition for a level already reached or ` +
+            `currently in progress, or use the next-level payment option for ${nextLevelAfter(student.level) ?? "the next level"}.`,
+        },
+        { status: 400 },
+      );
     }
 
     const description =
@@ -249,6 +274,8 @@ export async function PATCH(request: Request) {
       method: true,
       paymentIntentId: true,
       stripeSessionId: true,
+      level: true,
+      student: { select: { level: true } },
     },
   });
   if (!existing) return NextResponse.json({ error: "Payment not found" }, { status: 404 });
@@ -268,6 +295,25 @@ export async function PATCH(request: Request) {
   }
   if (body.level !== undefined) {
     const level = typeof body.level === "string" ? body.level.trim().toUpperCase() : "";
+    const nextLevel = nextLevelAfter(existing.student.level);
+    if (
+      level &&
+      level !== String(existing.level ?? "").trim().toUpperCase() &&
+      !isPaymentLevelAllowedForStudent({
+        currentLevel: existing.student.level,
+        paymentLevel: level,
+        forNextLevel: level === nextLevel,
+      })
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `This payment cannot be assigned to ${level}. Keep it on a level already reached or currently in progress, ` +
+            `or assign it to the immediate next level (${nextLevel ?? "none"}).`,
+        },
+        { status: 400 },
+      );
+    }
     data.level = level || null;
   }
 

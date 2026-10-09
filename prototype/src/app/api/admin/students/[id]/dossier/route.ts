@@ -364,9 +364,9 @@ export async function GET(
         : depositMet
           ? "depositPaid"
           : "registeredOnly";
-  // The portal gate still follows `access.depositCleared` so this file cannot
-  // disagree with the student's own lock about whether classes are open.
-  const lockedOut = !access.depositCleared;
+  // Match the student's portal gate, including the overdue-balance and
+  // upcoming-intake locks — deposit progress alone does not mean classes open.
+  const lockedOut = !access.hasAccess;
 
   // Part-payment balance lock — deposit in, fee not, 30 days after classes
   // started (falling back to enrolment), unless an admin grace date or an
