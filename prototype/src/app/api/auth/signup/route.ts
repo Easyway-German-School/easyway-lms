@@ -23,7 +23,11 @@ import { SIGNUP_ACCESS_GATE_ENABLED, validateSignupAccess, verifyInviteSig } fro
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
-import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import {
+  archiveDeletedAccountHistory,
+  FRESH_ENROLMENT_STUDENT_RESET,
+  lookupEmailAccount,
+} from "@/lib/deleted-account";
 import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 import { resolveSignupReferralAttribution } from "@/lib/referral-attribution";
@@ -550,12 +554,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Three cases, not two. A live account blocks the signup with "please sign
-    // in". A soft-deleted one — a student the office removed who is now coming
-    // back — is NOT a block: the guard leaves that row (and its email) in the
-    // table (see lib/deleted-account.ts), so a plain `user.create` would trip
-    // the email unique index. Revive the tombstone and update it into the new
-    // signup instead.
+    // A live account blocks the signup with "please sign in". A soft-deleted
+    // student is re-enrolled in place because the email remains unique; old
+    // billing/enrolment records are archived before the account is reactivated.
     const emailState = await lookupEmailAccount(normalizedEmail);
     if (emailState.kind === "live") {
       return NextResponse.json(
@@ -568,6 +569,18 @@ export async function POST(request: NextRequest) {
       );
     }
     const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
+    if (
+      emailState.kind === "deleted" &&
+      emailState.tenantId !== currentTenantId()
+    ) {
+      return NextResponse.json(
+        {
+          error: "This email belongs to a deleted account from another school. Contact the school for help.",
+          code: "email_exists",
+        },
+        { status: 409, headers: buildCorsHeaders(request) },
+      );
+    }
     const referralAttribution = await resolveSignupReferralAttribution(
       referralCodeInput,
       !revivedUserId,
@@ -577,14 +590,12 @@ export async function POST(request: NextRequest) {
           select: { id: true },
         }),
     );
-    if (revivedUserId) {
-      await reviveDeletedAccount(revivedUserId);
-    }
-
     const hashedPassword = await bcryptjs.hash(normalizedPassword, 10);
 
     const studentFields = {
+      ...(revivedUserId ? FRESH_ENROLMENT_STUDENT_RESET : {}),
       level: normalizedLevel,
+      tenantId: currentTenantId(),
       pathway: normalizedPathway,
       sessionSlot: normalizedSessionSlot,
       classType: normalizedClassType,
@@ -619,11 +630,15 @@ export async function POST(request: NextRequest) {
     let user;
 
     try {
+      if (revivedUserId) {
+        await archiveDeletedAccountHistory(revivedUserId, currentTenantId());
+      }
       const userFields = {
         email: normalizedEmail,
         name: normalizedName,
         password: hashedPassword,
         role: normalizedRole,
+        ...(revivedUserId ? { deletedAt: null } : {}),
         // `User` is a global model, so nothing stamps this for us — see the
         // note on the same line in the admin tutor route. Without it a
         // student signs up successfully and then holds a session with no
@@ -718,7 +733,7 @@ export async function POST(request: NextRequest) {
               classType: normalizedClassType,
               deliveryMode: normalizedDeliveryMode,
               batch: (normalizedAdmission as any)?.batch,
-              registeredAt: user.createdAt,
+              registeredAt: revivedUserId ? new Date() : user.createdAt,
               tenantId: currentTenantId(),
               tuitionChargeId: signupCharge?.chargeId ?? null,
               feeSnapshot: signupCharge?.amount ?? null,
