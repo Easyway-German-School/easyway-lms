@@ -3,6 +3,7 @@ import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { isEmbeddedVideo, parseEmbed } from "@/lib/media-embed";
 import { isPlayableVideo, toPlayableUrl } from "@/lib/video-library";
+import { isRecorderEgressId } from "@/lib/recorder";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function GET() {
         createdAt: true,
         course: { select: { title: true, level: true } },
         lecturer: { select: { user: { select: { name: true } } } },
-        recording: { select: { status: true, variant: true, roomName: true, keepForever: true } },
+        recording: { select: { status: true, variant: true, roomName: true, keepForever: true, egressId: true } },
         privateClasses: { select: { id: true }, take: 1 },
         classSessions: { select: { branch: { select: { name: true } } }, take: 1 },
       },
@@ -42,6 +43,7 @@ export async function GET() {
       const privateClass = row.privateClasses.length > 0;
       const recording = row.kind === "recording" || Boolean(row.recording);
       const category = privateClass ? "private" : recording ? "recording" : embed ? "external" : "course";
+      const viaOurRecorder = isRecorderEgressId(row.recording?.egressId ?? null);
 
       return {
         id: row.id,
@@ -49,7 +51,7 @@ export async function GET() {
         description: row.description,
         url: embed?.embedUrl ?? toPlayableUrl(row.filePath),
         sourceUrl: embed?.sourceUrl ?? null,
-        provider: embed?.label ?? (recording ? "LiveKit" : "EasyWay storage"),
+        provider: embed?.label ?? (recording ? (viaOurRecorder ? "Our recorder" : "LiveKit") : "EasyWay storage"),
         category,
         categoryLabel: privateClass ? "Private class" : recording ? "Live recording" : embed ? "External embed" : "Course library",
         audience: recording ? "Online class recording" : privateClass ? "Private student" : "Course library (delivery not tagged)",
