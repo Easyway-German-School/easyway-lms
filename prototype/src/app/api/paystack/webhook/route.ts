@@ -8,6 +8,7 @@ import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
+import { recordCommissionForPayment } from "@/lib/growth/commission";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped, setTenantScope } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
@@ -395,6 +396,13 @@ async function handlePOST(request: Request) {
 
     await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
       console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
+    });
+
+    // Growth Desk: credit the rep if this student came through an assigned
+    // Lead. A no-op for every other payment. See the rate placeholder note
+    // in src/lib/growth/commission.ts — not wired to real pay yet.
+    await recordCommissionForPayment(payment.id).catch((error) => {
+      console.error("Paystack webhook: commission recording failed", { paymentId: payment.id, error });
     });
 
     const notificationMessage =

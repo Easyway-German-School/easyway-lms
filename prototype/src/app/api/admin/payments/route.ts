@@ -15,6 +15,7 @@ import { isPaymentLevelAllowedForStudent, levelFromDescription } from "@/lib/pay
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { getStudentAccess } from "@/lib/student-access";
+import { recordCommissionForPayment } from "@/lib/growth/commission";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -171,6 +172,15 @@ export async function POST(request: Request) {
       await reconcileTravelPackageStudent({ studentId, setPathway: false });
     } catch (reconcileError) {
       console.error("Travel Package reconcile failed after manual payment", { studentId, reconcileError });
+    }
+
+    // Growth Desk: credit the rep if this student came through an assigned
+    // Lead. A no-op for every other payment. See the rate placeholder note
+    // in src/lib/growth/commission.ts — not wired to real pay yet.
+    try {
+      await recordCommissionForPayment(payment.id);
+    } catch (commissionError) {
+      console.error("Commission recording failed after manual payment", { paymentId: payment.id, commissionError });
     }
 
     let warning: string | null = null;

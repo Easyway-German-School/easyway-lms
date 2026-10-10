@@ -62,6 +62,12 @@ export const TENANT_OWNED_MODELS = [
   "TuitionCharge",
   "PaymentPlan",
   "Lead",
+  // Growth Desk: the sales pipeline sitting on top of Lead. Same reasoning —
+  // one school's pipeline notes and commission figures must never be
+  // readable by another school's.
+  "LeadActivity",
+  "SalesTask",
+  "CommissionEntry",
   "Notification",
   "NotificationSetting",
   /**
