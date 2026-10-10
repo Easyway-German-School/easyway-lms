@@ -385,6 +385,37 @@ function StudentsRoster() {
     return `${base}${base.includes("?") ? "&" : "?"}layout=chase`;
   }
 
+  /**
+   * The Reminders tab, carrying this exact view along with it.
+   *
+   * Without the query string, "Send a reminder…" always landed on the generic
+   * Reminders tab with its own four fixed groups over the WHOLE roster — so a
+   * batch filter picked here (October, say) was silently dropped the moment
+   * the office clicked through, and the mass send reached everyone owing,
+   * not just the people this view was narrowed to. The Reminders tab reads
+   * these same params back out and narrows its own audience to match — see
+   * FeeRemindersPanel.
+   */
+  function reminderUrl(): string {
+    const params = new URLSearchParams();
+    if (filterBranchId) params.set("branchId", filterBranchId);
+    if (filterTutorId) params.set("tutorId", filterTutorId);
+    if (filterLevel) params.set("level", filterLevel);
+    if (filterBatch) params.set("batch", filterBatch);
+    if (filterClassType) params.set("classType", filterClassType);
+    if (filterSessionSlot) params.set("sessionSlot", filterSessionSlot);
+    if (filterStatus) params.set("status", filterStatus);
+    if (filterPaymentStatus) params.set("paymentStatus", filterPaymentStatus);
+    if (filterTag) params.set("tag", filterTag);
+    if (filterYear) params.set("year", filterYear);
+    if (search) params.set("search", search);
+    if (focus) params.set("focus", focus);
+    if (agingBucket) params.set("agingBucket", agingBucket);
+    if (focusIds) params.set("ids", focusIds);
+    params.set("tab", "reminders");
+    return `/admin/finance?${params.toString()}`;
+  }
+
   function applyChaseFocus(id: string) {
     setFocus(id);
     setAgingBucket("");
@@ -1102,7 +1133,7 @@ function StudentsRoster() {
               </a>
               {canSeeMoney ? (
                 <Link
-                  href="/admin/finance?tab=reminders"
+                  href={reminderUrl()}
                   className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
                 >
                   Send a reminder…
