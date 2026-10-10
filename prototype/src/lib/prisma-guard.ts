@@ -84,6 +84,10 @@ export const FULLY_AUDITED_MODELS = new Set<string>([
   "Exam",
   "PrivateClass",
   "RefundRequest",
+  "Lead",
+  "LeadActivity",
+  "SalesTask",
+  "CommissionEntry",
 ]);
 
 /**
