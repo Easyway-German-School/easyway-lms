@@ -547,6 +547,14 @@ export default function LiveKitClassroom({
    * join the classroom" was reloading the whole page; now it's one tap.
    */
   const [retryKey, setRetryKey] = useState(0);
+  /**
+   * How many automatic reconnect attempts the CURRENT join has already made.
+   * Purely for the loader's wording — `connectWithRetry` below is what
+   * actually retries. 0 on a fresh mount/retryKey bump, bumped once per
+   * silent retry so a student stuck on a bad link for a while sees the
+   * message change rather than the same "Connecting…" sitting still.
+   */
+  const [connectAttempt, setConnectAttempt] = useState(0);
   const [mode, setMode] = useState<QualityMode>(initialQuality);
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(qualitySpec(initialQuality).publishesVideo);
@@ -693,6 +701,7 @@ export default function LiveKitClassroom({
 
   useEffect(() => {
     let cancelled = false;
+    setConnectAttempt(0);
 
     const room = new Room({
       // The three settings that carry the whole low-bandwidth story.
@@ -831,16 +840,48 @@ export default function LiveKitClassroom({
       });
 
     (async () => {
-      try {
-        await room.connect(url, token);
-      } catch (connectError) {
+      /**
+       * THE FIRST CONNECT GETS ITS OWN RETRY LOOP, SEPARATE FROM LIVEKIT'S.
+       *
+       * `reconnectPolicy` (the library's own retry machinery) only covers a
+       * drop AFTER a successful join — it never runs if `room.connect()`
+       * itself rejects, which is exactly the case on a bad link: ICE
+       * gathering or the signalling websocket times out (15s each by
+       * default) before a connection is ever established, and the whole
+       * join fails outright. Before this, that meant a tutor on a rough
+       * mobile connection needed to physically tap "Try again" — see the
+       * comment on `retryKey` above. Three silent attempts, a few seconds
+       * apart, resolves the single-bad-round case this app already knows is
+       * common on Nigerian mobile links without making anyone do that
+       * tapping themselves; it does not change what happens after a
+       * successful join, which is still the library's own reconnect.
+       */
+      const RETRY_DELAYS_MS = [2500, 5000];
+      let lastError: unknown = null;
+      let connected = false;
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
         if (cancelled) return;
-        console.error("LiveKit connect failed", connectError);
-        setError(connectError instanceof Error ? connectError.message : "Could not join the classroom");
+        if (attempt > 0) {
+          setConnectAttempt(attempt);
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
+          if (cancelled) return;
+        }
+        try {
+          await room.connect(url, token);
+          connected = true;
+          break;
+        } catch (connectError) {
+          lastError = connectError;
+          console.warn(`LiveKit connect attempt ${attempt + 1} failed`, connectError);
+        }
+      }
+      if (cancelled) return;
+      if (!connected) {
+        console.error("LiveKit connect failed", lastError);
+        setError(lastError instanceof Error ? lastError.message : "Could not join the classroom");
         setStatus("failed");
         return;
       }
-      if (cancelled) return;
 
       /**
        * Devices are attempted SEPARATELY, and neither one failing ends the
@@ -1681,7 +1722,15 @@ export default function LiveKitClassroom({
         </div>
       ) : status === "connecting" ? (
         <div className="grid aspect-video w-full place-items-center rounded-3xl bg-slate-900">
-          <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message="Connecting you to your class." />
+          <BrandLoader
+            size="md"
+            title="Klassenzimmer wird geöffnet…"
+            message={
+              connectAttempt > 0
+                ? "Your connection is slow — trying again…"
+                : "Connecting you to your class."
+            }
+          />
         </div>
       ) : (
         <div className={`flex min-h-0 flex-1 gap-3 ${panel && !focusMode ? "lg:flex-row" : ""} flex-col`}>
