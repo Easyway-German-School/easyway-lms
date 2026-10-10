@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { captureLead } from "@/lib/leads";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
+import { notifyAdminsOfLead } from "@/lib/admin-alerts";
 
 /**
  * Public enquiry capture, for the registration form on the marketing site.
@@ -74,6 +75,15 @@ export async function POST(request: NextRequest) {
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400, headers: corsHeaders(request) });
+    }
+
+    if (!result.duplicate) {
+      await notifyAdminsOfLead({
+        leadId: result.leadId,
+        name: body.name.trim(),
+        interestedLevel: typeof body.level === "string" ? body.level : null,
+        source: typeof body.source === "string" ? body.source : "website",
+      });
     }
 
     return NextResponse.json(

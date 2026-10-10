@@ -5,14 +5,16 @@ import {
   isValidPaymentStatus,
   isReceivedPayment,
   isRegistrationFeePayment,
-  isTravelPackagePathway,
-  isTuitionPayment,
   PAYMENT_STATUSES,
-  requiredDepositFor,
 } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
+import { nextLevelAfter } from "@/lib/levels";
+import { isPaymentLevelAllowedForStudent, levelFromDescription } from "@/lib/payment-level";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { promoteIfNextLevelPayment } from "@/lib/promotion";
+import { getStudentAccess } from "@/lib/student-access";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -48,9 +50,12 @@ export async function POST(request: Request) {
   const amount = typeof body.amount === "number" ? body.amount : Number(body.amount);
   const currency = typeof body.currency === "string" ? body.currency : "usd";
   const method = typeof body.method === "string" ? body.method.trim() : "";
-  const description = typeof body.description === "string" ? body.description.trim() : null;
+  const descriptionRaw = typeof body.description === "string" ? body.description.trim() : "";
   const invoiceId = typeof body.invoiceId === "string" && body.invoiceId.trim() ? body.invoiceId : null;
   const status = typeof body.status === "string" ? body.status : "pending";
+  const forNextLevel = body.forNextLevel === true;
+  const requestedLevel =
+    typeof body.level === "string" && body.level.trim() ? body.level.trim().toUpperCase() : "";
 
   if (!studentId || !amount || !method) {
     return NextResponse.json({ error: "studentId, amount, and method are required" }, { status: 400 });
@@ -64,6 +69,82 @@ export async function POST(request: Request) {
   }
 
   try {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        level: true,
+        classType: true,
+        pathway: true,
+        branch: { select: { name: true } },
+        user: { select: { name: true, email: true } },
+        // `description` is needed to tell a tuition payment from the ₦5,000
+        // registration fee, which the paywall does not count.
+        payments: { select: { amount: true, status: true, description: true } },
+      },
+    });
+    if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    let paymentLevel = requestedLevel;
+    if (forNextLevel) {
+      const next = nextLevelAfter(student.level);
+      if (!next) {
+        return NextResponse.json(
+          { error: `${student.user?.name || "This student"} is already at the top of the ladder.` },
+          { status: 400 },
+        );
+      }
+      if (requestedLevel && requestedLevel !== next) {
+        return NextResponse.json(
+          { error: `A next-level payment for ${student.user?.name || "this student"} must be assigned to ${next}.` },
+          { status: 400 },
+        );
+      }
+      paymentLevel = next;
+    } else if (!paymentLevel && !isRegistrationFeePayment(descriptionRaw || null)) {
+      paymentLevel = levelFromDescription(descriptionRaw) || student.level;
+    }
+
+    if (
+      paymentLevel &&
+      !isRegistrationFeePayment(descriptionRaw || null) &&
+      !isPaymentLevelAllowedForStudent({
+        currentLevel: student.level,
+        paymentLevel,
+        forNextLevel,
+      })
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `This payment cannot be assigned to ${paymentLevel}. Record tuition for a level already reached or ` +
+            `currently in progress, or use the next-level payment option for ${nextLevelAfter(student.level) ?? "the next level"}.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    const description =
+      descriptionRaw ||
+      (forNextLevel ? `${paymentLevel} tuition — next level` : `${paymentLevel} tuition`);
+
+    const charge = paymentLevel && !isRegistrationFeePayment(description)
+      ? await ensureChargeForLevel({
+          studentId,
+          level: paymentLevel,
+          origin: forNextLevel ? "next_level_payment" : "admin",
+        })
+      : null;
+    const chargeReady = !paymentLevel || isRegistrationFeePayment(description) || Boolean(charge);
+    if (!chargeReady) {
+      return NextResponse.json(
+        { error: `Could not prepare the ${paymentLevel} tuition balance, so the payment was not recorded. Please retry or contact support.` },
+        { status: 503 },
+      );
+    }
+
     const payment = await prisma.payment.create({
       data: {
         studentId,
@@ -73,20 +154,7 @@ export async function POST(request: Request) {
         description,
         invoiceId,
         status,
-      },
-    });
-
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: {
-        level: true,
-        classType: true,
-        pathway: true,
-        branch: { select: { name: true } },
-        user: { select: { name: true, email: true } },
-        // `description` is needed to tell a tuition payment from the ₦5,000
-        // registration fee, which the paywall does not count.
-        payments: { select: { amount: true, status: true, description: true } },
+        level: paymentLevel || null,
       },
     });
 
@@ -105,46 +173,8 @@ export async function POST(request: Request) {
       console.error("Travel Package reconcile failed after manual payment", { studentId, reconcileError });
     }
 
-    /**
-     * Did this payment just open the student's classes?
-     *
-     * The office can record any amount at any status (cash and bank-transfer
-     * desks need that freedom), but the paywall gates on the cumulative
-     * RECEIVED TUITION total reaching the 60% deposit — not on the status
-     * label, and NOT counting the ₦5,000 registration fee (see
-     * `isTuitionPayment` / `deriveStudentAccess`). So for a hand-entered
-     * tuition payment we say plainly whether the student is now unlocked, or —
-     * if it is still short — that it is not, with the figures. A registration
-     * fee recorded here says nothing (it was never going to unlock anything).
-     */
     let warning: string | null = null;
     let notice: string | null = null;
-    if (student && isReceivedPayment(status) && !isRegistrationFeePayment(description)) {
-      const receivedTuition = student.payments
-        .filter((p) => isTuitionPayment({ status: p.status, description: p.description }))
-        .reduce((sum, p) => sum + p.amount, 0);
-      const deposit = requiredDepositFor({
-        level: student.level,
-        branch: student.branch?.name ?? null,
-        classType: student.classType,
-        pathway: student.pathway,
-      });
-      const who = student.user?.name || student.user?.email || "This student";
-      const money = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
-      const gateLabel = isTravelPackagePathway(student.pathway)
-        ? `${money(deposit)} minimum first payment for the Travel Package`
-        : `60% tuition deposit (${money(deposit)})`;
-      if (deposit > 0 && receivedTuition >= deposit) {
-        notice =
-          `Recorded. ${who} has met the ${gateLabel} — received tuition is now ${money(receivedTuition)}, ` +
-          `so their classes are unlocked. If their portal still shows a lock it is the missing-photo step, ` +
-          `which only they can clear from their profile.`;
-      } else {
-        warning =
-          `Recorded, but received tuition is ${money(receivedTuition)} — still below the ${gateLabel}. ` +
-          `${who}'s classes will NOT unlock until it reaches that.`;
-      }
-    }
 
     // A transfer or cash payment entered at the desk is a real payment the
     // student is waiting to hear about, so they get the same designed receipt
@@ -152,6 +182,52 @@ export async function POST(request: Request) {
     // back-dated entry that should not email anyone.
     if (body.sendReceipt !== false) await sendPaymentReceiptEmail(payment.id);
     await notifyEnrolmentLetterIfSettled(studentId);
+
+    if (forNextLevel) {
+      const levelBefore = student.level;
+      await promoteIfNextLevelPayment(studentId, { forNextLevel: "true", reference: payment.id }).catch((error) => {
+        console.error("Manual next-level payment: promotion failed", { studentId, error });
+      });
+      const moved = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: { level: true, user: { select: { name: true, email: true } } },
+      });
+      if (moved && moved.level !== levelBefore) {
+        const who = moved.user?.name || moved.user?.email || "This student";
+        notice = `Recorded. ${who} has moved from ${levelBefore} to ${moved.level}.`;
+        warning = null;
+      }
+    }
+
+    /**
+     * Unlock copy uses the same gate as the student portal. Summing every
+     * payment this student ever made against the CURRENT level's deposit is
+     * how an August A1 transfer was announced as opening October A2.
+     */
+    if (student && isReceivedPayment(status) && !isRegistrationFeePayment(description) && !notice) {
+      const access = await getStudentAccess(studentId);
+      const live = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: { level: true, user: { select: { name: true, email: true } } },
+      });
+      const who = live?.user?.name || live?.user?.email || student.user?.name || student.user?.email || "This student";
+      const currentLevel = live?.level || student.level;
+      const billedLevel = paymentLevel || currentLevel;
+      if (access?.hasAccess) {
+        notice =
+          `Recorded. ${who} has met the ${currentLevel} deposit — their classes are unlocked. ` +
+          `If their portal still shows a lock it is the missing-photo step, which only they can clear from their profile.`;
+      } else if (access?.depositCleared) {
+        notice = access.lockReason === "upcoming_batch"
+          ? `Recorded. ${who}'s ${currentLevel} deposit is met, but classes stay locked until their batch opens.`
+          : `Recorded. ${who}'s ${currentLevel} deposit is met, but classes stay locked until the remaining balance is paid (or unlocked at the desk).`;
+      } else if (billedLevel && billedLevel !== currentLevel) {
+        notice = `Recorded as ${billedLevel} tuition. ${who} is in ${currentLevel} and that level stays locked until its own deposit is recorded.`;
+      } else {
+        warning =
+          `Recorded, but ${who}'s ${currentLevel} deposit is not met — classes stay locked until that level is paid (or unlocked at the desk).`;
+      }
+    }
 
     return NextResponse.json({ payment, warning, notice }, { status: 201 });
   } catch (error) {
@@ -198,16 +274,47 @@ export async function PATCH(request: Request) {
       method: true,
       paymentIntentId: true,
       stripeSessionId: true,
+      level: true,
+      student: { select: { level: true } },
     },
   });
   if (!existing) return NextResponse.json({ error: "Payment not found" }, { status: 404 });
 
   const isGateway = Boolean(existing.paymentIntentId || existing.stripeSessionId);
 
-  const data: { amount?: number; status?: string; method?: string; description?: string | null } = {};
+  const data: {
+    amount?: number;
+    status?: string;
+    method?: string;
+    description?: string | null;
+    level?: string | null;
+  } = {};
 
   if (body.description !== undefined) {
     data.description = typeof body.description === "string" && body.description.trim() ? body.description.trim() : null;
+  }
+  if (body.level !== undefined) {
+    const level = typeof body.level === "string" ? body.level.trim().toUpperCase() : "";
+    const nextLevel = nextLevelAfter(existing.student.level);
+    if (
+      level &&
+      level !== String(existing.level ?? "").trim().toUpperCase() &&
+      !isPaymentLevelAllowedForStudent({
+        currentLevel: existing.student.level,
+        paymentLevel: level,
+        forNextLevel: level === nextLevel,
+      })
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `This payment cannot be assigned to ${level}. Keep it on a level already reached or currently in progress, ` +
+            `or assign it to the immediate next level (${nextLevel ?? "none"}).`,
+        },
+        { status: 400 },
+      );
+    }
+    data.level = level || null;
   }
 
   if (!isGateway) {

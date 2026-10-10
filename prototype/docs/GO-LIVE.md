@@ -144,6 +144,21 @@ applying the migration to production data. Two options:
    from the tutor account. Within ~8 seconds a card should appear bottom-right
    carrying **the actual message text**, and clicking it should open that room.
 
+### Concurrent classes
+
+The LMS does not impose a fixed number of simultaneous class rooms. Each live
+class gets its own room; the actual ceiling comes from the LiveKit account,
+Vercel plan/concurrency, and database connection capacity. Those provider
+quotas must be checked in their dashboards before scheduling a larger peak —
+the application cannot guarantee unlimited rooms. Failed tutor connections
+after both the direct and relay attempts, and server-side room setup failures,
+are recorded in Mission Control so capacity-related failures are visible.
+
+Before increasing the timetable beyond the known operating level, run a
+coordinated multi-room test with representative tutor and student counts. Track
+active rooms, participant totals, failed joins, database connection pressure,
+and recording start failures during the test.
+
 ---
 
 ## 5. Known gaps, stated plainly

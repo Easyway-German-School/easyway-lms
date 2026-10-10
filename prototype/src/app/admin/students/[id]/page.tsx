@@ -96,8 +96,10 @@ type Dossier = {
   };
   origin: { source: string; status: string; enquiredAt: string; notes: string | null } | null;
   money: {
-    paywall: "unpaid" | "registeredOnly" | "depositPaid" | "fullPaid";
+    paywall: "unpaid" | "registeredOnly" | "owesThisLevel" | "depositPaid" | "fullPaid";
     lockedOut: boolean;
+    /** Already sat a previous level — registration is not on this file. */
+    returningStudent?: boolean;
     /** Placed in an intake that has not opened — the portal is a countdown. */
     waitingForBatch?: boolean;
     batchLabel?: string | null;
@@ -235,6 +237,7 @@ type Dossier = {
 const PAYWALL_LABEL: Record<Dossier["money"]["paywall"], string> = {
   unpaid: "Nothing paid",
   registeredOnly: "Registered only — below deposit",
+  owesThisLevel: "This level unpaid",
   depositPaid: "Deposit paid",
   fullPaid: "Paid in full",
 };
@@ -920,11 +923,10 @@ export default function StudentDossierPage() {
           currency: "ngn",
           method: payForm.method,
           status: "completed",
-          // "Registration fee" is the prefix lib/payment.ts keys on to keep
-          // this row out of the tuition total — so a registration payment says
-          // nothing about unlocking, exactly as intended.
+          // Returning students already paid registration on the previous
+          // level — never record a second ₦5,000 row against this file.
           description:
-            payForm.kind === "registration"
+            !data?.money.returningStudent && payForm.kind === "registration"
               ? `Registration fee${payForm.note.trim() ? ` — ${payForm.note.trim()}` : ""}`
               : payForm.note.trim() || "Tuition payment (recorded by office)",
         }),
@@ -952,7 +954,7 @@ export default function StudentDossierPage() {
     } finally {
       setPayBusy(false);
     }
-  }, [id, payForm, load]);
+  }, [id, payForm, load, data?.money.returningStudent]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -1349,7 +1351,7 @@ export default function StudentDossierPage() {
             }
             sub={
               data.viewer.canSeeMoney && money.fee !== undefined
-                ? `of ${naira(money.fee)} · deposit ${naira(money.deposit ?? 0)}`
+                ? `of ${naira(money.fee)}${money.returningStudent ? " this level" : ""} · deposit ${naira(money.deposit ?? 0)}`
                 : "Amounts are restricted to the payments role"
             }
             tone={money.lockedOut ? "bad" : money.paywall === "fullPaid" ? "good" : "warn"}
@@ -1491,7 +1493,7 @@ export default function StudentDossierPage() {
             ) : (
               <>
                 <div className="grid grid-cols-3 gap-4">
-                  <Field label="Tuition" value={naira(money.fee ?? 0)} />
+                  <Field label={money.returningStudent ? "This level" : "Tuition"} value={naira(money.fee ?? 0)} />
                   <Field label="Paid" value={naira(money.paid ?? 0)} />
                   <Field
                     label="Outstanding"
@@ -1502,9 +1504,19 @@ export default function StudentDossierPage() {
                     }
                   />
                 </div>
+                {money.returningStudent && (
+                  <p className="mt-3 text-xs text-[var(--muted)]">
+                    Registration was paid once, on the previous level. Earlier tuition stays on the file
+                    and does not count toward {identity.level}.
+                  </p>
+                )}
                 <div className="mt-5 space-y-2">
                   {(money.payments ?? []).length === 0 && (
-                    <p className="text-sm text-[var(--muted)]">No payment has ever been recorded for this student.</p>
+                    <p className="text-sm text-[var(--muted)]">
+                      {money.returningStudent
+                        ? `No ${identity.level} tuition has been recorded yet.`
+                        : "No payment has ever been recorded for this student."}
+                    </p>
                   )}
                   {(money.payments ?? []).map((payment) => (
                     <div
@@ -1553,9 +1565,9 @@ export default function StudentDossierPage() {
                 ) : (
                   <div className="space-y-3">
                     <p className="text-xs text-[var(--muted)]">
-                      A payment made in cash or by bank transfer. This records it against{" "}
-                      {identity.name.split(" ")[0]}; a tuition payment opens their classes once the
-                      deposit is met.
+                      {money.returningStudent
+                        ? `A payment made in cash or by bank transfer. Registration was paid on the previous level — this records ${identity.level} tuition only.`
+                        : `A payment made in cash or by bank transfer. This records it against ${identity.name.split(" ")[0]}; a tuition payment opens their classes once the deposit is met.`}
                     </p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -1588,6 +1600,7 @@ export default function StudentDossierPage() {
                           <option value="other">Other</option>
                         </select>
                       </label>
+                      {!money.returningStudent && (
                       <label className="block text-xs font-semibold text-[var(--muted)]">
                         For
                         <select
@@ -1604,6 +1617,7 @@ export default function StudentDossierPage() {
                           <option value="registration">Registration fee</option>
                         </select>
                       </label>
+                      )}
                       <label className="block text-xs font-semibold text-[var(--muted)]">
                         Note (optional)
                         <input

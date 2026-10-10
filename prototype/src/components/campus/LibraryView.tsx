@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { CampusHeader, CoinChip, FaceRow, Flash, useFlash } from "@/components/campus/CampusParts";
-import Avatar from "@/components/Avatar";
+import { YouthBlobs, YouthFace } from "@/components/youth/YouthMotion";
 import { BREAK_MS, FOCUS_MS, clock, focusPhase } from "@/lib/campus";
 import { useCampusLive } from "@/lib/useCampus";
 
@@ -56,11 +56,12 @@ export default function LibraryView() {
 
   return (
     <>
-      <div className="mx-auto max-w-3xl px-4 pb-10 pt-5 sm:px-6">
+      <div className="relative isolate mx-auto max-w-3xl px-4 pb-10 pt-5 sm:px-6">
+        <YouthBlobs />
         <CampusHeader title="Library" subtitle="Silent study, everyone on the same clock" back="/campus" right={<CoinChip balance={live?.balance} />} />
 
         <div
-          className="mt-5 rounded-[2rem] p-6 text-center"
+          className={`relative mt-5 rounded-[2rem] p-6 text-center ${focusing ? "youth-room-live" : "youth-pop"}`}
           style={{ background: focusing ? "#E1F5EE" : "#FAEEDA", color: focusing ? "#085041" : "#633806" }}
         >
           <p className="text-xs font-bold uppercase tracking-[0.25em]">{focusing ? "Focus" : "Break"}</p>
@@ -93,7 +94,7 @@ export default function LibraryView() {
               <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {people.map((person) => (
                   <li key={person.userId} className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5">
-                    <Avatar config={person.avatar} seed={person.name} size={32} />
+                    <YouthFace config={person.avatar} seed={person.name} size={36} live />
                     <span className="min-w-0 truncate text-sm font-bold">{person.name}</span>
                   </li>
                 ))}

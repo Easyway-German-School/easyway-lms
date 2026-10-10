@@ -71,19 +71,22 @@
  *   muscle memory of the first. The gap is what makes two modals read as two
  *   deliberate things rather than a machine gun.
  *
- *   TWO MODALS A VISIT, MAXIMUM. The third good idea does not get to be an
+ *   TWO MODALS A DAY, MAXIMUM. The third good idea does not get to be an
  *   interruption. This is the rule that actually holds the line — an ordering
- *   with no cap is still six modals, politely queued.
+ *   with no cap is still six modals, politely queued. The cap used to reset
+ *   every time StudentShell remounted (every client navigation), which is why
+ *   leaving the dashboard and coming back felt like a new pile of popups.
  *
  *   NOTHING IS LOST, IT IS DEFERRED. Whatever does not get shown goes to a
  *   small dock the student can open when they choose. That is what makes the
  *   cap honest instead of a silent drop, and it turns an interruption into an
  *   invitation, which is the whole trade.
  *
- *   DISMISSING IS AN ANSWER. Once released, a moment does not come back this
- *   visit, whether it was read or closed. Each moment still owns its own
- *   longer-term memory (a server stamp, a localStorage key) — this queue is
- *   about one page-visit, not about whether a thing is due at all.
+ *   DISMISSING IS AN ANSWER. Once released — or once it was on screen when
+ *   they navigated away — a moment does not come back today, whether it was
+ *   read or closed. Each moment still owns its own longer-term memory (a
+ *   server stamp, a localStorage key) — this queue is about one day, not
+ *   about whether a thing is due at all.
  */
 
 import {
@@ -417,7 +420,7 @@ export const MOMENTS: Record<MomentId, Definition> = {
    */
   /**
    * Becca on the new student look — "we gave the app a fresh look", or, for
-   * the phone-heavy 25–34s, "want to try it?".
+   * everyone else, "want to try it?".
    *
    * A TOAST, NOT A MODAL, ON PURPOSE. This is news, not a decision the student
    * must make, and the one thing the queue exists to prevent is a pile of
@@ -442,8 +445,65 @@ export const MOMENTS: Record<MomentId, Definition> = {
   },
 };
 
-/** Modals per page visit. The third good idea waits in the dock. */
+/** Modals per calendar day. The third good idea waits in the dock. */
 const MAX_MODALS = 2;
+
+/**
+ * StudentShell remounts on every client navigation, and the provider lives
+ * inside it. An in-memory visit was therefore a page, not a sitting — leave
+ * the dashboard, come back, another popup. The day is stored so the cap and
+ * the "already shown" list survive that remount, and reset tomorrow morning.
+ */
+export const MOMENT_VISIT_KEY = "easyway-moment-visit";
+
+export function momentVisitDay(now = new Date()): string {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function parseMomentVisit(
+  raw: unknown,
+  today = momentVisitDay(),
+): { done: MomentId[]; modalsShown: number } {
+  if (!raw || typeof raw !== "object") return { done: [], modalsShown: 0 };
+  const value = raw as Record<string, unknown>;
+  if (value.day !== today) return { done: [], modalsShown: 0 };
+  const known = Object.keys(MOMENTS);
+  const done = Array.isArray(value.done)
+    ? value.done.filter((id): id is MomentId => typeof id === "string" && known.includes(id))
+    : [];
+  const modalsShown =
+    typeof value.modalsShown === "number" && Number.isFinite(value.modalsShown)
+      ? Math.max(0, Math.min(99, Math.round(value.modalsShown)))
+      : 0;
+  return { done, modalsShown };
+}
+
+function readVisit(): { done: Set<MomentId>; modalsShown: number } {
+  if (typeof window === "undefined") return { done: new Set(), modalsShown: 0 };
+  try {
+    const parsed = parseMomentVisit(JSON.parse(window.localStorage.getItem(MOMENT_VISIT_KEY) ?? "null"));
+    return { done: new Set(parsed.done), modalsShown: parsed.modalsShown };
+  } catch {
+    return { done: new Set(), modalsShown: 0 };
+  }
+}
+
+function writeVisit(done: Set<MomentId>, modalsShown: number, active?: MomentId | null) {
+  if (typeof window === "undefined") return;
+  try {
+    const ids = new Set(done);
+    if (active) ids.add(active);
+    window.localStorage.setItem(
+      MOMENT_VISIT_KEY,
+      JSON.stringify({ day: momentVisitDay(), done: [...ids], modalsShown }),
+    );
+  } catch {
+    /* Private mode or a full disk: the day-cap is optional. */
+  }
+}
 
 /** The pause between one moment closing and the next opening. */
 const HANDOVER_MS = 620;
@@ -523,9 +583,9 @@ const StateContext = createContext<State>({ active: null, deferred: [], preempte
 
 export function MomentQueueProvider({ children }: { children: ReactNode }) {
   const [claimed, setClaimed] = useState<Set<MomentId>>(() => new Set());
-  const [done, setDone] = useState<Set<MomentId>>(() => new Set());
+  const [done, setDone] = useState<Set<MomentId>>(() => readVisit().done);
   const [active, setActive] = useState<MomentId | null>(null);
-  const [modalsShown, setModalsShown] = useState(0);
+  const [modalsShown, setModalsShown] = useState(() => readVisit().modalsShown);
   const [holding, setHolding] = useState(false);
   /** A moment the student asked for. Ignores the cap and jumps the queue. */
   const [summoned, setSummoned] = useState<MomentId | null>(null);
@@ -537,6 +597,13 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  // Remember the day across StudentShell remounts. Writing `active` into the
+  // stored done list is what stops a popup they already saw from coming back
+  // when they leave the dashboard and return — release may never have fired.
+  useEffect(() => {
+    writeVisit(done, modalsShown, active);
+  }, [done, modalsShown, active]);
 
   /** Bumped by every new claim; restarts the settle window. */
   const [claimTick, setClaimTick] = useState(0);

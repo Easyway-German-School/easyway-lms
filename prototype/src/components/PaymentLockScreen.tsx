@@ -149,6 +149,16 @@ export default function PaymentLockScreen({
   const progress = balanceLock ? access?.feeProgressPercent ?? 0 : access?.progressPercent ?? 0;
   const registrationPaid = access?.registrationPaid ?? true;
   const lockedSince = balanceLock && access?.lockAt ? new Date(access.lockAt) : null;
+  // Lifetime total still includes the previous level. If that already covers
+  // a full fee but this level's deposit is not cleared, they are moving up —
+  // not a new registration.
+  const returningUnpaidLevel = Boolean(
+    access &&
+      !balanceLock &&
+      !access.depositCleared &&
+      access.tuitionFee > 0 &&
+      access.totalPaid >= access.tuitionFee,
+  );
 
   return (
     <>
@@ -346,15 +356,19 @@ export default function PaymentLockScreen({
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
                           <CheckIcon className="h-3.5 w-3.5" strokeWidth={2.6} />
                         </span>
-                        Registration fee received
+                        {returningUnpaidLevel
+                          ? "Already registered — no registration fee this level"
+                          : "Registration fee received"}
                       </div>
                       <div className="flex items-center gap-3 text-sm text-amber-100">
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400/20 text-xs">
                           !
                         </span>
-                        {registrationPaid && outstanding > 0
-                          ? `${naira(outstanding)} left to unlock your class`
-                          : "Tuition fee outstanding"}
+                        {returningUnpaidLevel && access
+                          ? `${naira(access.tuitionFee)} tuition outstanding for this level`
+                          : registrationPaid && outstanding > 0
+                            ? `${naira(outstanding)} left to unlock your class`
+                            : "Tuition fee outstanding"}
                       </div>
                     </>
                   )}
@@ -384,18 +398,20 @@ export default function PaymentLockScreen({
                   <div className="mt-6">
                     <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-white/60">
                       <span>Towards your seat</span>
-                      <span>{progress}%</span>
+                      <span>{returningUnpaidLevel ? "0%" : `${progress}%`}</span>
                     </div>
                     <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/10">
                       <motion.div
                         className="h-full rounded-full bg-gradient-to-r from-[#FF6600] to-[#0D7C7E]"
                         initial={{ width: 0 }}
-                        animate={{ width: `${Math.max(progress, 3)}%` }}
+                        animate={{ width: `${returningUnpaidLevel ? 3 : Math.max(progress, 3)}%` }}
                         transition={{ duration: 1, delay: 0.8, ease: "easeOut" }}
                       />
                     </div>
                     <p className="mt-2 text-xs text-white/60">
-                      {naira(access.totalPaid)} of {naira(access.requiredDeposit)} paid
+                      {returningUnpaidLevel
+                        ? `${naira(0)} of ${naira(access.tuitionFee)} paid this level`
+                        : `${naira(access.totalPaid)} of ${naira(access.requiredDeposit)} paid`}
                     </p>
                   </div>
                 )}
@@ -435,7 +451,9 @@ export default function PaymentLockScreen({
           <p className="mt-10 max-w-md text-sm leading-7 text-white/60">
             {balanceLock
               ? `Your tuition balance is outstanding — settle it to unlock ${areaLabel.toLowerCase()} again.`
-              : `Your registration is confirmed — pay the tuition fee to unlock ${areaLabel.toLowerCase()}.`}
+              : returningUnpaidLevel
+                ? `Pay this level's tuition to unlock ${areaLabel.toLowerCase()}.`
+                : `Your registration is confirmed — pay the tuition fee to unlock ${areaLabel.toLowerCase()}.`}
           </p>
         )}
 

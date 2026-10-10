@@ -19,7 +19,11 @@ import { isTravelPackagePathway } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
-import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import {
+  archiveDeletedAccountHistory,
+  FRESH_ENROLMENT_STUDENT_RESET,
+  lookupEmailAccount,
+} from "@/lib/deleted-account";
 import { batchFromAdmission } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
@@ -249,11 +253,9 @@ export async function POST(request: Request) {
   // another admin just added is caught here. The message says what to do about
   // it rather than leaving the office to guess.
   //
-  // A student the office DELETED is the third case, and the one that used to
-  // trap re-adding the same person: the guard soft-deletes the User and its
-  // email stays in the unique index. `lookupEmailAccount` sees that tombstone;
-  // when it is a former student we revive the row below and update it into the
-  // new details instead of creating a second one (see lib/deleted-account.ts).
+  // A deleted student's email stays reserved by its tombstone. Re-adding that
+  // student archives the old active billing/enrolment records before the
+  // tombstone is reused; see lib/deleted-account.ts.
   const emailState = await lookupEmailAccount(email);
   if (emailState.kind === "live") {
     return NextResponse.json(
@@ -265,8 +267,14 @@ export async function POST(request: Request) {
     );
   }
   const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
-  if (revivedUserId) {
-    await reviveDeletedAccount(revivedUserId);
+  if (
+    emailState.kind === "deleted" &&
+    emailState.tenantId !== (gate.session.user.tenantId ?? null)
+  ) {
+    return NextResponse.json(
+      { error: "That email belongs to a deleted student account from another school." },
+      { status: 409 },
+    );
   }
 
   let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
@@ -309,7 +317,9 @@ export async function POST(request: Request) {
   // this form collects lands in both places at once.
   const profileInput = normalizeProfileInput({ ...body, photoUrl });
   const studentFields = {
+    ...(revivedUserId ? FRESH_ENROLMENT_STUDENT_RESET : {}),
     level,
+    tenantId: gate.session.user.tenantId,
     branchId,
     status,
     tutorId,
@@ -321,6 +331,9 @@ export async function POST(request: Request) {
   };
 
   try {
+    if (revivedUserId) {
+      await archiveDeletedAccountHistory(revivedUserId, gate.session.user.tenantId ?? null);
+    }
     // Revived tombstone (see the pre-check above): the row is live again but
     // still carries the deleted student's old details, so update it into the
     // new ones rather than creating a second User against the same email. A
@@ -334,6 +347,7 @@ export async function POST(request: Request) {
             password: hashedPassword,
             role: "STUDENT",
             tenantId: gate.session.user.tenantId,
+            deletedAt: null,
             student: {
               upsert: {
                 create: { ...studentFields, profile: { create: profileInput } },
@@ -462,6 +476,7 @@ export async function POST(request: Request) {
         classType,
         deliveryMode,
         studentCode,
+        reEnrolled: Boolean(revivedUserId),
         // Handed back so the admin screen has it even when it typed nothing
         // and this route generated one — the only place it is ever shown.
         password,

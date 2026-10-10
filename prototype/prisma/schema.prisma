@@ -501,6 +501,7 @@ model Student {
   // students created before the scheme existed are backfilled by
   // scripts/backfill-student-codes.mjs rather than blocked at read time.
   studentCode String? @unique
+  referralCode String? @unique
 
   status        String @default("active")
   level         String @default("A1") // A1, A2, B1, B2, C1, C2
@@ -808,6 +809,8 @@ model Student {
    * Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private.
    */
   tutorMessages         TutorMessage[]
+  referralsGiven        ReferralRedemption[]   @relation("ReferralReferrer")
+  referralReceived      ReferralRedemption?    @relation("ReferralReferred")
   /**
    * What the tutor wrote up after each private session.
    */
@@ -2272,6 +2275,14 @@ model Payment {
   status             String    @default("pending")
   method             String
   description        String?
+  /**
+   * Which CEFR level this payment was recorded against, e.g. "A2".
+   * Null on older rows and on the ₦5,000 registration fee. `Student.level`
+   * is the CURRENT pointer and moves on promotion; this stamp is the
+   * historical record so an August A1 payment still reads as A1 after
+   * they sit A2 in October.
+   */
+  level              String?
   stripeSessionId    String?
   paymentIntentId    String?
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent
@@ -2291,6 +2302,41 @@ model Payment {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+  @@index([studentId, level])
+}
+
+model ReferralRedemption {
+  id                String         @id @default(cuid())
+  referralCode      String
+  status            String         @default("registered")
+  referrerStudentId String
+  referrerStudent   Student        @relation("ReferralReferrer", fields: [referrerStudentId], references: [id], onDelete: Cascade)
+  referredStudentId String         @unique
+  referredStudent   Student        @relation("ReferralReferred", fields: [referredStudentId], references: [id], onDelete: Cascade)
+  tenantId          String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  holds             ReferralHold[]
+
+  @@index([tenantId])
+  @@index([referrerStudentId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ReferralHold {
+  id           String             @id @default(cuid())
+  redemptionId String
+  redemption   ReferralRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
+  reason       String
+  heldAt       DateTime           @default(now())
+  releasedAt   DateTime?
+  resolvedById String?
+  tenantId     String?
+  createdAt    DateTime           @default(now())
+
+  @@index([tenantId])
+  @@index([redemptionId, releasedAt])
+  @@index([heldAt])
 }
 
 /// ONE ROW PER LEVEL A STUDENT PASSES THROUGH — the debit side of tuition.
@@ -4415,12 +4461,20 @@ model LearnerUsageEvent {
    */
   sessionKey      String?
   durationSeconds Int      @default(0)
+  /**
+   * Which portal look the learner was ON when this happened — "youth" or
+   * "classic", as the browser held it. Lets the school compare the two looks
+   * (and the two community skins) on real behaviour. Null on rows from before
+   * this existed, and for staff.
+   */
+  look            String?
   occurredAt      DateTime @default(now())
 
   @@index([tenantId, area, occurredAt])
   @@index([userId, occurredAt])
   @@index([tenantId, occurredAt])
   @@index([sessionKey])
+  @@index([tenantId, look, occurredAt])
 }
 
 /**

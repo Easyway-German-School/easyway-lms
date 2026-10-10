@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
-import { prisma } from "@/lib/prisma";
+import { guardedPrisma, prisma, unguardedPrisma } from "@/lib/prisma";
 import { isTravelPackagePathway, receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
 import { buildLedger, type Ledger } from "@/lib/finance/ledger";
 
@@ -111,6 +111,41 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
           pathway: student.pathway,
         });
 
+  const existingArchived = await unguardedPrisma.tuitionCharge.findUnique({
+    where: { studentId_level: { studentId: student.id, level } },
+    select: { id: true, amount: true, deletedAt: true, studentId: true },
+  });
+  if (existingArchived?.deletedAt && existingArchived.studentId === student.id) {
+    const charge = await guardedPrisma.tuitionCharge.update({
+      where: { id: existingArchived.id },
+      data: {
+        amount,
+        classType: student.classType ?? "group",
+        branchName: student.branch?.name ?? null,
+        origin: input.origin,
+        legacyArrears: Boolean(input.legacyArrears),
+        waivedAmount: 0,
+        waivedReason: null,
+        note: input.note ?? null,
+        settledAt: null,
+        createdAt: input.now ?? new Date(),
+        deletedAt: null,
+        ...(student.tenantId ? { tenantId: student.tenantId } : {}),
+      },
+      select: { id: true },
+    });
+    return { created: true, chargeId: charge.id, level, amount };
+  }
+
+  if (existingArchived) {
+    return {
+      created: false,
+      chargeId: existingArchived.id,
+      level,
+      amount: existingArchived.amount,
+    };
+  }
+
   const data: Prisma.TuitionChargeUncheckedCreateInput = {
     studentId: student.id,
     level,
@@ -161,10 +196,10 @@ export async function loadStudentLedger(studentId: string, now: Date = new Date(
     }),
     prisma.payment.findMany({
       where: { studentId, ...receivedPaymentFilter() },
-      select: { amount: true },
+      select: { amount: true, level: true, description: true, createdAt: true },
     }),
   ]);
 
   const paid = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-  return buildLedger(charges, paid, now);
+  return buildLedger(charges, paid, now, payments);
 }

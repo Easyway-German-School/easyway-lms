@@ -57,6 +57,8 @@ export const TENANT_OWNED_MODELS = [
   "Certificate",
   "Invoice",
   "Payment",
+  "ReferralRedemption",
+  "ReferralHold",
   "TuitionCharge",
   "PaymentPlan",
   "Lead",

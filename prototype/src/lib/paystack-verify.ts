@@ -59,6 +59,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   const derivedTotal = Math.round(Number(metadata.totalAmount || paymentAmount));
   const totalAmount = tuitionFeeValue > 0 ? Math.max(tuitionFeeValue, derivedTotal) : derivedTotal;
   const forNextLevel = String(metadata.forNextLevel || "") === "true";
+  const paymentLevel = String(metadata.level || metadata.targetLevel || "").trim().toUpperCase();
   const paymentClassification = classifyPaymentTransaction({
     // A next-level checkout's amount can exceed the new level's fee because it
     // ALSO clears an old balance (see the breakdown in /api/paystack/initialize).
@@ -116,6 +117,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
         currency,
         method: "paystack",
         description: getPaymentDescription(effectivePaymentType, pathwayName),
+        ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
         paymentIntentId: reference,
       },
     });
@@ -203,6 +205,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
       status: settledStatus,
       method: "paystack",
       description: getPaymentDescription(effectivePaymentType, pathwayName),
+      ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
       stripeSessionId: reference,
       paymentIntentId: reference,
     },

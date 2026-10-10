@@ -3,8 +3,12 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { motion } from "framer-motion";
+
 import Avatar from "@/components/Avatar";
-import { BellIcon, ChevronLeftIcon, CoinIcon, CrossIcon, EyeIcon, EyeOffIcon, HandIcon, TargetIcon } from "@/components/icons";
+import { YouthFace, youthSpring } from "@/components/youth/YouthMotion";
+import { BellIcon, BookOpenIcon, ChevronLeftIcon, CoinIcon, CrossIcon, EyeIcon, EyeOffIcon, HandIcon, LockIcon, TargetIcon, UsersIcon } from "@/components/icons";
+import type { RoomDef } from "@/lib/campus";
 import { usePushNotifications } from "@/lib/use-push";
 import type { PresencePerson } from "@/lib/campus";
 import type { RequestCard } from "@/lib/campus-server";
@@ -68,6 +72,86 @@ export function GhostToggle({ hidden, busy, onChange }: { hidden: boolean; busy:
   );
 }
 
+const ROOM_TINT: Record<string, { bg: string; ink: string; icon: ReactNode }> = {
+  library: { bg: "#E1F5EE", ink: "#085041", icon: <BookOpenIcon className="h-6 w-6" /> },
+  arena: { bg: "#EEEDFE", ink: "#3C3489", icon: <TargetIcon className="h-6 w-6" /> },
+  cafe: { bg: "#FAECE7", ink: "#712B13", icon: <UsersIcon className="h-6 w-6" /> },
+  exam: { bg: "#FAEEDA", ink: "#633806", icon: <BookOpenIcon className="h-6 w-6" /> },
+};
+
+export function CampusRoomCard({
+  room,
+  count,
+  people,
+  more,
+  tall = false,
+  href,
+  onSelect,
+  destinationLabel,
+}: {
+  room: RoomDef;
+  count: number;
+  people: PresencePerson[];
+  more: number;
+  tall?: boolean;
+  href?: string;
+  onSelect?: () => void;
+  destinationLabel?: string;
+}) {
+  const tint = ROOM_TINT[room.id] ?? ROOM_TINT.library;
+  const isCampusRoomOpen = room.open;
+  const interactive = Boolean(href || onSelect);
+  const body = (
+    <motion.div
+      whileHover={interactive ? { y: -5, scale: 1.02 } : undefined}
+      whileTap={interactive ? { scale: 0.97 } : undefined}
+      transition={youthSpring}
+      className={`youth-room relative flex h-full flex-col justify-between rounded-[1.75rem] p-5 ${
+        tall ? "min-h-[12rem] sm:min-h-[14rem]" : "min-h-[9.5rem]"
+      } ${isCampusRoomOpen && count > 0 ? "youth-room-live" : ""} ${interactive ? "" : "opacity-70"}`}
+      style={{ background: tint.bg, color: tint.ink }}
+    >
+      <div className="flex items-start justify-between">
+        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/60">{tint.icon}</span>
+        {!interactive ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
+      </div>
+      <div>
+        <p className="text-base font-extrabold leading-tight">{room.name}</p>
+        <p className="mt-0.5 text-xs opacity-80">{isCampusRoomOpen ? room.blurb : destinationLabel ?? "Opening soon"}</p>
+        {isCampusRoomOpen ? (
+          <div className="mt-2 space-y-1.5">
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold">
+              <span className={`h-2 w-2 rounded-full ${count > 0 ? "youth-glow bg-emerald-500" : "bg-black/20"}`} />
+              {count > 0 ? `${count} here` : onSelect ? "Empty right now" : href ? "Be the first" : "Empty"}
+            </span>
+            <div className="min-h-[24px]">
+              <FaceRow people={people} more={more} size={24} />
+            </div>
+          </div>
+        ) : interactive ? <span className="mt-2 inline-flex text-xs font-extrabold">{destinationLabel ?? "Opening soon"} →</span> : null}
+      </div>
+    </motion.div>
+  );
+  return onSelect ? (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="block h-full w-full rounded-[1.75rem] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+      aria-label={`Preview ${room.name}${room.open ? "" : ", not yet open to students"}`}
+    >
+      {body}
+    </button>
+  ) : href ? (
+    <Link
+      href={href}
+      className="block h-full rounded-[1.75rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+      aria-label={`${room.name}: ${destinationLabel ?? room.blurb}`}
+    >
+      {body}
+    </Link>
+  ) : body;
+}
+
 /** Faces in a row, with a +N for the rest. */
 export function FaceRow({ people, more = 0, size = 28 }: { people: PresencePerson[]; more?: number; size?: number }) {
   if (people.length === 0 && more === 0) return null;
@@ -75,7 +159,7 @@ export function FaceRow({ people, more = 0, size = 28 }: { people: PresencePerso
     <span className="flex items-center">
       {people.slice(0, 5).map((p, i) => (
         <span key={p.userId} className={i === 0 ? "" : "-ml-2"} style={{ zIndex: 10 - i }}>
-          <Avatar config={p.avatar} seed={p.name} size={size} className="rounded-full ring-2 ring-[var(--surface)]" />
+          <YouthFace config={p.avatar} seed={p.name} size={size} live />
         </span>
       ))}
       {more + Math.max(0, people.length - 5) > 0 ? (
@@ -114,8 +198,13 @@ export function PersonCard({
   }
 
   return (
-    <li className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <Avatar config={person.avatar} seed={person.name} size={44} />
+    <motion.li
+      variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+      initial="hidden"
+      animate="show"
+      className="youth-pop flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
+    >
+      <YouthFace config={person.avatar} seed={person.name} size={48} live />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-extrabold">{person.name}</p>
         <p className="text-xs text-[var(--muted)]">
@@ -123,15 +212,17 @@ export function PersonCard({
           {person.room !== "lobby" ? ` · in the ${person.room === "exam" ? "Prüfungsraum" : person.room[0].toUpperCase() + person.room.slice(1)}` : ""}
         </p>
       </div>
-      <button
+      <motion.button
         type="button"
         onClick={wave}
         disabled={send.isPending || waved}
         aria-label={`Wave at ${person.name}`}
+        animate={waved ? { rotate: [0, -18, 18, -10, 10, 0], scale: [1, 1.15, 1] } : {}}
+        transition={{ duration: 0.55 }}
         className="grid h-10 w-10 place-items-center rounded-full bg-[var(--surface-alt)] text-[var(--foreground-soft)] transition active:scale-90 disabled:opacity-50"
       >
         <HandIcon className="h-5 w-5" />
-      </button>
+      </motion.button>
       {onChallenge ? (
         <button
           type="button"
@@ -142,7 +233,7 @@ export function PersonCard({
           <TargetIcon className="h-4 w-4" /> Duel
         </button>
       ) : null}
-    </li>
+    </motion.li>
   );
 }
 
@@ -225,7 +316,7 @@ export function Flash({ message }: { message: string }) {
   if (!message) return null;
   return (
     <div role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 lg:bottom-8">
-      <span className="rounded-full bg-[var(--foreground)] px-4 py-2 text-sm font-semibold text-[var(--surface)] shadow-lg">{message}</span>
+      <span className="youth-pop rounded-full bg-[var(--foreground)] px-4 py-2 text-sm font-semibold text-[var(--surface)] shadow-lg">{message}</span>
     </div>
   );
 }

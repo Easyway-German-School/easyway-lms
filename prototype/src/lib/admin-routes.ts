@@ -67,6 +67,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/payments", capability: "payments" },
   { prefix: "/admin/finance", capability: "payments" },
+  { prefix: "/admin/referrals", capability: "payments" },
   // Refund decisions are money leaving the school, and Terms acceptance is
   // what a refund decision gets checked against — same desk as the rest of
   // the fee book rather than a new capability for what is, underneath, a

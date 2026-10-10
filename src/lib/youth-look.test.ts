@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  DEFAULT_LOOK_WAVE,
-  isInviteAge,
-  parseLookChoice,
-  parseLookWave,
-  phoneShareOf,
-  promptFor,
-  resolveLook,
-} from "@/lib/youth-look";
+import { DEFAULT_LOOK_WAVE, parseLookChoice, parseLookWave, promptFor, resolveLook } from "@/lib/youth-look";
 
 describe("resolveLook", () => {
   it("puts under-25s on the new look by default", () => {
@@ -17,7 +9,7 @@ describe("resolveLook", () => {
   });
 
   it("leaves 25 and over on the classic look", () => {
-    expect(resolveLook({ age: 25, choice: null })).toEqual({ look: "classic", reason: "default", cohort: "classic", inWave: false });
+    expect(resolveLook({ age: 25, choice: null })).toEqual({ look: "classic", reason: "default", cohort: "invited", inWave: false });
     expect(resolveLook({ age: 52, choice: null }).look).toBe("classic");
   });
 
@@ -39,7 +31,7 @@ describe("resolveLook", () => {
   });
 
   it("always honours the student's own choice, in both directions", () => {
-    expect(resolveLook({ age: 60, choice: "youth" })).toEqual({ look: "youth", reason: "chosen", cohort: "classic", inWave: false });
+    expect(resolveLook({ age: 60, choice: "youth" })).toEqual({ look: "youth", reason: "chosen", cohort: "invited", inWave: false });
     expect(resolveLook({ age: 15, choice: "classic" })).toEqual({ look: "classic", reason: "chosen", cohort: "wave", inWave: true });
     expect(resolveLook({ age: null, choice: "youth" }).look).toBe("youth");
   });
@@ -54,13 +46,13 @@ describe("parseLookWave", () => {
   });
 
   it("reads a well-formed row", () => {
-    expect(parseLookWave({ maxAge: 30, includeUnknownAge: true, inviteMaxAge: 40, invitePhoneShare: 0.5, inviteMinEvents: 5 })).toEqual({
-      maxAge: 30,
-      includeUnknownAge: true,
-      inviteMaxAge: 40,
-      invitePhoneShare: 0.5,
-      inviteMinEvents: 5,
-    });
+    expect(parseLookWave({ maxAge: 30, includeUnknownAge: true })).toEqual({ maxAge: 30, includeUnknownAge: true });
+  });
+
+  it("ignores the retired phone-usage invitation rules an older save may carry", () => {
+    expect(parseLookWave({ maxAge: 24, includeUnknownAge: false, inviteMaxAge: 34, invitePhoneShare: 0.6, inviteMinEvents: 10 })).toEqual(
+      DEFAULT_LOOK_WAVE,
+    );
   });
 
   it("clamps an absurd age and rounds a fractional one", () => {
@@ -80,95 +72,29 @@ describe("parseLookChoice", () => {
   });
 });
 
-describe("the invited cohort", () => {
-  const phone = { events: 40, mobileEvents: 36 }; // 90% on a phone
-  const laptop = { events: 40, mobileEvents: 4 }; // 10%
-
-  it("invites 25–34s who live on their phone, without changing their layout", () => {
-    const d = resolveLook({ age: 29, choice: null, usage: phone });
-    expect(d).toEqual({ look: "classic", reason: "default", cohort: "invited", inWave: false });
-  });
-
-  it("does not invite a 25–34 who mostly uses a laptop", () => {
-    expect(resolveLook({ age: 29, choice: null, usage: laptop }).cohort).toBe("classic");
-  });
-
-  it("does not trust a phone share built on a handful of events", () => {
-    expect(resolveLook({ age: 29, choice: null, usage: { events: 3, mobileEvents: 3 } }).cohort).toBe("classic");
-  });
-
-  it("never invites anyone with no usage on record", () => {
-    expect(resolveLook({ age: 29, choice: null, usage: null }).cohort).toBe("classic");
-    expect(resolveLook({ age: 29, choice: null }).cohort).toBe("classic");
-  });
-
-  it("never invites 35 and over, however phone-heavy", () => {
-    expect(resolveLook({ age: 35, choice: null, usage: phone }).cohort).toBe("classic");
-    expect(resolveLook({ age: 58, choice: null, usage: phone }).cohort).toBe("classic");
-  });
-
-  it("never invites an unknown age", () => {
-    expect(resolveLook({ age: null, choice: null, usage: phone }).cohort).toBe("classic");
-  });
-
-  it("knows which ages are worth measuring", () => {
-    expect(isInviteAge(24)).toBe(false);
-    expect(isInviteAge(25)).toBe(true);
-    expect(isInviteAge(34)).toBe(true);
-    expect(isInviteAge(35)).toBe(false);
-    expect(isInviteAge(null)).toBe(false);
-  });
-
-  it("measures phone share", () => {
-    expect(phoneShareOf(phone)).toBeCloseTo(0.9);
-    expect(phoneShareOf({ events: 0, mobileEvents: 0 })).toBeNull();
-    expect(phoneShareOf(null)).toBeNull();
-  });
-
-  it("keeps invitations from reaching down into the wave", () => {
-    expect(parseLookWave({ maxAge: 30, inviteMaxAge: 20 }).inviteMaxAge).toBe(30);
-  });
-});
-
 describe("promptFor", () => {
   const wave = resolveLook({ age: 17, choice: null });
-  const invited = resolveLook({ age: 29, choice: null, usage: { events: 50, mobileEvents: 50 } });
-  const classic = resolveLook({ age: 52, choice: null });
-  const now = new Date("2026-10-06T08:00:00Z");
-  const oldTimer = { createdAt: new Date("2026-08-01T00:00:00Z"), now };
-  const joinedAfterLaunch = { createdAt: new Date("2026-10-05T09:00:00Z"), now };
+  const older = resolveLook({ age: 29, choice: null });
+  const senior = resolveLook({ age: 52, choice: null });
+  const noBirthDate = resolveLook({ age: null, choice: null });
 
-  it("announces to existing wave students and invites the invited, once", () => {
-    expect(promptFor(wave, false, oldTimer)).toBe("announce");
-    expect(promptFor(invited, false, oldTimer)).toBe("invite");
+  it("announces to wave students and offers the choice to everyone else, once", () => {
+    expect(promptFor(wave, false)).toBe("announce");
+    expect(promptFor(older, false)).toBe("invite");
+  });
+
+  it("offers the choice at any age, and when no birth date is on file", () => {
+    expect(promptFor(senior, false)).toBe("invite");
+    expect(promptFor(noBirthDate, false)).toBe("invite");
   });
 
   it("never prompts the same student twice", () => {
-    expect(promptFor(wave, true, oldTimer)).toBeNull();
-    expect(promptFor(invited, true, oldTimer)).toBeNull();
-  });
-
-  it("never interrupts the classic cohort", () => {
-    expect(promptFor(classic, false, oldTimer)).toBeNull();
+    expect(promptFor(wave, true)).toBeNull();
+    expect(promptFor(older, true)).toBeNull();
   });
 
   it("never prompts someone who already picked a look themselves", () => {
-    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false, oldTimer)).toBeNull();
-    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false, oldTimer)).toBeNull();
-  });
-
-  it("does not announce a 'fresh look' to a student who joined after launch — they never knew the old one", () => {
-    expect(promptFor(wave, false, joinedAfterLaunch)).toBeNull();
-  });
-
-  it("does not guess when the join date is unknown", () => {
-    expect(promptFor(wave, false)).toBeNull();
-    expect(promptFor(wave, false, { createdAt: null })).toBeNull();
-    expect(promptFor(invited, false)).toBeNull();
-  });
-
-  it("holds an invitation back until the student's first week is over", () => {
-    expect(promptFor(invited, false, { createdAt: new Date("2026-10-02T00:00:00Z"), now })).toBeNull();
-    expect(promptFor(invited, false, { createdAt: new Date("2026-09-28T00:00:00Z"), now })).toBe("invite");
+    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false)).toBeNull();
+    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false)).toBeNull();
   });
 });

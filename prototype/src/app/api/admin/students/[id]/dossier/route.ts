@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { isReturningLevelStudent, sumPaidTowardLevel } from "@/lib/payment-level";
 import { BEHIND_TUITION_MIN_DAYS } from "@/lib/finance/receivables";
 import { accessFromStudent } from "@/lib/student-access";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
@@ -177,6 +178,7 @@ export async function GET(
         status: true,
         method: true,
         description: true,
+        level: true,
         createdAt: true,
       },
     }),
@@ -314,8 +316,24 @@ export async function GET(
 
   const fee = access.tuitionFee;
   const deposit = access.requiredDeposit;
-  const paid = access.totalPaid;
-  const owed = access.outstandingBalance;
+  const currentLevel = String(student.level ?? "").trim().toUpperCase();
+  const currentCharge = student.tuitionCharges.find(
+    (charge) => String(charge.level ?? "").trim().toUpperCase() === currentLevel,
+  );
+  const returningStudent = isReturningLevelStudent({
+    currentLevel,
+    chargeLevels: student.tuitionCharges.map((charge) => charge.level),
+    enrolmentLevels: enrolments.map((row) => row.level),
+    completedLevel: student.levelCompletedFor,
+    currentChargeCreatedAt: currentCharge?.createdAt,
+    payments,
+  });
+  // Returning students already paid registration on the previous level. This
+  // file only shows what they have paid toward THIS level's tuition — leftover
+  // A1 cash and the ₦5,000 registration row must not look like an A2 deposit.
+  const paidTowardLevel = sumPaidTowardLevel(payments, currentLevel, currentCharge?.createdAt);
+  const paid = returningStudent ? paidTowardLevel : access.totalPaid;
+  const owed = returningStudent ? Math.max(0, fee - paidTowardLevel) : access.outstandingBalance;
 
   /**
    * Which side of the padlock they are on. Named the same four ways the
@@ -327,11 +345,28 @@ export async function GET(
    * ledger-aware `access` object now (`progressPercent`/`outstandingBalance`)
    * instead of a flat `paid >= fee` comparison against the static sticker
    * price — see the module comment for what that flat comparison got wrong.
+   *
+   * Returning / next-level students never sit in `registeredOnly`: that label
+   * is for a brand-new file that has only paid the ₦5,000 registration fee.
    */
-  const depositMet = access.progressPercent >= 100;
+  const depositMet = returningStudent ? paidTowardLevel >= deposit : access.depositCleared;
   const fullyPaid = owed <= 0;
-  const paywall = paid <= 0 ? "unpaid" : fullyPaid ? "fullPaid" : depositMet ? "depositPaid" : "registeredOnly";
-  const lockedOut = !depositMet;
+  const paywall = returningStudent
+    ? fullyPaid
+      ? "fullPaid"
+      : depositMet
+        ? "depositPaid"
+        : "owesThisLevel"
+    : paid <= 0
+      ? "unpaid"
+      : fullyPaid
+        ? "fullPaid"
+        : depositMet
+          ? "depositPaid"
+          : "registeredOnly";
+  // Match the student's portal gate, including the overdue-balance and
+  // upcoming-intake locks — deposit progress alone does not mean classes open.
+  const lockedOut = !access.hasAccess;
 
   // Part-payment balance lock — deposit in, fee not, 30 days after classes
   // started (falling back to enrolment), unless an admin grace date or an
@@ -468,6 +503,7 @@ export async function GET(
     money: {
       paywall,
       lockedOut,
+      returningStudent,
       // Placed in an intake that has not opened: the portal is a countdown
       // whatever they have paid, so "Portal open" would be wrong even for a
       // student who paid in full. See lib/batch-reservation.ts.
@@ -489,7 +525,10 @@ export async function GET(
             owed,
             feeProgressPercent: access.feeProgressPercent,
             reminderStages: (student.feeRemindersScheduled ?? {}) as Record<string, boolean>,
-            payments: payments.map((payment) => ({
+            payments: (returningStudent
+              ? payments.filter((payment) => !isRegistrationFeePayment(payment.description))
+              : payments
+            ).map((payment) => ({
               ...payment,
               createdAt: payment.createdAt.toISOString(),
             })),

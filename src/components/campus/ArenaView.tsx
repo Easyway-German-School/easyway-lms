@@ -108,7 +108,7 @@ export default function ArenaView() {
         <CampusHeader title="Arena" subtitle="Wortduell — eight words, der, die or das" back="/campus" right={<CoinChip balance={live?.balance} />} />
 
         {pending ? (
-          <div className="mt-5 rounded-3xl bg-[#EEEDFE] p-5 text-center text-[#3C3489]">
+          <div className="youth-room-live mt-5 rounded-3xl bg-[#EEEDFE] p-5 text-center text-[#3C3489]">
             <p className="text-xs font-bold uppercase tracking-[0.25em]">Challenge sent</p>
             <p className="mt-2 text-lg font-extrabold">Waiting for {pending.label} to say yes…</p>
             <p className="mt-1 font-mono text-3xl font-black tabular-nums">

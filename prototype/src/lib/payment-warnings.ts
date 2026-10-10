@@ -126,7 +126,10 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       admission: true,
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      payments: {
+        where: receivedPaymentFilter(),
+        select: { amount: true, level: true, description: true, createdAt: true },
+      },
       tuitionCharges: {
         where: { deletedAt: null },
         select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
@@ -168,7 +171,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     // The per-level ledger. When populated it decides both what is owed and
     // which clock the lock runs on; legacy arrears (levels passed before the
     // ledger existed) are chased on a gentle track, never with a lock threat.
-    const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now);
+    const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now, student.payments);
     const hasLedger = ledgerIsPopulated(ledger);
     const goForwardOwed = hasLedger ? ledger.goForwardOutstanding : Math.max(0, tuitionFee - totalPaid);
 

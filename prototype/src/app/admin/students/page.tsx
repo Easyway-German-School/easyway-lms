@@ -270,7 +270,13 @@ function StudentsRoster() {
    * never re-fetched.
    */
   const [savedCredentials, setSavedCredentials] = useState<
-    Array<{ name: string; email: string; password: string; studentCode?: string | null }>
+    Array<{
+      name: string;
+      email: string;
+      password: string;
+      studentCode?: string | null;
+      reEnrolled?: boolean;
+    }>
   >([]);
   /** Whether the "send their login by email?" prompt has been answered yet, for the credentials just created. */
   const [sendCredsState, setSendCredsState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -549,6 +555,7 @@ function StudentsRoster() {
         email: newEmail.trim().toLowerCase(),
         password: typeof data?.password === "string" ? data.password : newPassword.trim(),
         studentCode: data?.studentCode ?? null,
+        reEnrolled: data?.reEnrolled === true,
       };
       setSavedCredentials((prev) => [...prev, minted]);
     }
@@ -1446,6 +1453,13 @@ function StudentsRoster() {
                 Dismiss
               </button>
             </div>
+            {savedCredentials.some((cred) => cred.reEnrolled) ? (
+              <p className="rounded-xl border border-emerald-300 bg-white/70 px-3 py-2">
+                A previously deleted account was re-enrolled. Its former tuition charges, payment plans, and
+                enrolment records are archived in the audit trail. Recorded payments remain on the account and
+                apply to the new charge.
+              </p>
+            ) : null}
             <ul className="space-y-1">
               {savedCredentials.map((cred) => (
                 <li key={cred.email}>

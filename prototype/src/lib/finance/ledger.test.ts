@@ -37,6 +37,56 @@ describe("buildLedger — FIFO allocation", () => {
     expect(ledger.lifetimeOutstanding).toBe(100_000);
   });
 
+  it("applies a level-stamped payment to that level before older balances", () => {
+    const ledger = buildLedger(
+      [
+        charge({ id: "a2", level: "A2", amount: 180_000, createdAt: new Date(NOW.getTime() - 60 * DAY) }),
+        charge({ id: "b1", level: "B1", amount: 180_000, createdAt: new Date(NOW.getTime() - 10 * DAY) }),
+      ],
+      180_000,
+      NOW,
+      [{ amount: 180_000, level: "B1", description: "Tuition payment", createdAt: NOW }],
+    );
+
+    expect(ledger.lines.map((line) => [line.level, line.allocated, line.outstanding])).toEqual([
+      ["A2", 0, 180_000],
+      ["B1", 180_000, 0],
+    ]);
+    expect(ledger.lifetimePaid).toBe(180_000);
+    expect(ledger.lifetimeOutstanding).toBe(180_000);
+  });
+
+  it("credits a recorded previous-level payment when the old charge is archived", () => {
+    const ledger = buildLedger(
+      [charge({ id: "new-a1", level: "A1", amount: 150_000 })],
+      150_000,
+      NOW,
+      [{ amount: 150_000, level: "B1", description: "Tuition payment", createdAt: NOW }],
+    );
+
+    expect(ledger.lines.map((line) => [line.level, line.allocated, line.outstanding])).toEqual([
+      ["A1", 150_000, 0],
+    ]);
+    expect(ledger.lifetimePaid).toBe(150_000);
+  });
+
+  it("keeps unlabelled payments on the existing oldest-charge-first rule", () => {
+    const ledger = buildLedger(
+      [
+        charge({ id: "a2", level: "A2", amount: 180_000, createdAt: new Date(NOW.getTime() - 60 * DAY) }),
+        charge({ id: "b1", level: "B1", amount: 180_000, createdAt: new Date(NOW.getTime() - 10 * DAY) }),
+      ],
+      180_000,
+      NOW,
+      [{ amount: 180_000, description: "Bank transfer", createdAt: NOW }],
+    );
+
+    expect(ledger.lines.map((line) => [line.level, line.allocated])).toEqual([
+      ["A2", 180_000],
+      ["B1", 0],
+    ]);
+  });
+
   it("orders charges raised in the same instant by ladder position", () => {
     const sameInstant = new Date(NOW.getTime() - 10 * DAY);
     const ledger = buildLedger(

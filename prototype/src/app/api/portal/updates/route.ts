@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSpaceScope } from "@/lib/community-spaces";
 import { unreadByChannel, totalUnread } from "@/lib/community-unread";
 import { previewOf } from "@/lib/community-notify";
+import { storedNotificationLink } from "@/lib/notification-destinations";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export type PortalUpdate = {
   title: string;
   body: string;
   link: string | null;
+  kind?: string | null;
   at: string;
   severity: string;
   author: { name: string } | null;
@@ -131,7 +133,8 @@ export async function GET(request: Request) {
         source: "notification" as const,
         title: notification.title,
         body: notification.message,
-        link: notification.link,
+        link: storedNotificationLink(notification.kind, notification.link),
+        kind: notification.kind,
         at: notification.createdAt.toISOString(),
         severity: notification.severity,
         author: null,

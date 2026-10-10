@@ -114,7 +114,8 @@ export default function NotificationInvite({
   const accept = async () => {
     // The native prompt fires inside here — after a deliberate tap, which is
     // the only moment a browser will honour the request anyway.
-    await enable();
+    const enabled = await enable();
+    if (!enabled) return;
     recordAsk();
     setJustEnabled(true);
   };

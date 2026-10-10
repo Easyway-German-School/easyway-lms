@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import { rewriteNotificationLink } from "@/lib/notification-destinations";
 
 /**
  * The bell, for whoever is signed in.
@@ -138,7 +139,7 @@ export async function GET(request: Request) {
         message: n.message,
         kind: n.kind,
         severity: n.severity,
-        link: n.link,
+        link: rewriteNotificationLink(n.link),
         channel: n.channel,
         status: n.status,
         readAt: n.readAt?.toISOString() ?? null,

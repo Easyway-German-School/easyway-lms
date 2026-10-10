@@ -6,7 +6,10 @@ import { verdictKeyLabel } from "@/lib/portal-verdict";
 import BackendMap from "./BackendMap";
 import DiagnosePanel, { type DiagnoseTarget } from "./DiagnosePanel";
 import PatternsPanel from "./PatternsPanel";
+import RecoveryPanel from "./RecoveryPanel";
+import RiskRadarPanel from "./RiskRadarPanel";
 import Sparkline from "./Sparkline";
+import { confirmSession, probeSession } from "@/lib/session-confirm";
 
 /* ------------------------------------------------------------------------ */
 /* Types                                                                     */
@@ -67,7 +70,7 @@ function whoIsAffected(info: IncidentDetail): DiagnoseTarget {
   return info.userId ? { userId: info.userId } : null;
 }
 
-type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns";
+type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns" | "recovery" | "risk-radar";
 
 const SEVERITY = {
   critical: { dot: "bg-red-500", text: "text-red-500", label: "Critical" },
@@ -115,6 +118,7 @@ function IncidentList({
   limit,
   expandId,
   onDiagnose,
+  onFindSimilar,
   compact,
 }: {
   kind?: string;
@@ -122,6 +126,7 @@ function IncidentList({
   expandId?: string | null;
   compact?: boolean;
   onDiagnose?: (target: NonNullable<DiagnoseTarget>) => void;
+  onFindSimilar?: (description: string) => void;
 }) {
   const [status, setStatus] = useState<"active" | "resolved" | "ignored" | "all">("active");
   const [kindFilter, setKindFilter] = useState(kind ?? "");
@@ -132,6 +137,8 @@ function IncidentList({
   const [detail, setDetail] = useState<Record<string, IncidentDetail>>({});
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+  const [actionNotice, setActionNotice] = useState("");
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ take: String(limit ?? 60) });
@@ -162,14 +169,70 @@ function IncidentList({
 
   async function act(id: string, next: string) {
     setBusy(id);
+    setActionErrors((current) => ({ ...current, [id]: "" }));
     try {
-      await fetch("/api/admin/developer/incidents", {
+      const response = await fetch("/api/admin/developer/incidents", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, status: next, note }),
       });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || `Could not update incident (${response.status}).`);
       setNote("");
       await load();
+    } catch (error) {
+      setActionErrors((current) => ({
+        ...current,
+        [id]: error instanceof Error ? error.message : "Could not update incident.",
+      }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function isAuthSessionIncident(row: Pick<Incident, "route" | "title"> | null | undefined): boolean {
+    if (!row) return false;
+    const route = (row.route ?? "").toLowerCase();
+    const title = row.title.toLowerCase();
+    return route === "/api/auth/session"
+      || title.includes("/api/auth/session")
+      || /\b(sign[ -]?in|login|signed out)\b/.test(title);
+  }
+
+  async function recoverAuthIncident(id: string) {
+    setBusy(id);
+    setActionNotice("");
+    setActionErrors((current) => ({ ...current, [id]: "" }));
+    try {
+      const { verdict, attempts } = await confirmSession({
+        probe: () => probeSession(fetch, 5_000),
+        sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+        delays: [750, 1_500],
+      });
+      if (verdict === "signed_out") {
+        throw new Error("The server confirms this operator is signed out. The affected tutor must sign in again; their browser session cannot be restored remotely.");
+      }
+      if (verdict !== "alive") {
+        throw new Error("Auth is still not responding after three checks. The incident remains open; try again when the service is reachable.");
+      }
+
+      const resolutionNote = note.trim()
+        || `Auth session endpoint recovered for the Mission Control operator after ${attempts} check${attempts === 1 ? "" : "s"}. This does not remotely refresh the affected tutor's browser session.`;
+      const response = await fetch("/api/admin/developer/incidents", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status: "resolved", note: resolutionNote }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || `Could not resolve incident (${response.status}).`);
+      setNote("");
+      setActionNotice(`Auth responded after ${attempts} check${attempts === 1 ? "" : "s"}; the incident was resolved. If the tutor's own session truly expired, they must sign in again.`);
+      await load();
+    } catch (error) {
+      setActionErrors((current) => ({
+        ...current,
+        [id]: error instanceof Error ? error.message : "Could not verify auth health.",
+      }));
     } finally {
       setBusy(null);
     }
@@ -177,6 +240,7 @@ function IncidentList({
 
   return (
     <div className="space-y-3">
+      {actionNotice && <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{actionNotice}</p>}
       {!compact && (
         <div className="flex flex-wrap items-center gap-2">
           {(["active", "resolved", "ignored", "all"] as const).map((value) => (
@@ -277,6 +341,15 @@ function IncidentList({
                             Diagnose the student this is about →
                           </button>
                         )}
+                        {onFindSimilar && (
+                          <button
+                            type="button"
+                            onClick={() => onFindSimilar([row.title, info.message, row.route].filter(Boolean).join(" ").slice(0, 500))}
+                            className="rounded-lg border border-[var(--border)] px-3 py-1.5 font-semibold"
+                          >
+                            Search similar past fixes →
+                          </button>
+                        )}
                       </>
                     )}
                     <div className="flex flex-wrap items-center gap-2">
@@ -294,9 +367,19 @@ function IncidentList({
                       )}
                       {(row.status === "open" || row.status === "acknowledged") && (
                         <>
-                          <button disabled={busy === row.id} onClick={() => act(row.id, "resolved")} className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white">
-                            Resolve
-                          </button>
+                          {isAuthSessionIncident(row) ? (
+                            <button
+                              disabled={busy === row.id}
+                              onClick={() => void recoverAuthIncident(row.id)}
+                              className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white disabled:opacity-50"
+                            >
+                              {busy === row.id ? "Checking auth…" : "Check auth & resolve"}
+                            </button>
+                          ) : (
+                            <button disabled={busy === row.id} onClick={() => void act(row.id, "resolved")} className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white">
+                              Resolve
+                            </button>
+                          )}
                           <button disabled={busy === row.id} onClick={() => act(row.id, "ignored")} className="rounded-lg border border-[var(--border)] px-2.5 py-1 font-semibold text-[var(--muted)]">
                             Ignore
                           </button>
@@ -308,6 +391,12 @@ function IncidentList({
                         </button>
                       )}
                     </div>
+                    {isAuthSessionIncident(row) && (
+                      <p className="text-[11px] text-[var(--muted)]">
+                        Retries auth health three times before resolving. It cannot remotely refresh the affected tutor&apos;s browser session; if that session truly expired, they must sign in again.
+                      </p>
+                    )}
+                    {actionErrors[row.id] && <p role="alert" className="text-xs text-red-500">{actionErrors[row.id]}</p>}
                   </div>
                 )}
               </li>
@@ -541,12 +630,15 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "access", label: "Access drift" },
   { id: "map", label: "Backend map" },
   { id: "patterns", label: "Patterns" },
+  { id: "recovery", label: "Recovery library" },
+  { id: "risk-radar", label: "Risk radar" },
 ];
 
 export default function MissionControl() {
   const [tab, setTab] = useState<Tab>("overview");
   const [expand, setExpand] = useState<string | null>(null);
   const [diagnoseTarget, setDiagnoseTarget] = useState<DiagnoseTarget>(null);
+  const [recoveryRequest, setRecoveryRequest] = useState<{ text: string; id: number } | null>(null);
 
   // A complaint or drift incident hands its student to the Diagnose tab in one click.
   const diagnoseWho = useMemo(
@@ -562,6 +654,14 @@ export default function MissionControl() {
     () => (id: string) => {
       setExpand(id);
       setTab("incidents");
+    },
+    [],
+  );
+
+  const findSimilar = useMemo(
+    () => (text: string) => {
+      setRecoveryRequest({ text, id: Date.now() });
+      setTab("recovery");
     },
     [],
   );
@@ -599,11 +699,21 @@ export default function MissionControl() {
       </nav>
 
       {tab === "overview" && <OverviewPanel onOpenIncident={openIncident} />}
-      {tab === "incidents" && <IncidentList expandId={expand} onDiagnose={diagnoseWho} />}
+      {tab === "incidents" && <IncidentList expandId={expand} onDiagnose={diagnoseWho} onFindSimilar={findSimilar} />}
       {tab === "diagnose" && <DiagnosePanel target={diagnoseTarget} onTargetUsed={clearTarget} />}
       {tab === "access" && <AccessPanel onDiagnose={diagnoseWho} />}
       {tab === "map" && <BackendMap />}
       {tab === "patterns" && <PatternsTab />}
+      {tab === "recovery" && (
+        <RecoveryPanel
+          key={recoveryRequest?.id ?? 0}
+          initialQuery={recoveryRequest?.text ?? ""}
+          onOpenIncident={openIncident}
+        />
+      )}
+      {tab === "risk-radar" && (
+        <RiskRadarPanel onInvestigate={findSimilar} onOpenIncident={openIncident} />
+      )}
     </div>
   );
 }

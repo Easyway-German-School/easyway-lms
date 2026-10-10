@@ -4,8 +4,8 @@ import { requireCapability } from "@/lib/admin-roles";
 import { ageFromDob, dobOfStudent } from "@/lib/age-bands";
 import { summariseLookCohorts, type CohortRow } from "@/lib/look-cohorts";
 import { prisma } from "@/lib/prisma";
-import { USAGE_WINDOW_DAYS, readLookWave } from "@/lib/youth-look-server";
-import { LOOK_WAVE_KEY, isInviteAge, parseLookChoice, parseLookWave, type PhoneUsage } from "@/lib/youth-look";
+import { readLookWave } from "@/lib/youth-look-server";
+import { LOOK_WAVE_KEY, parseLookChoice, parseLookWave } from "@/lib/youth-look";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +13,9 @@ export const dynamic = "force-dynamic";
  * Who gets the new student look, and how many that is — read and changed from
  * the age report. See src/lib/youth-look.ts for the rules.
  *
- * GET also takes the cutoffs to PREVIEW (`?maxAge=&inviteMaxAge=`), so the
- * admin sees "this would put 61 more students on it" before saving anything.
- * Counts only: no names, no birth dates.
+ * GET also takes the cutoff to PREVIEW (`?maxAge=`), so the admin sees "this
+ * would put 61 more students on it" before saving anything. Counts only: no
+ * names, no birth dates.
  */
 export async function GET(request: Request) {
   const gate = await requireCapability("reports");
@@ -27,9 +27,7 @@ export async function GET(request: Request) {
     const preview = parseLookWave({
       ...saved,
       ...(params.has("maxAge") ? { maxAge: Number(params.get("maxAge")) } : {}),
-      ...(params.has("inviteMaxAge") ? { inviteMaxAge: Number(params.get("inviteMaxAge")) } : {}),
       ...(params.has("includeUnknownAge") ? { includeUnknownAge: params.get("includeUnknownAge") === "true" } : {}),
-      ...(params.has("invitePhoneShare") ? { invitePhoneShare: Number(params.get("invitePhoneShare")) } : {}),
     });
 
     const students = await prisma.student.findMany({
@@ -39,51 +37,20 @@ export async function GET(request: Request) {
         uiLook: true,
         lookPromptedAt: true,
         profile: { select: { dateOfBirth: true } },
-        user: { select: { id: true } },
       },
     });
 
     const now = new Date();
-    const aged = students.map((s) => ({
-      userId: s.user.id,
+    const cohortRows: CohortRow[] = students.map((s) => ({
       age: ageFromDob(dobOfStudent(s.profile, s.admission), now),
       choice: parseLookChoice(s.uiLook),
       prompted: s.lookPromptedAt !== null,
-    }));
-
-    // Phone usage only where it can change an answer: ages that could be INVITED
-    // under either the saved or the previewed cutoffs.
-    const lowest = Math.min(preview.maxAge, saved.maxAge);
-    const highest = Math.max(preview.inviteMaxAge, saved.inviteMaxAge);
-    const measure = aged.filter((s) => s.age !== null && s.age > lowest && s.age <= highest);
-    const usage = new Map<string, PhoneUsage>();
-    if (measure.length) {
-      const since = new Date(Date.now() - USAGE_WINDOW_DAYS * 86_400_000);
-      const rows = await prisma.learnerUsageEvent.groupBy({
-        by: ["userId", "deviceKind"],
-        where: { userId: { in: measure.map((s) => s.userId) }, occurredAt: { gte: since } },
-        _count: { _all: true },
-      });
-      for (const r of rows) {
-        const entry = usage.get(r.userId) ?? { events: 0, mobileEvents: 0 };
-        entry.events += r._count._all;
-        if (r.deviceKind === "mobile") entry.mobileEvents += r._count._all;
-        usage.set(r.userId, entry);
-      }
-    }
-
-    const cohortRows: CohortRow[] = aged.map((s) => ({
-      age: s.age,
-      choice: s.choice,
-      prompted: s.prompted,
-      usage: s.age !== null && isInviteAge(s.age, preview) ? usage.get(s.userId) ?? null : null,
     }));
 
     return NextResponse.json({
       saved,
       preview,
       counts: summariseLookCohorts(cohortRows, preview),
-      windowDays: USAGE_WINDOW_DAYS,
     });
   } catch (error) {
     console.error("Failed to load the look wave:", error);
@@ -91,7 +58,7 @@ export async function GET(request: Request) {
   }
 }
 
-/** Save new cutoffs. Same gate as the other school-wide settings. */
+/** Save a new cutoff. Same gate as the other school-wide settings. */
 export async function POST(request: Request) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;

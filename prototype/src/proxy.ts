@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { isPlatformHost } from "@/lib/platform/brand";
+import { liveKitConnectSrc } from "@/lib/live-classroom";
 
 /**
  * The outermost layer: headers on every response, and a brake on the routes
@@ -252,9 +253,7 @@ function contentSecurityPolicy(): string {
     process.env.STORAGE_S3_ENDPOINT,
   ].filter(Boolean) as string[];
 
-  const livekit = process.env.LIVEKIT_URL
-    ? [process.env.LIVEKIT_URL, process.env.LIVEKIT_URL.replace(/^wss:/, "https:")]
-    : [];
+  const livekit = liveKitConnectSrc();
 
   return [
     "default-src 'self'",
@@ -266,7 +265,7 @@ function contentSecurityPolicy(): string {
     `img-src 'self' data: blob: ${media.join(" ")}`,
     `media-src 'self' blob: ${media.join(" ")}`,
     "font-src 'self' data:",
-    `connect-src 'self' https://api.paystack.co ${livekit.join(" ")} ${media.join(" ")}`,
+    `connect-src 'self' https://api.paystack.co http://127.0.0.1:7524 ${livekit.join(" ")} ${media.join(" ")}`,
     "frame-src 'self' https://checkout.paystack.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",

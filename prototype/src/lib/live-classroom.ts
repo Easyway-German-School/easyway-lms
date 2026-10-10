@@ -77,6 +77,40 @@ export function liveKitConfigured(): boolean {
   return missingLiveKitConfig().length === 0;
 }
 
+/**
+ * Origins the browser is allowed to open for a live class.
+ *
+ * Naming only `LIVEKIT_URL` is not enough. LiveKit Cloud hands the client
+ * regional signalling hosts and TURN servers (`*.livekit.cloud`,
+ * `*.turn.livekit.cloud`) after join. Chrome applies `connect-src` to those
+ * WebSocket and ICE connections. A policy that lists the project URL and
+ * nothing else looks fine on a network that can reach the SFU directly, and
+ * hangs forever on "Connecting you to your class" the moment the ISP blocks
+ * UDP and TURN is required — Zoom and Meet never show that because their
+ * TURN hosts are on the same origin policy as the app.
+ */
+export function liveKitConnectSrc(): string[] {
+  const raw = String(process.env.LIVEKIT_URL ?? "").trim();
+  const sources = new Set<string>();
+  if (raw) {
+    sources.add(raw);
+    sources.add(raw.replace(/^wss:/i, "https:").replace(/^ws:/i, "http:"));
+  }
+  let host = "";
+  try {
+    host = new URL(raw.replace(/^ws/i, "http")).hostname;
+  } catch {
+    host = "";
+  }
+  if (host === "livekit.cloud" || host.endsWith(".livekit.cloud")) {
+    sources.add("wss://*.livekit.cloud");
+    sources.add("https://*.livekit.cloud");
+    sources.add("wss://*.turn.livekit.cloud");
+    sources.add("https://*.turn.livekit.cloud");
+  }
+  return [...sources];
+}
+
 export function liveProvider(): LiveProvider {
   return "livekit";
 }
