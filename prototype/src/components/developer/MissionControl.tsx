@@ -9,6 +9,7 @@ import PatternsPanel from "./PatternsPanel";
 import RecoveryPanel from "./RecoveryPanel";
 import RiskRadarPanel from "./RiskRadarPanel";
 import Sparkline from "./Sparkline";
+import { confirmSession, probeSession } from "@/lib/session-confirm";
 
 /* ------------------------------------------------------------------------ */
 /* Types                                                                     */
@@ -137,6 +138,7 @@ function IncidentList({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+  const [actionNotice, setActionNotice] = useState("");
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ take: String(limit ?? 60) });
@@ -199,20 +201,23 @@ function IncidentList({
 
   async function recoverAuthIncident(id: string) {
     setBusy(id);
+    setActionNotice("");
     setActionErrors((current) => ({ ...current, [id]: "" }));
     try {
-      const health = await fetch("/api/auth/session", {
-        cache: "no-store",
-        credentials: "same-origin",
-        signal: AbortSignal.timeout(8_000),
+      const { verdict, attempts } = await confirmSession({
+        probe: () => probeSession(fetch, 5_000),
+        sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+        delays: [750, 1_500],
       });
-      const session = await health.json().catch(() => null);
-      if (!health.ok || !session?.user) {
-        throw new Error("Auth health check failed — the session endpoint is still unhealthy.");
+      if (verdict === "signed_out") {
+        throw new Error("The server confirms this operator is signed out. The affected tutor must sign in again; their browser session cannot be restored remotely.");
+      }
+      if (verdict !== "alive") {
+        throw new Error("Auth is still not responding after three checks. The incident remains open; try again when the service is reachable.");
       }
 
       const resolutionNote = note.trim()
-        || "Auth session endpoint is responding for the Mission Control operator. This check cannot refresh another person's browser session.";
+        || `Auth session endpoint recovered for the Mission Control operator after ${attempts} check${attempts === 1 ? "" : "s"}. This does not remotely refresh the affected tutor's browser session.`;
       const response = await fetch("/api/admin/developer/incidents", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -221,6 +226,7 @@ function IncidentList({
       const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error || `Could not resolve incident (${response.status}).`);
       setNote("");
+      setActionNotice(`Auth responded after ${attempts} check${attempts === 1 ? "" : "s"}; the incident was resolved. If the tutor's own session truly expired, they must sign in again.`);
       await load();
     } catch (error) {
       setActionErrors((current) => ({
@@ -234,6 +240,7 @@ function IncidentList({
 
   return (
     <div className="space-y-3">
+      {actionNotice && <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{actionNotice}</p>}
       {!compact && (
         <div className="flex flex-wrap items-center gap-2">
           {(["active", "resolved", "ignored", "all"] as const).map((value) => (
@@ -386,7 +393,7 @@ function IncidentList({
                     </div>
                     {isAuthSessionIncident(row) && (
                       <p className="text-[11px] text-[var(--muted)]">
-                        This checks the current operator&apos;s auth endpoint before resolving the alert. It cannot remotely refresh the affected tutor&apos;s browser session.
+                        Retries auth health three times before resolving. It cannot remotely refresh the affected tutor&apos;s browser session; if that session truly expired, they must sign in again.
                       </p>
                     )}
                     {actionErrors[row.id] && <p role="alert" className="text-xs text-red-500">{actionErrors[row.id]}</p>}
