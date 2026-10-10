@@ -14,7 +14,12 @@ export async function GET() {
     const referrerFilter = branchIds ? { referrerStudent: { branchId: { in: branchIds } } } : {};
     const referredFilter = branchIds ? { referredStudent: { branchId: { in: branchIds } } } : {};
     const redemptionFilter = branchIds ? { AND: [referrerFilter, referredFilter] } : {};
-    const [students, redemptions, holds, totalRedemptions, openHolds] = await Promise.all([
+    const campaignAudienceFilter = {
+      status: "active",
+      referralCode: { not: null },
+      ...(branchIds ? { branchId: { in: branchIds } } : {}),
+    };
+    const [students, redemptions, holds, totalRedemptions, openHolds, campaignAudienceCount] = await Promise.all([
       prisma.student.findMany({
         where: {
           referralCode: { not: null },
@@ -82,6 +87,7 @@ export async function GET() {
       prisma.referralHold.count({
         where: { releasedAt: null, redemption: redemptionFilter },
       }),
+      prisma.student.count({ where: campaignAudienceFilter }),
     ]);
 
     return NextResponse.json({
@@ -90,6 +96,7 @@ export async function GET() {
       holds,
       totalRedemptions,
       openHolds,
+      campaignAudienceCount,
       truncated: students.length === 5000 || redemptions.length === 1000 || holds.length === 500,
     });
   } catch (error) {

@@ -24,6 +24,7 @@ import HybridComboMoment from "@/components/moment/HybridComboMoment";
 import FeeReminderMoment from "@/components/moment/FeeReminderMoment";
 import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
+import ReferralPromotionMoment from "@/components/ReferralPromotionMoment";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
@@ -778,6 +779,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         See PortalUpdates for why the card carries the real message text.
       */}
       <PortalUpdates />
+      <ReferralPromotionMoment />
 
       {/* Whatever the queue held back. Bottom left, because the community
           launcher and the theme switch already own the other corner. */}
