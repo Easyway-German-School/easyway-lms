@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 
 import AdminShell from "@/components/AdminShell";
 import { DownloadIcon, RefreshIcon } from "@/components/icons";
+import {
+  REFERRAL_CAMPAIGN_STATUS,
+  REFERRAL_EMAIL_TEMPLATE,
+  REFERRAL_NOTIFICATION_TEMPLATE,
+  REFERRAL_REWARD_COPY,
+} from "@/lib/referral-campaign";
 
 type ReferralStudent = {
   id: string;
@@ -50,6 +56,7 @@ type ReferralData = {
   holds: Hold[];
   totalRedemptions: number;
   openHolds: number;
+  campaignAudienceCount: number;
   truncated: boolean;
 };
 
@@ -67,6 +74,7 @@ export default function AdminReferralsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [audienceConfirmed, setAudienceConfirmed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -113,6 +121,17 @@ export default function AdminReferralsPage() {
     }
   }
 
+  async function copyCampaignText(label: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice(`${label} copied. No message was sent.`);
+      setError("");
+    } catch {
+      setError(`Could not copy the ${label.toLowerCase()}.`);
+      setNotice("");
+    }
+  }
+
   function downloadCsv() {
     const rows = [
       ["Student code", "Name", "Email", "Branch", "Referral code", "Registered referrals"],
@@ -153,6 +172,7 @@ export default function AdminReferralsPage() {
               onClick={() => {
                 setLoading(true);
                 setError("");
+                setAudienceConfirmed(false);
                 setRefreshKey((key) => key + 1);
               }}
               disabled={loading}
@@ -187,6 +207,95 @@ export default function AdminReferralsPage() {
               <p className="mt-1 text-2xl font-bold tabular-nums">{loading ? "…" : metric.value.toLocaleString()}</p>
             </div>
           ))}
+        </section>
+
+        <section className="space-y-5 rounded-2xl border-2 border-rose-300 bg-[var(--surface)] p-4 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-rose-700">Referral campaign</p>
+              <h2 className="mt-1 text-xl font-black">Planned student rewards — not ready to launch</h2>
+              <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
+                Clear, student-ready copy is prepared below. Referral tracking currently records sign-ups only; the app
+                does not issue reward credit, and a manual verification/crediting process has not been confirmed.
+                No send or broadcast action is enabled here.
+              </p>
+            </div>
+            <span className="rounded-full bg-rose-100 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-rose-900">
+              {REFERRAL_CAMPAIGN_STATUS === "blocked" ? "Blocked" : "Ready"}
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+              <p className="text-sm font-bold">Pay tuition in parts</p>
+              <p className="mt-1 text-2xl font-black text-[var(--accent-ink)]">₦10,000 + ₦5,000</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">{REFERRAL_REWARD_COPY.partPayment}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+              <p className="text-sm font-bold">Pay full tuition at once</p>
+              <p className="mt-1 text-2xl font-black text-[var(--accent-ink)]">₦20,000</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">{REFERRAL_REWARD_COPY.fullPayment}</p>
+            </div>
+          </div>
+          <p className="text-sm font-semibold">{REFERRAL_REWARD_COPY.redemption}</p>
+
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            <p className="font-extrabold">Live audience check (send-time confirmation)</p>
+            <p className="mt-1">
+              {loading ? "Checking…" : (data?.campaignAudienceCount ?? 0).toLocaleString()} active students with referral
+              codes in your authorized branch scope. Refresh this page immediately before any future launch; this number
+              is queried from current records, not hardcoded.
+            </p>
+            <label className="mt-3 flex items-start gap-2 font-semibold">
+              <input
+                type="checkbox"
+                checked={audienceConfirmed}
+                onChange={(event) => setAudienceConfirmed(event.target.checked)}
+                disabled={loading || !data}
+                className="mt-0.5 h-4 w-4 accent-amber-700"
+              />
+              <span>I confirm this current, live referral-code audience is the intended group.</span>
+            </label>
+            <button
+              type="button"
+              disabled
+              title="Manual reward verification and crediting are not yet arranged."
+              className="mt-3 cursor-not-allowed rounded-xl bg-rose-800 px-4 py-2 font-bold text-white opacity-75"
+            >
+              Campaign launch blocked
+            </button>
+            <p className="mt-2 text-xs">Audience confirmation does not send anything. Launch stays blocked until manual reward fulfillment is arranged.</p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-[var(--border)] p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-bold">Email draft</h3>
+                <button
+                  type="button"
+                  onClick={() => void copyCampaignText("Email draft", `${REFERRAL_EMAIL_TEMPLATE.subject}\n\n${REFERRAL_EMAIL_TEMPLATE.body}`)}
+                  className="text-sm font-bold text-[var(--accent-ink)] hover:underline"
+                >
+                  Copy draft
+                </button>
+              </div>
+              <p className="mt-2 text-sm"><strong>Subject:</strong> {REFERRAL_EMAIL_TEMPLATE.subject}</p>
+              <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface-alt)] p-3 text-xs leading-5">{REFERRAL_EMAIL_TEMPLATE.body}</pre>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-bold">In-app notification draft</h3>
+                <button
+                  type="button"
+                  onClick={() => void copyCampaignText("In-app draft", REFERRAL_NOTIFICATION_TEMPLATE)}
+                  className="text-sm font-bold text-[var(--accent-ink)] hover:underline"
+                >
+                  Copy draft
+                </button>
+              </div>
+              <p className="mt-2 rounded-lg bg-[var(--surface-alt)] p-3 text-sm leading-6">{REFERRAL_NOTIFICATION_TEMPLATE}</p>
+            </div>
+          </div>
         </section>
 
         {data?.truncated ? (
