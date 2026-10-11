@@ -180,7 +180,7 @@ function LeadsBoard() {
               key={s}
               onClick={() => setStatus(s)}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition ${
-                status === s ? "bg-slate-900 text-white" : "border bg-[var(--surface)] hover:bg-[var(--surface-alt)]"
+                status === s ? "bg-[var(--accent)] text-white" : "border bg-[var(--surface)] hover:bg-[var(--surface-alt)]"
               }`}
             >
               {s} {counts[s] ? `(${counts[s]})` : ""}
@@ -203,7 +203,7 @@ function LeadsBoard() {
           <button
             onClick={() => act("invite")}
             disabled={busy || selectedIds.length === 0}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             {busy ? "Working…" : `Invite ${selectedIds.length || ""} to enrol`}
           </button>
@@ -250,7 +250,7 @@ function LeadsBoard() {
               <button
                 onClick={runImport}
                 disabled={busy || !csv.trim()}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 {busy ? "Importing…" : "Import"}
               </button>
