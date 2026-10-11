@@ -41,6 +41,16 @@ type Summary = {
   totals: { earned: number; paid: number; owed: number };
 };
 
+type CommissionEntry = {
+  id: string;
+  amount: number;
+  rateApplied: number;
+  status: "pending" | "approved" | "paid" | string;
+  createdAt: string;
+  lead: { id: string; name: string; email: string };
+  rep: { id: string; name: string | null; email: string };
+};
+
 function naira(amount: number): string {
   return `₦${Math.round(amount).toLocaleString("en-NG")}`;
 }
@@ -58,6 +68,46 @@ export default function PayrollPage() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [payModal, setPayModal] = useState<{ lecturerId: string; name: string; suggested: number; classesHeld: number } | null>(null);
+
+  // Growth Desk commission approvals — separate from the tutor table above
+  // (different source, different capability check server-side), so it loads
+  // and errors independently rather than failing the whole page if one is
+  // unreachable.
+  const [commissions, setCommissions] = useState<CommissionEntry[] | null>(null);
+  const [commissionError, setCommissionError] = useState("");
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  const loadCommissions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/growth/commission?scope=all", { cache: "no-store" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Could not load commission entries");
+      setCommissions(body.entries ?? []);
+    } catch (e) {
+      setCommissionError(e instanceof Error ? e.message : "Could not load commission entries");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCommissions();
+  }, [loadCommissions]);
+
+  async function approveCommission(entryId: string) {
+    setApprovingId(entryId);
+    try {
+      const res = await fetch("/api/admin/growth/commission", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryId }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Could not approve that entry");
+      await loadCommissions();
+    } catch (e) {
+      setCommissionError(e instanceof Error ? e.message : "Could not approve that entry");
+    } finally {
+      setApprovingId(null);
+    }
+  }
 
   const load = useCallback(async (selectedMonth: string) => {
     setLoading(true);
@@ -217,6 +267,81 @@ export default function PayrollPage() {
                     </td>
                   </tr>
                 )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-8 min-w-0">
+        <div className="mb-3">
+          <h2 className="text-lg font-bold sm:text-xl">Growth Desk commissions</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            What a rep earned off a lead that actually paid — approve it here once it's confirmed, same as any
+            other payout.
+          </p>
+          <p className="mt-1 text-xs font-semibold text-amber-700">
+            Rate not yet confirmed by the school — every figure below uses a 10% placeholder until that's decided.
+            Don't treat these as final pay.
+          </p>
+        </div>
+
+        {commissionError && (
+          <div className="mb-4 flex items-start gap-2 rounded-2xl bg-red-500/10 p-4 text-sm font-medium text-red-700">
+            <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0">{commissionError}</span>
+          </div>
+        )}
+
+        {commissions === null ? (
+          <div className="py-8 text-center text-[var(--muted)]">Loading…</div>
+        ) : commissions.length === 0 ? (
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-10 text-center text-sm text-[var(--muted)]">
+            Nothing to approve yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-[var(--surface-alt)]/70 text-left text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+                <tr>
+                  <th className="px-4 py-3">Rep</th>
+                  <th className="px-4 py-3">Lead</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)]">
+                {commissions.map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="px-4 py-3 font-semibold text-[var(--foreground)]">{entry.rep.name || entry.rep.email}</td>
+                    <td className="px-4 py-3 text-[var(--muted)]">{entry.lead.name}</td>
+                    <td className="px-4 py-3">{naira(entry.amount)}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          entry.status === "pending"
+                            ? "bg-amber-100 text-amber-900"
+                            : "bg-emerald-100 text-emerald-900"
+                        }`}
+                      >
+                        {entry.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {entry.status === "pending" && (
+                        <button
+                          type="button"
+                          disabled={approvingId === entry.id}
+                          onClick={() => void approveCommission(entry.id)}
+                          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-50"
+                        >
+                          {approvingId === entry.id ? "Approving…" : "Approve"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

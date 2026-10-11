@@ -1,25 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireCapability, adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET — a rep's own commission entries (read-only: see
  * src/lib/growth/commission.ts, the only code that ever writes this table).
- * `?scope=all` additionally requires `payroll` — the approval desk's view
- * across every rep, same split as the rest of this module: `growth` is the
- * pipeline, `payroll` is money going out to staff.
+ * `?scope=all` is the approval desk's view across every rep, gated on
+ * `payroll` ALONE — not `growth` — since the person approving a payout is
+ * typically an accountant with no Growth Desk access at all (see
+ * admin-roles.ts's `accountant` role: payments/reports/payroll, no
+ * `growth`). Gating scope=all behind `growth` first, as this route
+ * originally did, meant the one page that could call it 403'd before ever
+ * reaching the payroll check — which is exactly why nothing in the admin
+ * UI ever called it.
  */
 export async function GET(req: NextRequest) {
-  const gate = await requireCapability("growth");
-  if (!gate.ok) return gate.response;
-
   const scope = req.nextUrl.searchParams.get("scope");
   const wantsAll = scope === "all";
-  if (wantsAll && !(await adminHasCapability(gate.admin.userId, "payroll"))) {
-    return NextResponse.json({ error: "Your admin role does not cover payroll" }, { status: 403 });
-  }
+
+  const gate = await requireCapability(wantsAll ? "payroll" : "growth");
+  if (!gate.ok) return gate.response;
 
   const entries = await prisma.commissionEntry.findMany({
     where: wantsAll ? {} : { repId: gate.admin.userId },
