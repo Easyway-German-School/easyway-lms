@@ -15,7 +15,7 @@ import { beginAuditScope } from "@/lib/audit-context";
  * matching how the office is actually staffed rather than per-endpoint.
  */
 
-export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support"] as const;
+export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support", "growth"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
@@ -24,6 +24,7 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   accountant: "Accountant",
   data_comm: "Data & Communications Manager",
   support: "Customer Care",
+  growth: "Growth Desk (Sales & Business Development)",
 };
 
 export const CAPABILITIES = [
@@ -60,6 +61,9 @@ export const CAPABILITIES = [
   "events",       // the staff calendar, events, and webinars
   "payroll",      // what the school pays its tutors — separate from `payments`,
                   // which is tuition coming IN, not compensation going OUT
+  "growth",       // the sales/CRM pipeline: leads, the daily task queue, and a
+                  // rep's own commission entries (read-only — approving one
+                  // still requires `payroll`, since that is money going out)
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -160,6 +164,16 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // Owns communications and the numbers, not the student records or the money.
   // `events` too: a webinar is a broadcast, and the open day is a comms job.
   data_comm: ["community", "emails", "reports", "integrations", "events"],
+
+  /**
+   * Growth Desk — the Business Development Manager, the Sales & Marketing
+   * Teamlead, and reps, all on one flat role for now. A deliberately narrow
+   * preset: the pipeline and the daily queue, nothing about money itself.
+   * `payments`/`payroll` stay out on purpose — a rep sees their own
+   * commission entries through `growth`, but approving a payout is still
+   * somebody else's job, same reasoning as every other preset here.
+   */
+  growth: ["growth"],
 };
 
 /**

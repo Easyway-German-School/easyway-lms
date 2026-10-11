@@ -98,6 +98,10 @@ const navItems: NavItem[] = [
   // as a conversion opportunity.
   { label: 'Enquiries', href: '/admin/enquiries', icon: <InboxIcon />, group: 'Academics' },
   { label: 'Lead funnel', href: '/admin/leads', icon: <TicketIcon />, group: 'Academics' },
+  // A rep's own desk on top of the lead funnel above: the daily task queue
+  // and the pipeline notes/stage changes. Separate capability (`growth`)
+  // because a rep should see this without seeing the rest of Academics.
+  { label: 'Growth Desk', href: '/admin/growth', icon: <TrendingUpIcon />, group: 'Academics' },
   { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
   { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
   { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },

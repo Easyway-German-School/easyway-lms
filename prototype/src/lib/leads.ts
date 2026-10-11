@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { queueEmail } from "@/lib/email-queue";
+import { autoAssignNewLead } from "@/lib/growth/leads";
 
 /** Days a lead-invite signup token stays usable. Shared with /api/signup-tokens. */
 const INVITE_TOKEN_TTL_DAYS = Math.max(1, Math.min(90, Number(process.env.SIGNUP_TOKEN_TTL_DAYS) || 14));
@@ -118,6 +119,15 @@ export async function captureLead(input: LeadInput): Promise<CaptureResult> {
   }
 
   const created = await prisma.lead.create({ data });
+
+  // Best-effort: a Growth Desk rep not being assigned yet must never block
+  // the enquiry itself from being captured.
+  try {
+    await autoAssignNewLead(created.id, created.name);
+  } catch (error) {
+    console.error("Growth Desk auto-assignment failed:", error);
+  }
+
   return { ok: true, leadId: created.id, duplicate: false };
 }
 

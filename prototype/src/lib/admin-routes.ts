@@ -21,6 +21,10 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // with whoever holds the student records.
   { prefix: "/admin/certificates", capability: "students" },
   { prefix: "/admin/leads", capability: "students" },
+  // The Growth Desk is a rep's own view on top of the same leads — gated on
+  // `growth`, not `students`, so a rep's account doesn't also pick up the
+  // rest of the student record.
+  { prefix: "/admin/growth", capability: "growth" },
   // A guardian's account is paperwork about a named student, same desk as
   // the rest of the student record.
   { prefix: "/admin/parents", capability: "students" },

@@ -158,6 +158,15 @@ model User {
   refundRequests        RefundRequest[]          @relation("RefundRequestStudent")
   refundsDecided        RefundRequest[]          @relation("RefundRequestDecider")
   examCampaignResponses ExamCampaignResponse[]
+  assignedLeads         Lead[]                   @relation("LeadAssignee")
+  leadActivities        LeadActivity[]
+  assignedSalesTasks    SalesTask[]              @relation("SalesTaskAssignee")
+  commissionEntries     CommissionEntry[]        @relation("CommissionRep")
+  commissionApprovals   CommissionEntry[]        @relation("CommissionApprover")
+  ownedPartners         Partner[]                @relation("PartnerOwner")
+  fundRequests          FundRequest[]            @relation("FundRequester")
+  fundRequestsApproved  FundRequest[]            @relation("FundApprover")
+  dailyReports          DailyReport[]
   analyticsConsentAt    DateTime?
   /**
    * Set only when the person has ASKED to be left out of learning analytics.
@@ -301,6 +310,12 @@ model Tenant {
   gameTurns               GameTurn[]
   constraintDecks         ConstraintDeck[]
   leads                   Lead[]
+  leadActivities          LeadActivity[]
+  salesTasks              SalesTask[]
+  commissionEntries       CommissionEntry[]
+  partners                Partner[]
+  fundRequests            FundRequest[]
+  dailyReports            DailyReport[]
   supportTickets          SupportTicket[]
   supportTicketMessages   SupportTicketMessage[]
   certificates            Certificate[]
@@ -2289,6 +2304,10 @@ model Payment {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  /// Set once this payment has generated a rep's commission. See
+  /// CommissionEntry — unique on paymentId, so at most one of these exists.
+  commissionEntry CommissionEntry?
+
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -4121,10 +4140,27 @@ model Lead {
    */
   source String  @default("website")
   /**
-   * new | invited | converted | dropped
+   * new | invited | converted | dropped, plus the Growth Desk sales-funnel
+   * stages a rep moves a lead through by hand: contacted | qualified |
+   * proposal_sent | lost. Still a plain string, not an enum — it already was
+   * before Growth Desk existed, and the funnel stages are exactly the kind of
+   * vocabulary a sales process keeps tweaking. A rep changes this field only
+   * through the Growth Desk API, which writes a LeadActivity row alongside
+   * the update — see src/lib/growth/leads.ts. It is never the trigger for a
+   * CommissionEntry; only a real Payment is. See the Growth Desk section
+   * below for why that split matters.
    */
   status String  @default("new")
   notes  String?
+
+  /**
+   * The rep who owns this lead for follow-up. Null means unassigned — still
+   * visible to every rep, not yet claimed by one. SetNull rather than
+   * Cascade: removing a rep's account must not delete the leads they were
+   * working, only return them to the unassigned pool.
+   */
+  assignedToId String?
+  assignedTo   User?   @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   /**
    * When the enrolment invite was last emailed, so the office can chase.
@@ -4146,8 +4182,285 @@ model Lead {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  activities        LeadActivity[]
+  tasks             SalesTask[]
+  commissionEntries CommissionEntry[]
+
   @@index([status, createdAt])
   @@index([branchId, interestedLevel])
+  @@index([assignedToId, status])
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Growth Desk: the sales pipeline sitting on top of Lead.
+//
+// Three different jobs, three different models, on purpose:
+//   LeadActivity    what a rep did — a note, a call, a stage change. Append
+//                   only. This is the Google Sheet replacement: nobody edits
+//                   a cell, they add a row, so the history of a lead's
+//                   pipeline survives a rep trying to make yesterday's work
+//                   look different today.
+//   SalesTask       what a rep should do next — today's queue. Auto-assigned
+//                   on lead creation, or hand-assigned by the Sales &
+//                   Marketing Teamlead. An unfinished task simply stays
+//                   pending; there is no separate "carry over" step, because
+//                   leaving it untouched is what carrying it over means.
+//   CommissionEntry what a rep is owed. Never written or edited by a rep —
+//                   one row per real Payment, computed server-side. This is
+//                   the actual fix for a rep inflating their own numbers:
+//                   there is no field connected to money that a rep's
+//                   account is ever allowed to write.
+// ---------------------------------------------------------------------------
+
+/// One thing that happened to a Lead, in the order it happened. Never
+/// updated after it is written — same reasoning as TermsAcceptance below:
+/// the history is the point, not the latest state.
+model LeadActivity {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /**
+   * note | call | stage_change | task_completed | assigned
+   */
+  type String
+
+  /**
+   * Free-form detail for the type — the note text, the call outcome, the
+   * old/new stage on a stage_change. Never the source of a commission figure:
+   * see CommissionEntry, computed from Payment, not from anything logged
+   * here.
+   */
+  payload Json?
+
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([tenantId])
+}
+
+/// A rep's to-do item: one lead, one next action. The daily "queue" a rep
+/// sees on login is just this table filtered to `status = "pending"` and
+/// ranked by `priorityScore` — nothing generates a fresh batch each morning;
+/// yesterday's unfinished rows are exactly what today's queue should lead
+/// with. See src/lib/growth/tasks.ts.
+model SalesTask {
+  id String @id @default(cuid())
+
+  assignedToId String
+  assignedTo   User   @relation("SalesTaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  /**
+   * follow_up | call | webinar | admin
+   */
+  kind  String
+  title String
+
+  dueDate DateTime?
+
+  /**
+   * pending | done | skipped
+   */
+  status String @default("pending")
+
+  /**
+   * Higher sorts first in the queue. Set on assignment, not recomputed live —
+   * see src/lib/growth/tasks.ts for the formula.
+   */
+  priorityScore Float @default(0)
+
+  /**
+   * True when the least-loaded-rep assignment picked this up automatically
+   * rather than a Teamlead assigning it by hand. Kept so the assignment
+   * algorithm can be judged against what a human would have done.
+   */
+  autoAssigned Boolean @default(false)
+
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([assignedToId, status, priorityScore])
+  @@index([leadId])
+  @@index([tenantId])
+}
+
+/// What a rep is owed for one real payment. Exactly one row per Payment — the
+/// unique constraint on `paymentId` is what makes this impossible to
+/// double-write, by accident or on purpose. There is no create or update
+/// route exposed to a rep: see src/lib/growth/commission.ts, the only code
+/// path allowed to write this table, which runs off Payment creation, never
+/// off anything a rep clicked.
+model CommissionEntry {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  repId String
+  rep   User   @relation("CommissionRep", fields: [repId], references: [id], onDelete: Cascade)
+
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  /// Same unit as Payment.amount — whole currency units, not cents.
+  amount      Int
+  rateApplied Float
+
+  /**
+   * pending | approved | paid
+   */
+  status String @default("pending")
+
+  approvedById String?
+  approvedBy   User?     @relation("CommissionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([repId, status])
+  @@index([tenantId])
+}
+
+/// A corporate or organisational relationship — not a prospective student.
+/// The BDM's field work and the Strategic Relations side of Growth Desk.
+/// Deliberately simpler than Lead/LeadActivity: there is no commission tied
+/// to a Partner, so there is nothing here anyone has a reason to falsify,
+/// and a plain `notes` field plus `lastContactedAt` is enough to answer "are
+/// we keeping in touch with this one" without needing an immutable ledger.
+model Partner {
+  id String @id @default(cuid())
+
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+
+  /**
+   * corporate | partner — a corporate client vs. a referral/cooperation
+   * partner. Free-form string, same reasoning as every other status field
+   * in this schema: the vocabulary is a business decision, not a type.
+   */
+  type String @default("partner")
+
+  /**
+   * prospecting | engaged | cooperating | dormant
+   */
+  status String @default("prospecting")
+
+  ownerId String?
+  owner   User?   @relation("PartnerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  notes String?
+
+  /// Bumped every time someone logs a touchpoint — what the "keep partners
+  /// warm" reminder in the Partners tab is based on. A platform-wide
+  /// Webinar model already exists (LiveKit room, registration, landing
+  /// page) but has no creation flow wired up anywhere yet — building that
+  /// tonight is its own project, so "schedule the monthly webinar" stays a
+  /// nudge in the UI for now rather than a half-wired new table.
+  lastContactedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status])
+  @@index([tenantId])
+}
+
+/// A spend request that needs the Chief Operating Officer's sign-off —
+/// modelled on the handbook rule that an unanswered request escalates to
+/// Accounting after an hour. There is no background job doing that
+/// escalation yet (see src/lib/growth/fund-requests.ts for why a computed
+/// "is this overdue" read is the honest version of that rule for now,
+/// rather than a cron job this build does not have time to wire safely);
+/// `status` stays "pending" either way until someone acts on it.
+model FundRequest {
+  id String @id @default(cuid())
+
+  requesterId String
+  requester   User   @relation("FundRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  amount  Int
+  purpose String
+
+  /**
+   * marketing | mobility | other — what the spend is for, straight from the
+   * handbook's own wording.
+   */
+  category String @default("other")
+
+  /**
+   * pending | approved | rejected
+   */
+  status String @default("pending")
+
+  approvedById String?
+  approvedBy   User?     @relation("FundApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+  decisionNote String?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId, status])
+  @@index([tenantId])
+}
+
+/// One person's end-of-day log: what moved, and what problem was solved or
+/// flagged. The handbook asks every teamlead for this; Growth Desk is where
+/// it is built first. At most one per person per day — resubmitting the
+/// same day updates it rather than piling up duplicates, same reasoning as
+/// `captureLead` re-submitting an enquiry.
+model DailyReport {
+  id String @id @default(cuid())
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// Midnight of the day this report is for — the unique key, so "today"
+  /// has exactly one row regardless of time zone drift within the day.
+  reportDate DateTime
+
+  achievement   String
+  problemSolved String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([authorId, reportDate])
   @@index([tenantId])
 }
 
