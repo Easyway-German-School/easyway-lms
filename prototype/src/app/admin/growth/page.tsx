@@ -13,6 +13,7 @@ import {
   CheckIcon,
   PlusIcon,
   UsersIcon,
+  UploadIcon,
 } from "@/components/icons";
 
 // ---------------------------------------------------------------------------
@@ -376,6 +377,17 @@ export default function GrowthDeskPage() {
               if (!res.ok) return setError(body.error || "Could not save that note.");
               setNotice("Note saved to the lead's history.");
             }}
+            onImport={async (csv) => {
+              const res = await fetch("/api/admin/growth/leads", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ csv }),
+              });
+              const body = await res.json();
+              if (!res.ok) throw new Error(body.error || "Import failed");
+              refresh(`Imported ${body.created} new lead${body.created === 1 ? "" : "s"}, updated ${body.updated}${body.skipped?.length ? `, skipped ${body.skipped.length}` : ""} — scored and assigned automatically.`);
+              return body;
+            }}
           />
         ) : tab === "team" ? (
           <TeamTab
@@ -601,36 +613,101 @@ function PipelineTab({
   onScopeChange,
   onStage,
   onNote,
+  onImport,
 }: {
   leads: Lead[];
   scope: "mine" | "team";
   onScopeChange: (scope: "mine" | "team") => void;
   onStage: (leadId: string, status: string) => void;
   onNote: (leadId: string, note: string) => void;
+  onImport: (csv: string) => Promise<{ created: number; updated: number; skipped: Array<{ row: number; reason: string }> }>;
 }) {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [showImport, setShowImport] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    file.text().then(setCsv);
+  }
+
+  async function runImport() {
+    if (!csv.trim() || importing) return;
+    setImporting(true);
+    setImportError("");
+    try {
+      await onImport(csv);
+      setCsv("");
+      setShowImport(false);
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-bold">Pipeline</h2>
-        <div className="flex rounded-xl border border-[var(--border)] p-1 text-sm font-semibold">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => onScopeChange("mine")}
-            className={`rounded-lg px-3 py-1.5 ${scope === "mine" ? "bg-[var(--accent)] text-white" : ""}`}
+            onClick={() => setShowImport((s) => !s)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border)] px-3 py-1.5 text-sm font-semibold hover:bg-[var(--surface-alt)]"
           >
-            Mine
+            <UploadIcon className="h-4 w-4" />
+            Import sheet
           </button>
-          <button
-            type="button"
-            onClick={() => onScopeChange("team")}
-            className={`rounded-lg px-3 py-1.5 ${scope === "team" ? "bg-[var(--accent)] text-white" : ""}`}
-          >
-            Team
-          </button>
+          <div className="flex rounded-xl border border-[var(--border)] p-1 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => onScopeChange("mine")}
+              className={`rounded-lg px-3 py-1.5 ${scope === "mine" ? "bg-[var(--accent)] text-white" : ""}`}
+            >
+              Mine
+            </button>
+            <button
+              type="button"
+              onClick={() => onScopeChange("team")}
+              className={`rounded-lg px-3 py-1.5 ${scope === "team" ? "bg-[var(--accent)] text-white" : ""}`}
+            >
+              Team
+            </button>
+          </div>
         </div>
       </div>
+
+      {showImport && (
+        <div className="space-y-2.5 rounded-xl bg-[var(--surface-alt)] p-4">
+          <p className="text-sm text-[var(--muted)]">
+            Bring in your Google Sheet directly — paste it below or upload the CSV. A <strong>name</strong> and{" "}
+            <strong>email</strong> column are required; phone, level, session and notes are picked up too if
+            they're there. Every row is scored and assigned the same way a lead coming in one at a time is —
+            nothing to sort by hand afterward.
+          </p>
+          {importError && <p className="rounded-lg bg-red-50 p-2 text-xs font-semibold text-red-700">{importError}</p>}
+          <input type="file" accept=".csv,text/csv" onChange={handleFile} className="text-sm" />
+          <textarea
+            value={csv}
+            onChange={(e) => setCsv(e.target.value)}
+            rows={5}
+            placeholder="name,email,phone,level,session,notes"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => void runImport()}
+            disabled={!csv.trim() || importing}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {importing ? "Importing…" : "Import"}
+          </button>
+        </div>
+      )}
 
       {leads.length === 0 ? (
         <Empty>No leads in this view yet.</Empty>
@@ -697,6 +774,28 @@ function PipelineTab({
 // ---------------------------------------------------------------------------
 // Team
 // ---------------------------------------------------------------------------
+
+/** One learned rate, with a small fill bar — the one chart this page gets, deliberately plain. */
+function LearningRow({ label, rate, confident, sampleSize }: { label: string; rate: number; confident: boolean; sampleSize: number }) {
+  const pct = Math.round(rate * 100);
+  return (
+    <li>
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm capitalize">{label}</span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="text-base font-bold tabular-nums text-[var(--foreground)]">{pct}%</span>
+          {!confident && <Pill tone="warn">learning · {sampleSize}</Pill>}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--surface-alt)]">
+        <div
+          className={`h-full rounded-full ${confident ? "bg-[var(--accent)]" : "bg-[var(--accent)]/40"}`}
+          style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
+        />
+      </div>
+    </li>
+  );
+}
 
 function TeamTab({
   reps,
@@ -787,37 +886,21 @@ function TeamTab({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">By lead source</p>
-            <ul className="mt-2 space-y-1.5">
+            <ul className="mt-2.5 space-y-2.5">
               {sourceLearning.length === 0 ? (
                 <li className="text-sm text-[var(--muted)]">No leads yet.</li>
               ) : (
-                sourceLearning.map((s) => (
-                  <li key={s.source} className="flex items-center justify-between text-sm">
-                    <span className="capitalize">{s.source.replace("_", " ")}</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-semibold tabular-nums">{Math.round(s.rate * 100)}%</span>
-                      {!s.confident && <Pill tone="warn">still learning · {s.sampleSize}</Pill>}
-                    </span>
-                  </li>
-                ))
+                sourceLearning.map((s) => <LearningRow key={s.source} label={s.source.replace("_", " ")} rate={s.rate} confident={s.confident} sampleSize={s.sampleSize} />)
               )}
             </ul>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">By rep</p>
-            <ul className="mt-2 space-y-1.5">
+            <ul className="mt-2.5 space-y-2.5">
               {repLearning.length === 0 ? (
                 <li className="text-sm text-[var(--muted)]">Nobody assigned yet.</li>
               ) : (
-                repLearning.map((r) => (
-                  <li key={r.id} className="flex items-center justify-between text-sm">
-                    <span>{r.name || r.email}</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-semibold tabular-nums">{Math.round(r.rate * 100)}%</span>
-                      {!r.confident && <Pill tone="warn">still learning · {r.sampleSize}</Pill>}
-                    </span>
-                  </li>
-                ))
+                repLearning.map((r) => <LearningRow key={r.id} label={r.name || r.email} rate={r.rate} confident={r.confident} sampleSize={r.sampleSize} />)
               )}
             </ul>
           </div>

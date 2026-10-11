@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { assignLead, updateLeadStage } from "@/lib/growth/leads";
+import { importLeadsFromCsv } from "@/lib/leads";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,29 @@ export async function GET(req: NextRequest) {
       };
     }),
   });
+}
+
+/**
+ * POST — paste or upload the Google Sheet. Every row goes through the same
+ * captureLead() the public enquiry form uses, which is also what triggers
+ * auto-assignment and scoring (src/lib/growth/leads.ts's
+ * autoAssignNewLead) — a sheet uploaded here is not a separate pile of
+ * data somebody has to work by hand; by the time this returns, every row
+ * that could be assigned already has a rep and a ranked place in their
+ * queue, exactly like a lead that came in one at a time.
+ */
+export async function POST(req: NextRequest) {
+  const gate = await requireCapability("growth");
+  if (!gate.ok) return gate.response;
+
+  const body = await req.json().catch(() => null);
+  const { csv } = (body || {}) as Record<string, unknown>;
+  if (typeof csv !== "string" || !csv.trim()) {
+    return NextResponse.json({ error: "Paste or upload CSV content first" }, { status: 400 });
+  }
+
+  const result = await importLeadsFromCsv(csv, { source: "csv_import" });
+  return NextResponse.json(result);
 }
 
 /**
