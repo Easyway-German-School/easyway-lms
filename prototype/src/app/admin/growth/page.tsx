@@ -192,6 +192,7 @@ export default function GrowthDeskPage() {
   // because a 403 here is the EXPECTED, ordinary case for almost every
   // viewer, not a load failure the page should show an error for.
   const [aiSettings, setAiSettings] = useState<{ enabled: boolean; keyConfigured: boolean } | null>(null);
+  const [autoAssign, setAutoAssign] = useState<{ enabled: boolean; unassigned: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -210,16 +211,18 @@ export default function GrowthDeskPage() {
       fetch("/api/admin/growth/reports", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/team", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/intelligence", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/admin/growth/auto-assign", { cache: "no-store" }).then((r) => r.json()),
     ])
-      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody]) => {
+      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody, autoAssignBody]) => {
         if (!active) return;
-        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody]) {
+        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody, autoAssignBody]) {
           if (body?.error) throw new Error(body.error);
         }
         setMe(meBody);
         setTeamStats(teamBody.reps ?? []);
         setSourceLearning(intelBody.sources ?? []);
         setRepLearning(intelBody.reps ?? []);
+        setAutoAssign({ enabled: autoAssignBody.enabled, unassigned: autoAssignBody.unassigned ?? 0 });
         // Only ever auto-picks the tab once, on the first load — after that
         // it's the person's own navigation, not something to override out
         // from under them on every refresh.
@@ -356,6 +359,25 @@ export default function GrowthDeskPage() {
             leads={leads}
             scope={leadScope}
             onScopeChange={setLeadScope}
+            canReassign={me?.title === "sales_lead"}
+            reps={teamStats}
+            onReassign={async (leadId, assignedToId) => {
+              const res = await fetch("/api/admin/growth/leads", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ leadId, action: "reassign", assignedToId }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not reassign that lead.");
+              setLeads((prev) =>
+                prev.map((l) =>
+                  l.id === leadId
+                    ? { ...l, assignedTo: teamStats.find((r) => r.id === assignedToId) ?? l.assignedTo }
+                    : l,
+                ),
+              );
+              setNotice("Lead reassigned — they'll get a push.");
+            }}
             onStage={async (leadId, status) => {
               const res = await fetch("/api/admin/growth/leads", {
                 method: "PATCH",
@@ -405,6 +427,19 @@ export default function GrowthDeskPage() {
               if (!res.ok) return setError(body.error || "Could not change that setting.");
               setAiSettings({ enabled: body.enabled, keyConfigured: body.keyConfigured });
               setNotice(enabled ? "Growth Desk AI turned on." : "Growth Desk AI turned off.");
+            }}
+            autoAssign={autoAssign}
+            canManageAutoAssign={me?.title === "sales_lead"}
+            onToggleAutoAssign={async (enabled) => {
+              const res = await fetch("/api/admin/growth/auto-assign", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not change that setting.");
+              setAutoAssign({ enabled: body.enabled, unassigned: body.unassigned ?? 0 });
+              setNotice(enabled ? "Auto-assign turned on — new leads route themselves again." : "Auto-assign turned off — new leads will wait for you to hand them out.");
             }}
           />
         ) : tab === "partners" ? (
@@ -614,6 +649,9 @@ function PipelineTab({
   onStage,
   onNote,
   onImport,
+  canReassign,
+  reps,
+  onReassign,
 }: {
   leads: Lead[];
   scope: "mine" | "team";
@@ -621,12 +659,19 @@ function PipelineTab({
   onStage: (leadId: string, status: string) => void;
   onNote: (leadId: string, note: string) => void;
   onImport: (csv: string) => Promise<{ created: number; updated: number; skipped: Array<{ row: number; reason: string }> }>;
+  canReassign: boolean;
+  reps: RepStat[];
+  onReassign: (leadId: string, assignedToId: string) => void;
 }) {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [showImport, setShowImport] = useState(false);
   const [csv, setCsv] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+
+  const unassignedCount = scope === "team" ? leads.filter((l) => !l.assignedTo).length : 0;
+  const visibleLeads = scope === "team" && onlyUnassigned ? leads.filter((l) => !l.assignedTo) : leads;
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -678,6 +723,17 @@ function PipelineTab({
               Team
             </button>
           </div>
+          {scope === "team" && canReassign && unassignedCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setOnlyUnassigned((s) => !s)}
+              className={`rounded-xl px-3 py-1.5 text-sm font-semibold ${
+                onlyUnassigned ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-900"
+              }`}
+            >
+              {unassignedCount} unassigned{onlyUnassigned ? " · showing" : ""}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -709,11 +765,11 @@ function PipelineTab({
         </div>
       )}
 
-      {leads.length === 0 ? (
-        <Empty>No leads in this view yet.</Empty>
+      {visibleLeads.length === 0 ? (
+        <Empty>{onlyUnassigned ? "Nothing unassigned — everything's been handed out." : "No leads in this view yet."}</Empty>
       ) : (
         <ul className="divide-y divide-[var(--border)]">
-          {leads.map((lead) => (
+          {visibleLeads.map((lead) => (
             <li key={lead.id} className="space-y-2.5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -743,6 +799,23 @@ function PipelineTab({
                   ))}
                 </select>
               </div>
+              {scope === "team" && canReassign ? (
+                <select
+                  value={lead.assignedTo?.id ?? ""}
+                  onChange={(e) => e.target.value && onReassign(lead.id, e.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
+                  aria-label={`Reassign ${lead.name}`}
+                >
+                  <option value="" disabled>
+                    {lead.assignedTo ? "Reassign to…" : "Assign to…"}
+                  </option>
+                  {reps.map((rep) => (
+                    <option key={rep.id} value={rep.id}>
+                      {rep.name || rep.email}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <div className="flex gap-2">
                 <input
                   value={noteDrafts[lead.id] ?? ""}
@@ -803,15 +876,55 @@ function TeamTab({
   repLearning,
   aiSettings,
   onToggleAi,
+  autoAssign,
+  canManageAutoAssign,
+  onToggleAutoAssign,
 }: {
   reps: RepStat[];
   sourceLearning: SourceLearning[];
   repLearning: RepLearning[];
   aiSettings: { enabled: boolean; keyConfigured: boolean } | null;
   onToggleAi: (enabled: boolean) => void;
+  autoAssign: { enabled: boolean; unassigned: number } | null;
+  canManageAutoAssign: boolean;
+  onToggleAutoAssign: (enabled: boolean) => void;
 }) {
   return (
     <div className="space-y-5">
+      {autoAssign && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold">Auto-assign new leads</h2>
+              <p className="text-sm text-[var(--muted)]">
+                When on, a new lead is routed to a rep the moment it lands — same as always. Turn it off to hold
+                everything in an unassigned pool and hand leads out yourself, e.g. for a campaign you want to route by
+                hand.
+              </p>
+              {!autoAssign.enabled && autoAssign.unassigned > 0 ? (
+                <p className="mt-1 text-xs font-semibold text-amber-700">
+                  {autoAssign.unassigned} lead{autoAssign.unassigned === 1 ? "" : "s"} waiting, unassigned — reassign
+                  them from the Pipeline tab.
+                </p>
+              ) : null}
+            </div>
+            {canManageAutoAssign ? (
+              <button
+                type="button"
+                onClick={() => onToggleAutoAssign(!autoAssign.enabled)}
+                className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold ${
+                  autoAssign.enabled ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
+                }`}
+              >
+                {autoAssign.enabled ? "On — turn off" : "Off — turn on"}
+              </button>
+            ) : (
+              <Pill tone={autoAssign.enabled ? "good" : "warn"}>{autoAssign.enabled ? "On" : "Off"}</Pill>
+            )}
+          </div>
+        </Card>
+      )}
+
       {aiSettings && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-3">

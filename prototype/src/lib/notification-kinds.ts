@@ -68,6 +68,8 @@ export const KIND = {
   attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",
+  /** To the rep: a lead just landed in their queue, auto-routed or handed to them by the Teamlead. See src/lib/growth/leads.ts's assignLead. */
+  leadAssigned: "lead.assigned",
   /** A new high/critical incident appeared in Mission Control. */
   missionControlIncident: "mission_control.incident",
   /** A student asked the office for help, or wrote back on a thread. */
