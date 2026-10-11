@@ -30,7 +30,8 @@ import {
 } from "@/lib/deleted-account";
 import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
-import { resolveSignupReferralAttribution } from "@/lib/referral-attribution";
+import { resolveSignupPromoAttribution } from "@/lib/promo-attribution";
+import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
 
 /**
  * Whether there is a Branch table to select from.
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
       allowParentLogin,
       transportRoute,
       heardFrom,
-      referralCode: referralCodeInput,
+      promoCode: promoCodeInput,
       // Signup access proof — see the gate below. One of: a returning-student
       // token, a paid Paystack ref (new student), or a first-party invite
       // signature.
@@ -581,14 +582,24 @@ export async function POST(request: NextRequest) {
         { status: 409, headers: buildCorsHeaders(request) },
       );
     }
-    const referralAttribution = await resolveSignupReferralAttribution(
-      referralCodeInput,
+    const promoAttribution = await resolveSignupPromoAttribution(
+      promoCodeInput,
       !revivedUserId,
-      (referralCode) =>
-        prisma.student.findUnique({
-          where: { referralCode },
-          select: { id: true },
-        }),
+      async (code) => {
+        const found = await prisma.promoCode.findUnique({
+          where: { code },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            discountPercent: true,
+            discountFlat: true,
+            discountCapAmount: true,
+          },
+        });
+        return found && found.status === "active" ? found : null;
+      },
+      { level: normalizedLevel, branch: branchRow?.name ?? null, classType: normalizedClassType, pathway: normalizedPathway },
     );
     const hashedPassword = await bcryptjs.hash(normalizedPassword, 10);
 
@@ -614,12 +625,14 @@ export async function POST(request: NextRequest) {
       ...studentFields,
       referralCode: `EW${crypto.randomBytes(8).toString("hex").toUpperCase()}`,
       profile: { create: studentFields.profile },
-      ...(referralAttribution
+      ...(promoAttribution
         ? {
-            referralReceived: {
+            promoRedemption: {
               create: {
-                referralCode: referralAttribution.referralCode,
-                referrerStudent: { connect: { id: referralAttribution.referrerStudentId } },
+                promoCodeId: promoAttribution.promoCodeId,
+                codeSnapshot: promoAttribution.codeSnapshot,
+                type: promoAttribution.type,
+                discountAmount: promoAttribution.discountAmount,
                 tenantId: currentTenantId(),
               },
             },
@@ -691,10 +704,33 @@ export async function POST(request: NextRequest) {
       try {
         const created = await prisma.student.findUnique({
           where: { userId: user.id },
-          select: { id: true },
+          select: { id: true, referralCode: true },
         });
         if (created) {
           studentId = created.id;
+
+          // Mirror this student's own referral code into the unified promo
+          // system, so they immediately have a shareable PromoCode like
+          // every other student — best-effort, like the rest of this block:
+          // upsert on the code itself so a revived account (which already
+          // had a referralCode before this feature shipped) is a no-op.
+          if (created.referralCode) {
+            try {
+              await prisma.promoCode.upsert({
+                where: { code: created.referralCode },
+                create: {
+                  code: created.referralCode,
+                  type: "student_referral",
+                  status: "active",
+                  ownerStudentId: created.id,
+                  tenantId: currentTenantId(),
+                },
+                update: {},
+              });
+            } catch (promoCodeError) {
+              console.error("Mirroring PromoCode creation failed on signup:", promoCodeError);
+            }
+          }
           studentCode = await assignStudentCode(created.id, {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
@@ -718,6 +754,18 @@ export async function POST(request: NextRequest) {
             });
           } catch (chargeError) {
             console.error("Tuition charge creation failed on signup:", chargeError);
+          }
+
+          // Freeze this student's promo discount as a waiver on the charge
+          // just created — see src/lib/promo-discount.ts. Best-effort, same
+          // as the charge creation above: a miss here is repaired the first
+          // time they reach checkout (paystack/initialize applies it too).
+          if (signupCharge && promoAttribution && promoAttribution.discountAmount > 0) {
+            try {
+              await applyPromoDiscountIfNeeded(created.id, signupCharge.chargeId);
+            } catch (discountError) {
+              console.error("Promo discount application failed on signup:", discountError);
+            }
           }
 
           // Enrolment #1 — see lib/student-enrolment.ts. Best-effort like the

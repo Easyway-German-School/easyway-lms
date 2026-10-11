@@ -15,7 +15,7 @@ import { beginAuditScope } from "@/lib/audit-context";
  * matching how the office is actually staffed rather than per-endpoint.
  */
 
-export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support", "growth"] as const;
+export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support", "growth", "influencer"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
@@ -25,6 +25,7 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   data_comm: "Data & Communications Manager",
   support: "Customer Care",
   growth: "Growth Desk (Sales & Business Development)",
+  influencer: "Influencer / Affiliate Partner",
 };
 
 export const CAPABILITIES = [
@@ -64,6 +65,10 @@ export const CAPABILITIES = [
   "growth",       // the sales/CRM pipeline: leads, the daily task queue, and a
                   // rep's own commission entries (read-only — approving one
                   // still requires `payroll`, since that is money going out)
+  "influencer",   // an influencer's own view of their promo code, the
+                  // sign-ups it attributed and their payout ledger —
+                  // read-only, same split as `growth`: crediting a payout
+                  // still requires `payments`, since that is money moving
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -174,6 +179,13 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
    * somebody else's job, same reasoning as every other preset here.
    */
   growth: ["growth"],
+
+  // An external influencer, signed in to watch their own numbers — their
+  // code, the sign-ups it brought in, and what they are owed. Nothing else:
+  // no student records, no other influencer's figures, no ability to create
+  // or edit a code (that stays with `payments`, same desk that already owns
+  // /admin/referrals).
+  influencer: ["influencer"],
 };
 
 /**

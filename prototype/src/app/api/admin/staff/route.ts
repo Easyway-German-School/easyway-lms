@@ -176,6 +176,7 @@ const CAPABILITY_LABELS: Record<Capability, string> = {
   events: "Staff calendar, events and webinars",
   payroll: "Tutor payroll - pay rates and payout records (super admin)",
   growth: "Growth Desk - sales pipeline, daily task queue, own commission entries",
+  influencer: "Influencer Program - own promo code, sign-ups and payout ledger",
 };
 
 /**

@@ -107,6 +107,10 @@ const navItems: NavItem[] = [
   // and the pipeline notes/stage changes. Separate capability (`growth`)
   // because a rep should see this without seeing the rest of Academics.
   { label: 'Growth Desk', href: '/admin/growth', icon: <TrendingUpIcon />, group: 'Academics' },
+  // An influencer's own view of their own code, sign-ups and payouts —
+  // separate capability (`influencer`) so it carries nothing else this group
+  // would otherwise pull in.
+  { label: 'Influencer Program', href: '/admin/influencer', icon: <BroadcastIcon />, group: 'Academics' },
   { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
   { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
   { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },

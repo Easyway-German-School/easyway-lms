@@ -1,12 +1,11 @@
-export const REFERRAL_CAMPAIGN_STATUS = "blocked" as const;
-
-export const REFERRAL_REWARD_COPY = {
-  partPayment: "₦10,000 after your friend’s deposit/first tuition payment, plus ₦5,000 when they complete the balance — ₦15,000 total.",
-  fullPayment: "₦20,000 when your friend pays their full tuition at once.",
-  redemption: "Use your credit toward your next tuition payment or level.",
-  example: "For example, if B1 tuition is ₦180,000, ₦15,000 credit means you pay ₦165,000 next time; ₦20,000 credit means you pay ₦160,000.",
-  fulfillment: "This campaign is not live yet. Referral credits are not issued automatically; Easyway is still arranging manual verification and crediting. Please wait for official confirmation before relying on these rewards.",
-} as const;
+/**
+ * Frequency-throttling for the student referral promotion moment
+ * (ReferralPromotionMoment). The campaign itself is real now — see
+ * PromoCode/PromoRedemption/PromoPayout — so the copy and status flag that
+ * used to live here (REFERRAL_CAMPAIGN_STATUS, REFERRAL_REWARD_COPY) are
+ * retired; a student's actual code and reward figures are read live from
+ * their own PromoCode via /api/student/referral-promotion.
+ */
 
 const IMPRESSION_KEY_PREFIX = "easyway-referral-promotion-impressions-v1:";
 const DAILY_IMPRESSION_LIMIT = 2;
@@ -50,23 +49,3 @@ export function recordReferralPromotionImpression(
   storage.setItem(key, JSON.stringify({ date: today, count: count + 1 }));
   return true;
 }
-
-export const REFERRAL_EMAIL_TEMPLATE = {
-  subject: "Coming soon: refer a friend and earn up to ₦20,000 tuition credit",
-  body: [
-    "Hello {{name}},",
-    "",
-    "Invite a friend to Easyway and earn tuition credit:",
-    `• If they pay tuition in parts: ${REFERRAL_REWARD_COPY.partPayment}`,
-    `• If they pay full tuition at once: ${REFERRAL_REWARD_COPY.fullPayment}`,
-    REFERRAL_REWARD_COPY.redemption,
-    REFERRAL_REWARD_COPY.example,
-    "",
-    "Your personal referral link is available in your student portal.",
-    REFERRAL_REWARD_COPY.fulfillment,
-  ].join("\n"),
-} as const;
-
-export const REFERRAL_NOTIFICATION_TEMPLATE = [
-  `Coming soon: refer a friend. Earn ₦10,000 after their deposit/first payment + ₦5,000 after the balance, or ₦20,000 if they pay in full. Credit is for your next tuition/level. ${REFERRAL_REWARD_COPY.example} Not live yet; manual crediting is being arranged.`,
-].join("");

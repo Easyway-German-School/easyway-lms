@@ -1,65 +1,62 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import AdminShell from "@/components/AdminShell";
 import { DownloadIcon, RefreshIcon } from "@/components/icons";
-import {
-  REFERRAL_CAMPAIGN_STATUS,
-  REFERRAL_EMAIL_TEMPLATE,
-  REFERRAL_NOTIFICATION_TEMPLATE,
-  REFERRAL_REWARD_COPY,
-} from "@/lib/referral-campaign";
 
-type ReferralStudent = {
+type Code = {
   id: string;
-  referralCode: string;
-  studentCode: string | null;
+  code: string;
+  type: "student_referral" | "influencer";
+  status: "active" | "paused" | "revoked";
+  label: string | null;
+  discountPercent: number | null;
+  discountFlat: number | null;
+  discountCapAmount: number | null;
+  commissionPercent: number | null;
+  commissionFlat: number | null;
   createdAt: string;
-  user: { name: string | null; email: string };
-  branch: { name: string } | null;
-  _count: { referralsGiven: number };
+  ownerStudent: { studentCode: string | null; user: { name: string | null; email: string }; branch: { name: string } | null } | null;
+  ownerUser: { name: string | null; email: string } | null;
+  _count: { redemptions: number };
+};
+
+type Payout = {
+  id: string;
+  amount: number;
+  kind: "commission" | "referral_credit";
+  status: "pending" | "approved";
+  createdAt: string;
+  promoCode: {
+    code: string;
+    type: string;
+    ownerStudent: { user: { name: string | null; email: string } } | null;
+    ownerUser: { name: string | null; email: string } | null;
+  };
+  promoRedemption: { redeemedByStudent: { user: { name: string | null; email: string } } };
 };
 
 type Redemption = {
   id: string;
-  referralCode: string;
+  codeSnapshot: string;
+  type: string;
   status: string;
+  discountAmount: number;
   createdAt: string;
-  referrerStudent: {
-    user: { name: string | null; email: string };
-    studentCode: string | null;
-    branch: { name: string } | null;
-  };
-  referredStudent: {
-    user: { name: string | null; email: string };
-    studentCode: string | null;
-    branch: { name: string } | null;
-  };
-  _count: { holds: number };
-};
-
-type Hold = {
-  id: string;
-  reason: string;
-  heldAt: string;
-  redemption: {
-    referralCode: string;
-    referrerStudent: { user: { name: string | null } };
-    referredStudent: { user: { name: string | null } };
-  };
+  redeemedByStudent: { studentCode: string | null; user: { name: string | null; email: string }; branch: { name: string } | null };
 };
 
 type ReferralData = {
-  students: ReferralStudent[];
-  redemptions: Redemption[];
-  holds: Hold[];
+  codes: Code[];
+  pendingPayouts: Payout[];
+  recentRedemptions: Redemption[];
   totalRedemptions: number;
   openHolds: number;
-  campaignAudienceCount: number;
   truncated: boolean;
 };
 
+const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
 const date = (value: string) =>
   new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
@@ -67,14 +64,56 @@ function csvCell(value: unknown): string {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
 }
 
+function rewardLabel(code: Pick<Code, "discountPercent" | "discountFlat" | "commissionPercent" | "commissionFlat">): {
+  discount: string;
+  commission: string;
+} {
+  const discountParts: string[] = [];
+  if (code.discountPercent) discountParts.push(`${code.discountPercent}%`);
+  if (code.discountFlat) discountParts.push(naira(code.discountFlat));
+  const commissionParts: string[] = [];
+  if (code.commissionPercent) commissionParts.push(`${code.commissionPercent}%`);
+  if (code.commissionFlat) commissionParts.push(naira(code.commissionFlat));
+  return {
+    discount: discountParts.length ? discountParts.join(" + ") : "—",
+    commission: commissionParts.length ? commissionParts.join(" + ") : "—",
+  };
+}
+
+const AMOUNT_FIELDS = ["discountPercent", "discountFlat", "discountCapAmount", "commissionPercent", "commissionFlat"] as const;
+type AmountField = (typeof AMOUNT_FIELDS)[number];
+
 export default function AdminReferralsPage() {
   const [data, setData] = useState<ReferralData | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"all" | "student_referral" | "influencer">("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [audienceConfirmed, setAudienceConfirmed] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [creditingId, setCreditingId] = useState<string | null>(null);
+  const [creditNote, setCreditNote] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [newCode, setNewCode] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [newOwnerEmail, setNewOwnerEmail] = useState("");
+  const [newValues, setNewValues] = useState<Record<AmountField, string>>({
+    discountPercent: "",
+    discountFlat: "",
+    discountCapAmount: "",
+    commissionPercent: "",
+    commissionFlat: "",
+  });
+
+  function refresh() {
+    setLoading(true);
+    setError("");
+    setRefreshKey((key) => key + 1);
+  }
 
   useEffect(() => {
     let active = true;
@@ -100,59 +139,186 @@ export default function AdminReferralsPage() {
     };
   }, [refreshKey]);
 
-  const filteredStudents = useMemo(() => {
+  const filteredCodes = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return data?.students ?? [];
-    return (data?.students ?? []).filter((student) =>
-      [student.user.name, student.user.email, student.referralCode, student.studentCode, student.branch?.name]
-        .some((value) => value?.toLowerCase().includes(query)),
-    );
-  }, [data?.students, search]);
+    return (data?.codes ?? [])
+      .filter((code) => typeFilter === "all" || code.type === typeFilter)
+      .filter((code) => {
+        if (!query) return true;
+        const owner = code.ownerStudent?.user ?? code.ownerUser;
+        return [code.code, code.label, owner?.name, owner?.email].some((value) => value?.toLowerCase().includes(query));
+      });
+  }, [data?.codes, search, typeFilter]);
+
+  const pendingPayoutTotal = useMemo(
+    () => (data?.pendingPayouts ?? []).filter((p) => p.status === "pending").reduce((sum, p) => sum + p.amount, 0),
+    [data?.pendingPayouts],
+  );
 
   async function copyLink(code: string) {
-    const link = `${window.location.origin}/auth/signup?ref=${encodeURIComponent(code)}`;
+    const link = `${window.location.origin}/auth/signup?promo=${encodeURIComponent(code)}`;
     try {
       await navigator.clipboard.writeText(link);
-      setNotice(`Referral link copied for ${code}.`);
+      setNotice(`Signup link copied for ${code}.`);
       setError("");
     } catch {
-      setError("Could not copy the referral link. Check browser clipboard permissions.");
-      setNotice("");
-    }
-  }
-
-  async function copyCampaignText(label: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setNotice(`${label} copied. No message was sent.`);
-      setError("");
-    } catch {
-      setError(`Could not copy the ${label.toLowerCase()}.`);
+      setError("Could not copy the link. Check browser clipboard permissions.");
       setNotice("");
     }
   }
 
   function downloadCsv() {
     const rows = [
-      ["Student code", "Name", "Email", "Branch", "Referral code", "Registered referrals"],
-      ...filteredStudents.map((student) => [
-        student.studentCode,
-        student.user.name,
-        student.user.email,
-        student.branch?.name,
-        student.referralCode,
-        student._count.referralsGiven,
-      ]),
+      ["Type", "Code", "Owner", "Email", "Discount", "Commission", "Sign-ups", "Status", "Created"],
+      ...filteredCodes.map((code) => {
+        const owner = code.ownerStudent?.user ?? code.ownerUser;
+        const reward = rewardLabel(code);
+        return [
+          code.type,
+          code.code,
+          owner?.name,
+          owner?.email,
+          reward.discount,
+          reward.commission,
+          code._count.redemptions,
+          code.status,
+          date(code.createdAt),
+        ];
+      }),
     ];
-    const blob = new Blob([rows.map((row) => row.map(csvCell).join(",")).join("\r\n")], {
-      type: "text/csv;charset=utf-8",
-    });
+    const blob = new Blob([rows.map((row) => row.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `easyway-referrals-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `easyway-promo-codes-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  function startEdit(code: Code) {
+    setEditingId(code.id);
+    setEditValues({
+      discountPercent: code.discountPercent?.toString() ?? "",
+      discountFlat: code.discountFlat?.toString() ?? "",
+      discountCapAmount: code.discountCapAmount?.toString() ?? "",
+      commissionPercent: code.commissionPercent?.toString() ?? "",
+      commissionFlat: code.commissionFlat?.toString() ?? "",
+    });
+  }
+
+  async function saveEdit(id: string) {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/promo-codes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          Object.fromEntries(AMOUNT_FIELDS.map((field) => [field, editValues[field] === "" ? null : Number(editValues[field])])),
+        ),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Unable to save changes.");
+      setEditingId(null);
+      setNotice("Saved.");
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to save changes.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function setStatus(id: string, status: "active" | "paused" | "revoked") {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/promo-codes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Unable to update status.");
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to update status.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function createInfluencerCode(event: FormEvent) {
+    event.preventDefault();
+    setBusyId("new");
+    setError("");
+    try {
+      const res = await fetch("/api/admin/promo-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: newCode,
+          label: newLabel,
+          ownerEmail: newOwnerEmail,
+          ...Object.fromEntries(AMOUNT_FIELDS.map((field) => [field, newValues[field] === "" ? null : Number(newValues[field])])),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Unable to create the code.");
+      setNewCode("");
+      setNewLabel("");
+      setNewOwnerEmail("");
+      setNewValues({ discountPercent: "", discountFlat: "", discountCapAmount: "", commissionPercent: "", commissionFlat: "" });
+      setShowCreateForm(false);
+      setNotice("Influencer code created.");
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create the code.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function approvePayout(id: string) {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/promo-payouts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Unable to approve this payout.");
+      setNotice("Payout approved.");
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to approve this payout.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function creditPayout(id: string) {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/promo-payouts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "credit", note: creditNote.trim() || undefined }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Unable to credit this payout.");
+      setCreditingId(null);
+      setCreditNote("");
+      setNotice("Payout credited.");
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to credit this payout.");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
@@ -160,21 +326,15 @@ export default function AdminReferralsPage() {
       <main className="space-y-6">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-[var(--foreground)]">Referrals</h1>
+            <h1 className="text-2xl font-bold text-[var(--foreground)]">Referrals & influencers</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Student referral codes and registrations attributed to them. This is tracking only; no rewards or
-              payouts are issued automatically.
+              Student referral codes and influencer promo codes, the sign-ups they bring in, and what's owed.
             </p>
           </div>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => {
-                setLoading(true);
-                setError("");
-                setAudienceConfirmed(false);
-                setRefreshKey((key) => key + 1);
-              }}
+              onClick={refresh}
               disabled={loading}
               className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold disabled:opacity-50"
             >
@@ -184,7 +344,7 @@ export default function AdminReferralsPage() {
             <button
               type="button"
               onClick={downloadCsv}
-              disabled={!filteredStudents.length}
+              disabled={!filteredCodes.length}
               className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               <DownloadIcon className="h-4 w-4" />
@@ -196,166 +356,383 @@ export default function AdminReferralsPage() {
         {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
         {notice ? <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p> : null}
 
-        <section className="grid gap-3 sm:grid-cols-3">
+        <section className="grid gap-3 sm:grid-cols-4">
           {[
-            { label: "Referral codes", value: data?.students.length ?? 0 },
-            { label: "Attributed registrations", value: data?.totalRedemptions ?? 0 },
+            { label: "Promo codes", value: data?.codes.length ?? 0 },
+            { label: "Attributed sign-ups", value: data?.totalRedemptions ?? 0 },
+            { label: "Owed (pending)", value: pendingPayoutTotal, money: true },
             { label: "Open holds", value: data?.openHolds ?? 0 },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <p className="text-sm text-[var(--muted)]">{metric.label}</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums">{loading ? "…" : metric.value.toLocaleString()}</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">
+                {loading ? "…" : metric.money ? naira(metric.value) : metric.value.toLocaleString()}
+              </p>
             </div>
           ))}
         </section>
 
-        <section className="space-y-5 rounded-2xl border-2 border-rose-300 bg-[var(--surface)] p-4 sm:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+        <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-rose-700">Referral campaign</p>
-              <h2 className="mt-1 text-xl font-black">Planned student rewards — not ready to launch</h2>
-              <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-                Clear, student-ready copy is prepared below. Referral tracking currently records sign-ups only; the app
-                does not issue reward credit, and a manual verification/crediting process has not been confirmed.
-                No send or broadcast action is enabled here.
+              <h2 className="text-lg font-bold">New influencer code</h2>
+              <p className="text-sm text-[var(--muted)]">
+                The influencer needs an admin account with the Influencer role first (invite them at /admin/staff).
               </p>
             </div>
-            <span className="rounded-full bg-rose-100 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-rose-900">
-              {REFERRAL_CAMPAIGN_STATUS === "blocked" ? "Blocked" : "Ready"}
-            </span>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-              <p className="text-sm font-bold">Pay tuition in parts</p>
-              <p className="mt-1 text-2xl font-black text-[var(--accent-ink)]">₦10,000 + ₦5,000</p>
-              <p className="mt-1 text-sm text-[var(--muted)]">{REFERRAL_REWARD_COPY.partPayment}</p>
-            </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-              <p className="text-sm font-bold">Pay full tuition at once</p>
-              <p className="mt-1 text-2xl font-black text-[var(--accent-ink)]">₦20,000</p>
-              <p className="mt-1 text-sm text-[var(--muted)]">{REFERRAL_REWARD_COPY.fullPayment}</p>
-            </div>
-          </div>
-          <p className="text-sm font-semibold">{REFERRAL_REWARD_COPY.redemption}</p>
-
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-            <p className="font-extrabold">Live audience check (send-time confirmation)</p>
-            <p className="mt-1">
-              {loading ? "Checking…" : (data?.campaignAudienceCount ?? 0).toLocaleString()} active students with referral
-              codes in your authorized branch scope. Refresh this page immediately before any future launch; this number
-              is queried from current records, not hardcoded.
-            </p>
-            <label className="mt-3 flex items-start gap-2 font-semibold">
-              <input
-                type="checkbox"
-                checked={audienceConfirmed}
-                onChange={(event) => setAudienceConfirmed(event.target.checked)}
-                disabled={loading || !data}
-                className="mt-0.5 h-4 w-4 accent-amber-700"
-              />
-              <span>I confirm this current, live referral-code audience is the intended group.</span>
-            </label>
             <button
               type="button"
-              disabled
-              title="Manual reward verification and crediting are not yet arranged."
-              className="mt-3 cursor-not-allowed rounded-xl bg-rose-800 px-4 py-2 font-bold text-white opacity-75"
+              onClick={() => setShowCreateForm((v) => !v)}
+              className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold"
             >
-              Campaign launch blocked
+              {showCreateForm ? "Cancel" : "Add code"}
             </button>
-            <p className="mt-2 text-xs">Audience confirmation does not send anything. Launch stays blocked until manual reward fulfillment is arranged.</p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-[var(--border)] p-4">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-bold">Email draft</h3>
+          {showCreateForm ? (
+            <form onSubmit={createInfluencerCode} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="text-sm font-semibold">
+                Code
+                <input
+                  required
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value.toUpperCase())}
+                  placeholder="EASYWAY-JOHN"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-mono"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Influencer's admin email
+                <input
+                  required
+                  type="email"
+                  value={newOwnerEmail}
+                  onChange={(e) => setNewOwnerEmail(e.target.value)}
+                  placeholder="john@example.com"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Display label (optional)
+                <input
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="John's audience"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Student discount — %
+                <input
+                  type="number"
+                  min={0}
+                  value={newValues.discountPercent}
+                  onChange={(e) => setNewValues((v) => ({ ...v, discountPercent: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Student discount — flat ₦
+                <input
+                  type="number"
+                  min={0}
+                  value={newValues.discountFlat}
+                  onChange={(e) => setNewValues((v) => ({ ...v, discountFlat: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Discount cap ₦ (optional)
+                <input
+                  type="number"
+                  min={0}
+                  value={newValues.discountCapAmount}
+                  onChange={(e) => setNewValues((v) => ({ ...v, discountCapAmount: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Your commission — %
+                <input
+                  type="number"
+                  min={0}
+                  value={newValues.commissionPercent}
+                  onChange={(e) => setNewValues((v) => ({ ...v, commissionPercent: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm font-semibold">
+                Your commission — flat ₦
+                <input
+                  type="number"
+                  min={0}
+                  value={newValues.commissionFlat}
+                  onChange={(e) => setNewValues((v) => ({ ...v, commissionFlat: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                />
+              </label>
+              <div className="flex items-end">
                 <button
-                  type="button"
-                  onClick={() => void copyCampaignText("Email draft", `${REFERRAL_EMAIL_TEMPLATE.subject}\n\n${REFERRAL_EMAIL_TEMPLATE.body}`)}
-                  className="text-sm font-bold text-[var(--accent-ink)] hover:underline"
+                  type="submit"
+                  disabled={busyId === "new"}
+                  className="w-full rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
                 >
-                  Copy draft
+                  {busyId === "new" ? "Creating…" : "Create code"}
                 </button>
               </div>
-              <p className="mt-2 text-sm"><strong>Subject:</strong> {REFERRAL_EMAIL_TEMPLATE.subject}</p>
-              <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface-alt)] p-3 text-xs leading-5">{REFERRAL_EMAIL_TEMPLATE.body}</pre>
-            </div>
-            <div className="rounded-xl border border-[var(--border)] p-4">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-bold">In-app notification draft</h3>
-                <button
-                  type="button"
-                  onClick={() => void copyCampaignText("In-app draft", REFERRAL_NOTIFICATION_TEMPLATE)}
-                  className="text-sm font-bold text-[var(--accent-ink)] hover:underline"
-                >
-                  Copy draft
-                </button>
-              </div>
-              <p className="mt-2 rounded-lg bg-[var(--surface-alt)] p-3 text-sm leading-6">{REFERRAL_NOTIFICATION_TEMPLATE}</p>
-            </div>
-          </div>
+            </form>
+          ) : null}
         </section>
+
+        {data?.pendingPayouts.length ? (
+          <section className="space-y-3 rounded-2xl border border-amber-300 bg-[var(--surface)] p-4">
+            <h2 className="text-lg font-bold">Payouts waiting on you</h2>
+            <ul className="divide-y divide-[var(--border)]">
+              {data.pendingPayouts.map((payout) => {
+                const owner = payout.promoCode.ownerStudent?.user ?? payout.promoCode.ownerUser;
+                return (
+                  <li key={payout.id} className="space-y-2 py-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">
+                          {naira(payout.amount)} — {payout.kind === "commission" ? "influencer commission" : "referral credit"}
+                        </p>
+                        <p className="text-xs text-[var(--muted)]">
+                          Code {payout.promoCode.code} ({owner?.name || owner?.email || "—"}) · referred{" "}
+                          {payout.promoRedemption.redeemedByStudent.user.name || "a student"} · {date(payout.createdAt)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-slate-700">
+                          {payout.status}
+                        </span>
+                        {payout.status === "pending" ? (
+                          <button
+                            type="button"
+                            onClick={() => void approvePayout(payout.id)}
+                            disabled={busyId === payout.id}
+                            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-bold disabled:opacity-50"
+                          >
+                            Approve
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCreditingId(creditingId === payout.id ? null : payout.id);
+                              setCreditNote("");
+                            }}
+                            disabled={busyId === payout.id}
+                            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                          >
+                            Credit
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {creditingId === payout.id ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-alt)] p-3">
+                        <input
+                          value={creditNote}
+                          onChange={(e) => setCreditNote(e.target.value)}
+                          placeholder={
+                            payout.kind === "commission"
+                              ? "How was this paid out, e.g. bank transfer 12 Oct"
+                              : "Optional — leave blank to auto-apply as a waiver on their open balance"
+                          }
+                          className="min-w-[14rem] flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void creditPayout(payout.id)}
+                          disabled={busyId === payout.id}
+                          className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+                        >
+                          Mark credited
+                        </button>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
         {data?.truncated ? (
           <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
-            This view is capped for performance. The code list, registrations, or holds may be incomplete.
+            This view is capped for performance. Some codes, payouts or registrations may be incomplete.
           </p>
         ) : null}
 
         <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold">Student codes</h2>
-              <p className="text-sm text-[var(--muted)]">Copy a link to share; a registration via the link is recorded here.</p>
+              <h2 className="text-lg font-bold">Codes</h2>
+              <p className="text-sm text-[var(--muted)]">Every student referral and influencer code.</p>
             </div>
-            <input
-              aria-label="Search referral codes"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name, email, code or branch"
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm sm:max-w-sm"
-            />
+            <div className="flex flex-wrap gap-2">
+              {(["all", "student_referral", "influencer"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTypeFilter(t)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                    typeFilter === t ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
+                  }`}
+                >
+                  {t === "all" ? "All" : t === "student_referral" ? "Student referrals" : "Influencers"}
+                </button>
+              ))}
+              <input
+                aria-label="Search codes"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search name, email or code"
+                className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
+              />
+            </div>
           </div>
 
           {loading ? (
-            <p className="py-8 text-center text-sm text-[var(--muted)]">Loading referral records…</p>
-          ) : filteredStudents.length === 0 ? (
-            <p className="py-8 text-center text-sm text-[var(--muted)]">
-              {data?.students.length ? "No referral codes match this search." : "No student referral codes are available."}
-            </p>
+            <p className="py-8 text-center text-sm text-[var(--muted)]">Loading…</p>
+          ) : filteredCodes.length === 0 ? (
+            <p className="py-8 text-center text-sm text-[var(--muted)]">No codes match this view.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
+              <table className="w-full min-w-[920px] text-left text-sm">
                 <thead className="border-b border-[var(--border)] text-xs uppercase tracking-wide text-[var(--muted)]">
                   <tr>
-                    <th className="px-3 py-3">Student</th>
-                    <th className="px-3 py-3">Branch</th>
-                    <th className="px-3 py-3">Referral code</th>
-                    <th className="px-3 py-3">Registrations</th>
-                    <th className="px-3 py-3">Joined</th>
-                    <th className="px-3 py-3">Link</th>
+                    <th className="px-3 py-3">Owner</th>
+                    <th className="px-3 py-3">Type</th>
+                    <th className="px-3 py-3">Code</th>
+                    <th className="px-3 py-3">Discount</th>
+                    <th className="px-3 py-3">Commission</th>
+                    <th className="px-3 py-3">Sign-ups</th>
+                    <th className="px-3 py-3">Status</th>
+                    <th className="px-3 py-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {filteredStudents.map((student) => (
-                    <tr key={student.id}>
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{student.user.name || "Student"}</p>
-                        <p className="text-xs text-[var(--muted)]">{student.user.email}</p>
-                      </td>
-                      <td className="px-3 py-3">{student.branch?.name ?? "—"}</td>
-                      <td className="px-3 py-3 font-mono font-bold">{student.referralCode}</td>
-                      <td className="px-3 py-3 tabular-nums">{student._count.referralsGiven}</td>
-                      <td className="px-3 py-3">{date(student.createdAt)}</td>
-                      <td className="px-3 py-3">
-                        <button type="button" onClick={() => void copyLink(student.referralCode)} className="font-semibold text-[var(--accent-ink)] hover:underline">
-                          Copy link
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredCodes.map((code) => {
+                    const owner = code.ownerStudent?.user ?? code.ownerUser;
+                    const reward = rewardLabel(code);
+                    const isEditing = editingId === code.id;
+                    return (
+                      <tr key={code.id}>
+                        <td className="px-3 py-3">
+                          <p className="font-semibold">{owner?.name || "—"}</p>
+                          <p className="text-xs text-[var(--muted)]">{owner?.email}</p>
+                        </td>
+                        <td className="px-3 py-3 capitalize">{code.type.replace("_", " ")}</td>
+                        <td className="px-3 py-3 font-mono font-bold">{code.code}</td>
+                        {isEditing ? (
+                          <>
+                            <td className="px-3 py-3">
+                              <div className="flex gap-1">
+                                <input
+                                  aria-label="Discount percent"
+                                  value={editValues.discountPercent}
+                                  onChange={(e) => setEditValues((v) => ({ ...v, discountPercent: e.target.value }))}
+                                  placeholder="%"
+                                  className="w-14 rounded border border-[var(--border)] px-1.5 py-1 text-xs"
+                                />
+                                <input
+                                  aria-label="Discount flat"
+                                  value={editValues.discountFlat}
+                                  onChange={(e) => setEditValues((v) => ({ ...v, discountFlat: e.target.value }))}
+                                  placeholder="₦"
+                                  className="w-20 rounded border border-[var(--border)] px-1.5 py-1 text-xs"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex gap-1">
+                                <input
+                                  aria-label="Commission percent"
+                                  value={editValues.commissionPercent}
+                                  onChange={(e) => setEditValues((v) => ({ ...v, commissionPercent: e.target.value }))}
+                                  placeholder="%"
+                                  className="w-14 rounded border border-[var(--border)] px-1.5 py-1 text-xs"
+                                />
+                                <input
+                                  aria-label="Commission flat"
+                                  value={editValues.commissionFlat}
+                                  onChange={(e) => setEditValues((v) => ({ ...v, commissionFlat: e.target.value }))}
+                                  placeholder="₦"
+                                  className="w-20 rounded border border-[var(--border)] px-1.5 py-1 text-xs"
+                                />
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-3 py-3">{reward.discount}</td>
+                            <td className="px-3 py-3">{reward.commission}</td>
+                          </>
+                        )}
+                        <td className="px-3 py-3 tabular-nums">{code._count.redemptions}</td>
+                        <td className="px-3 py-3">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${
+                              code.status === "active"
+                                ? "bg-emerald-100 text-emerald-900"
+                                : code.status === "paused"
+                                ? "bg-amber-100 text-amber-900"
+                                : "bg-rose-100 text-rose-900"
+                            }`}
+                          >
+                            {code.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button type="button" onClick={() => void copyLink(code.code)} className="text-xs font-semibold text-[var(--accent-ink)] hover:underline">
+                              Copy link
+                            </button>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveEdit(code.id)}
+                                  disabled={busyId === code.id}
+                                  className="text-xs font-semibold text-emerald-700 hover:underline disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                                <button type="button" onClick={() => setEditingId(null)} className="text-xs font-semibold text-[var(--muted)] hover:underline">
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <button type="button" onClick={() => startEdit(code)} className="text-xs font-semibold text-[var(--accent-ink)] hover:underline">
+                                Edit reward
+                              </button>
+                            )}
+                            {code.status === "active" ? (
+                              <button
+                                type="button"
+                                onClick={() => void setStatus(code.id, "paused")}
+                                disabled={busyId === code.id}
+                                className="text-xs font-semibold text-amber-700 hover:underline disabled:opacity-50"
+                              >
+                                Pause
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void setStatus(code.id, "active")}
+                                disabled={busyId === code.id}
+                                className="text-xs font-semibold text-emerald-700 hover:underline disabled:opacity-50"
+                              >
+                                Activate
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -364,32 +741,32 @@ export default function AdminReferralsPage() {
 
         <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <div>
-            <h2 className="text-lg font-bold">Attributed registrations</h2>
-            <p className="text-sm text-[var(--muted)]">A registration is recorded when a new student signs up using a referral link.</p>
+            <h2 className="text-lg font-bold">Recent sign-ups</h2>
+            <p className="text-sm text-[var(--muted)]">A registration is recorded when a new student signs up with a promo code.</p>
           </div>
-          {!data?.redemptions.length ? (
+          {!data?.recentRedemptions.length ? (
             <p className="py-6 text-center text-sm text-[var(--muted)]">No registrations have been attributed yet.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[680px] text-left text-sm">
                 <thead className="border-b border-[var(--border)] text-xs uppercase tracking-wide text-[var(--muted)]">
                   <tr>
-                    <th className="px-3 py-3">Referred student</th>
-                    <th className="px-3 py-3">Referred by</th>
+                    <th className="px-3 py-3">Student</th>
                     <th className="px-3 py-3">Code</th>
+                    <th className="px-3 py-3">Discount</th>
                     <th className="px-3 py-3">Status</th>
                     <th className="px-3 py-3">Registered</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {data.redemptions.map((redemption) => (
+                  {data.recentRedemptions.map((redemption) => (
                     <tr key={redemption.id}>
                       <td className="px-3 py-3">
-                        <p className="font-semibold">{redemption.referredStudent.user.name || "Student"}</p>
-                        <p className="text-xs text-[var(--muted)]">{redemption.referredStudent.user.email}</p>
+                        <p className="font-semibold">{redemption.redeemedByStudent.user.name || "Student"}</p>
+                        <p className="text-xs text-[var(--muted)]">{redemption.redeemedByStudent.user.email}</p>
                       </td>
-                      <td className="px-3 py-3">{redemption.referrerStudent.user.name || "Student"}</td>
-                      <td className="px-3 py-3 font-mono">{redemption.referralCode}</td>
+                      <td className="px-3 py-3 font-mono">{redemption.codeSnapshot}</td>
+                      <td className="px-3 py-3 tabular-nums">{redemption.discountAmount ? naira(redemption.discountAmount) : "—"}</td>
                       <td className="px-3 py-3 capitalize">{redemption.status}</td>
                       <td className="px-3 py-3">{date(redemption.createdAt)}</td>
                     </tr>
@@ -397,28 +774,6 @@ export default function AdminReferralsPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </section>
-
-        <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div>
-            <h2 className="text-lg font-bold">Open referral holds</h2>
-            <p className="text-sm text-[var(--muted)]">Holds are recorded for review only; this page does not release or pay rewards.</p>
-          </div>
-          {!data?.holds.length ? (
-            <p className="py-6 text-center text-sm text-[var(--muted)]">There are no open holds.</p>
-          ) : (
-            <ul className="divide-y divide-[var(--border)]">
-              {data.holds.map((hold) => (
-                <li key={hold.id} className="flex flex-wrap items-start justify-between gap-2 py-3 text-sm">
-                  <div>
-                    <p className="font-semibold">{hold.redemption.referredStudent.user.name || "Student"} referred by {hold.redemption.referrerStudent.user.name || "Student"}</p>
-                    <p className="text-[var(--muted)]">{hold.reason}</p>
-                  </div>
-                  <time className="text-xs text-[var(--muted)]">{date(hold.heldAt)}</time>
-                </li>
-              ))}
-            </ul>
           )}
         </section>
       </main>

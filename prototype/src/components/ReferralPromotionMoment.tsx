@@ -2,10 +2,29 @@
 
 import { useEffect, useState } from "react";
 
-import { recordReferralPromotionImpression, REFERRAL_REWARD_COPY } from "@/lib/referral-campaign";
+import { recordReferralPromotionImpression } from "@/lib/referral-campaign";
+
+type ReferralPromotionData = {
+  referralCode: string | null;
+  commissionPercent?: number | null;
+  commissionFlat?: number | null;
+  signups?: number;
+  pendingCredit?: number;
+  creditedTotal?: number;
+};
+
+const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
+
+function rewardLine(data: ReferralPromotionData): string | null {
+  const parts: string[] = [];
+  if (data.commissionPercent) parts.push(`${data.commissionPercent}%`);
+  if (data.commissionFlat) parts.push(naira(data.commissionFlat));
+  if (!parts.length) return null;
+  return `Earn ${parts.join(" + ")} credit toward your own tuition for every friend who joins.`;
+}
 
 export default function ReferralPromotionMoment() {
-  const [referralCode, setReferralCode] = useState<string | null>(null);
+  const [data, setData] = useState<ReferralPromotionData | null>(null);
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -15,17 +34,17 @@ export default function ReferralPromotionMoment() {
     fetch("/api/student/referral-promotion", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) return null;
-        return (await response.json()) as { referralCode?: string | null; campaignStatus?: string };
+        return (await response.json()) as ReferralPromotionData;
       })
-      .then((data) => {
-        if (!active || !data?.referralCode || data.campaignStatus !== "blocked") return;
+      .then((result) => {
+        if (!active || !result?.referralCode) return;
         try {
-          if (!recordReferralPromotionImpression(data.referralCode, window.localStorage)) return;
+          if (!recordReferralPromotionImpression(result.referralCode, window.localStorage)) return;
         } catch {
           // Do not show repeatedly when daily frequency cannot be persisted.
           return;
         }
-        setReferralCode(data.referralCode);
+        setData(result);
         setVisible(true);
       })
       .catch(() => {});
@@ -40,8 +59,8 @@ export default function ReferralPromotionMoment() {
   }
 
   async function copyReferralLink() {
-    if (!referralCode) return;
-    const link = `${window.location.origin}/auth/signup?ref=${encodeURIComponent(referralCode)}`;
+    if (!data?.referralCode) return;
+    const link = `${window.location.origin}/auth/signup?promo=${encodeURIComponent(data.referralCode)}`;
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
@@ -50,7 +69,10 @@ export default function ReferralPromotionMoment() {
     }
   }
 
-  if (!visible || !referralCode) return null;
+  if (!visible || !data?.referralCode) return null;
+  const reward = rewardLine(data);
+  const creditedTotal = data.creditedTotal ?? 0;
+  const pendingCredit = data.pendingCredit ?? 0;
 
   return (
     <aside className="fixed bottom-20 left-3 right-3 z-[100] sm:bottom-5 sm:left-auto sm:right-5 sm:w-[min(26rem,calc(100vw-2.5rem))]">
@@ -67,39 +89,29 @@ export default function ReferralPromotionMoment() {
           ×
         </button>
 
-        <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-amber-700">Referral rewards — planned</p>
+        <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-amber-700">Refer a friend</p>
         <h2 id="referral-promotion-title" className="mt-2 pr-8 text-2xl font-black leading-tight text-slate-950">
-          Refer a friend. Save on your next tuition.
+          Share your code. Earn credit.
         </h2>
         <p className="mt-2 text-sm font-medium text-slate-600">
-          Get tuition credit toward your next payment or level when someone joins through your link.
+          {reward ?? "Share your code with a friend — your school will confirm what you earn when they join."}
         </p>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-amber-900">Pays in parts</p>
-            <p className="mt-1 text-2xl font-black tabular-nums text-slate-950">₦10,000 + ₦5,000</p>
-            <p className="mt-1 text-xs leading-5 text-slate-700">₦10,000 after their first payment, then ₦5,000 after they complete the balance.</p>
-            <p className="mt-2 text-sm font-extrabold text-amber-900">₦15,000 total</p>
+        {creditedTotal > 0 || pendingCredit > 0 ? (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-900">Credited</p>
+              <p className="mt-1 text-2xl font-black tabular-nums text-slate-950">{naira(creditedTotal)}</p>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-900">On the way</p>
+              <p className="mt-1 text-2xl font-black tabular-nums text-slate-950">{naira(pendingCredit)}</p>
+            </div>
           </div>
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-900">Pays all at once</p>
-            <p className="mt-1 text-3xl font-black tabular-nums text-slate-950">₦20,000</p>
-            <p className="mt-1 text-xs leading-5 text-slate-700">When your friend pays their full tuition in one payment.</p>
-          </div>
-        </div>
+        ) : null}
 
-        <p className="mt-3 rounded-xl bg-slate-100 p-3 text-xs font-semibold leading-5 text-slate-700">
-          {REFERRAL_REWARD_COPY.example}
-        </p>
-
-        <div className="mt-4 rounded-2xl border-2 border-rose-200 bg-rose-50 p-4">
-          <p className="font-extrabold text-rose-950">Not live yet — please note</p>
-          <p className="mt-1 text-xs leading-5 text-rose-900">{REFERRAL_REWARD_COPY.fulfillment}</p>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-100 p-3">
-          <p className="text-xs text-slate-700">Your code: <strong className="font-mono text-slate-950">{referralCode}</strong></p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-100 p-3">
+          <p className="text-xs text-slate-700">Your code: <strong className="font-mono text-slate-950">{data.referralCode}</strong></p>
           <button
             type="button"
             onClick={() => void copyReferralLink()}

@@ -25,6 +25,10 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // `growth`, not `students`, so a rep's account doesn't also pick up the
   // rest of the student record.
   { prefix: "/admin/growth", capability: "growth" },
+  // An influencer's own dashboard — their code, their sign-ups, their payout
+  // ledger. Gated on its own capability so it carries nothing else `growth`
+  // or `payments` would otherwise pull in.
+  { prefix: "/admin/influencer", capability: "influencer" },
   // A guardian's account is paperwork about a named student, same desk as
   // the rest of the student record.
   { prefix: "/admin/parents", capability: "students" },
