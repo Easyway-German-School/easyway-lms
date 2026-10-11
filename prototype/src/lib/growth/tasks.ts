@@ -3,6 +3,7 @@ import { logLeadActivity } from "@/lib/growth/activity";
 import { isPartnerStale } from "@/lib/growth/partners";
 import { startOfToday } from "@/lib/growth/reports";
 import { sourceConversionRate } from "@/lib/growth/intelligence";
+import { notify, KIND } from "@/lib/notify";
 import type { GrowthTitle } from "@/lib/growth/titles";
 
 /**
@@ -225,5 +226,64 @@ export async function autoCompleteTasksForLeadActivity(opts: { leadId: string; a
 
   for (const task of tasks) {
     await completeTask({ taskId: task.id, actorId: opts.actorId, outcome: "done", verified: true });
+  }
+}
+
+/**
+ * One push per person per day — the first time they open the desk, not a
+ * cron, same idempotent-on-first-load shape as ensureDailyOpsTasks right
+ * above it. notify()'s own dedupeKey does the "already sent today" check,
+ * so a page refreshed fifty times still only ever buzzes once.
+ *
+ * Silent when there's nothing worth a buzz: an empty queue, an unassigned
+ * pool of zero, or a fully-reported team says nothing, on purpose — a
+ * notification that fires every day whether or not anything needs doing is
+ * one a rep learns to swipe away without reading.
+ */
+export async function sendDailyDigestIfNeeded(opts: {
+  userId: string;
+  title: GrowthTitle;
+  pendingTaskCount: number;
+}): Promise<void> {
+  let message: string | null = null;
+
+  if (opts.title === "rep") {
+    if (opts.pendingTaskCount > 0) {
+      message = `${opts.pendingTaskCount} follow-up${opts.pendingTaskCount === 1 ? "" : "s"} waiting in your queue today.`;
+    }
+  } else if (opts.title === "sales_lead") {
+    const [unassigned, reportsToday, repCount] = await Promise.all([
+      prisma.lead.count({ where: { assignedToId: null, status: { notIn: ["converted", "lost", "dropped"] } } }),
+      prisma.dailyReport.count({ where: { reportDate: startOfToday() } }),
+      prisma.user.count({ where: { role: "ADMIN", adminRole: "growth", deletedAt: null } }),
+    ]);
+    const parts: string[] = [];
+    if (unassigned > 0) parts.push(`${unassigned} lead${unassigned === 1 ? "" : "s"} unassigned`);
+    const missingReports = repCount - reportsToday;
+    if (missingReports > 0) parts.push(`${missingReports} report${missingReports === 1 ? "" : "s"} outstanding`);
+    if (parts.length > 0) message = `${parts.join(", ")}.`;
+  } else if (opts.title === "bdm") {
+    const partners = await prisma.partner.findMany({
+      where: { ownerId: opts.userId },
+      select: { lastContactedAt: true, createdAt: true },
+    });
+    const staleCount = partners.filter(isPartnerStale).length;
+    if (staleCount > 0) message = `${staleCount} partner${staleCount === 1 ? "" : "s"} overdue a check-in.`;
+  }
+
+  if (!message) return;
+
+  try {
+    await notify({
+      to: { userIds: [opts.userId] },
+      kind: KIND.growthDailyDigest,
+      title: "Your Growth Desk today",
+      message,
+      link: "/admin/growth",
+      dedupeKey: `growth-digest-${opts.userId}-${startOfToday().toISOString().slice(0, 10)}`,
+      email: false,
+    });
+  } catch (error) {
+    console.error("Growth Desk daily digest failed:", error);
   }
 }

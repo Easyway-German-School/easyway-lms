@@ -70,6 +70,8 @@ export const KIND = {
   leadCaptured: "lead.captured",
   /** To the rep: a lead just landed in their queue, auto-routed or handed to them by the Teamlead. See src/lib/growth/leads.ts's assignLead. */
   leadAssigned: "lead.assigned",
+  /** Once a day, the first time a Growth Desk account opens the desk: queue size, unassigned count, or stale partners, depending on the job. See src/lib/growth/tasks.ts's sendDailyDigestIfNeeded. */
+  growthDailyDigest: "growth.daily_digest",
   /** A new high/critical incident appeared in Mission Control. */
   missionControlIncident: "mission_control.incident",
   /** A student asked the office for help, or wrote back on a thread. */
