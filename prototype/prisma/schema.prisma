@@ -177,6 +177,10 @@ model User {
   ownedPartners         Partner[]                @relation("PartnerOwner")
   fundRequests          FundRequest[]            @relation("FundRequester")
   fundRequestsApproved  FundRequest[]            @relation("FundApprover")
+  promoCodesOwned       PromoCode[]              @relation("PromoCodeOwnerUser")
+  promoCodesCreated     PromoCode[]              @relation("PromoCodeCreatedBy")
+  promoPayoutsApproved  PromoPayout[]            @relation("PromoPayoutApprover")
+  promoPayoutsCredited  PromoPayout[]            @relation("PromoPayoutCreditor")
   dailyReports          DailyReport[]
   staffChannelsCreated  StaffChannel[]           @relation("StaffChannelCreator")
   staffChannelMessages  StaffChannelMessage[]    @relation("StaffChannelAuthor")
@@ -328,6 +332,8 @@ model Tenant {
   commissionEntries       CommissionEntry[]
   partners                Partner[]
   fundRequests            FundRequest[]
+  promoCodes              PromoCode[]
+  promoPayouts            PromoPayout[]
   dailyReports            DailyReport[]
   staffChannels           StaffChannel[]
   staffChannelMessages    StaffChannelMessage[]
@@ -839,8 +845,8 @@ model Student {
    * Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private.
    */
   tutorMessages         TutorMessage[]
-  referralsGiven        ReferralRedemption[]   @relation("ReferralReferrer")
-  referralReceived      ReferralRedemption?    @relation("ReferralReferred")
+  promoCodesOwned       PromoCode[]            @relation("PromoCodeOwnerStudent")
+  promoRedemption       PromoRedemption?       @relation("PromoRedeemedBy")
   /**
    * What the tutor wrote up after each private session.
    */
@@ -2323,6 +2329,11 @@ model Payment {
   /// CommissionEntry — unique on paymentId, so at most one of these exists.
   commissionEntry CommissionEntry?
 
+  /// Promo-code payouts (commission / referral credit) this payment accrued.
+  /// Not unique — a payout can also be recorded with no payment at all (a
+  /// manual admin adjustment).
+  promoPayouts PromoPayout[]
+
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -2339,38 +2350,169 @@ model Payment {
   @@index([studentId, level])
 }
 
-model ReferralRedemption {
-  id                String         @id @default(cuid())
-  referralCode      String
-  status            String         @default("registered")
-  referrerStudentId String
-  referrerStudent   Student        @relation("ReferralReferrer", fields: [referrerStudentId], references: [id], onDelete: Cascade)
-  referredStudentId String         @unique
-  referredStudent   Student        @relation("ReferralReferred", fields: [referredStudentId], references: [id], onDelete: Cascade)
-  tenantId          String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  holds             ReferralHold[]
+/// ONE CODE, ONE TYPE — the unified promo-code system. Replaces the
+/// student-only ReferralRedemption/ReferralHold pair (now retired; their
+/// tables stay on disk as untouched history, copied forward into
+/// PromoRedemption/PromoRedemptionHold by the migration) with one shape that
+/// also covers influencer codes. `type` picks which program a code belongs
+/// to; the discount/commission fields are admin-set per row and default to
+/// unset — nothing is hardcoded here, see REFERRAL_REWARD_COPY's retirement.
+model PromoCode {
+  id     String @id @default(cuid())
+  /// UPPERCASE, e.g. EW3F9A2B1C4D5E67 (auto-generated for every student) or
+  /// a hand-picked influencer code like INFLUENCER-JOHN.
+  code   String @unique
+  /// student_referral | influencer
+  type   String
+  /// active | paused | revoked — paused/revoked codes are refused at signup,
+  /// but history (existing PromoRedemption/PromoPayout rows) is untouched.
+  status String @default("active")
 
+  /// Owner for a student_referral code — the existing student who refers.
+  ownerStudentId String?
+  ownerStudent   Student? @relation("PromoCodeOwnerStudent", fields: [ownerStudentId], references: [id], onDelete: Cascade)
+  /// Owner for an influencer code — an admin-console User with adminRole
+  /// "influencer". No self-serve influencer signup in v1.
+  ownerUserId String?
+  ownerUser   User?   @relation("PromoCodeOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  /// Display name, e.g. the influencer's public handle.
+  label String?
+
+  /// Discount given to the NEW student who signs up with this code. Both may
+  /// be set (flat applied after percent); null/0 means no discount — true
+  /// today for every student_referral code, since that program rewards the
+  /// REFERRER, not the new student. Percent is whole points (10 = 10%).
+  discountPercent   Int?
+  discountFlat      Int?
+  discountCapAmount Int?
+
+  /// Reward earned by the code's owner (the referrer, or the influencer).
+  commissionPercent Int?
+  commissionFlat    Int?
+
+  notes String?
+
+  createdById String?
+  createdBy   User?   @relation("PromoCodeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  redemptions PromoRedemption[]
+  payouts     PromoPayout[]
+
+  @@index([type, status])
   @@index([tenantId])
-  @@index([referrerStudentId, createdAt])
-  @@index([status, createdAt])
 }
 
-model ReferralHold {
-  id           String             @id @default(cuid())
+/// One row per NEW student who signed up using a PromoCode.
+model PromoRedemption {
+  id          String    @id @default(cuid())
+  promoCodeId String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  /// Snapshot of the code string at redemption time — survives a later rename.
+  codeSnapshot String
+  /// Snapshot of PromoCode.type at redemption time.
+  type         String
+
+  redeemedByStudentId String  @unique
+  redeemedByStudent   Student @relation("PromoRedeemedBy", fields: [redeemedByStudentId], references: [id], onDelete: Cascade)
+
+  /// The discount actually frozen for this student, whole naira. Computed
+  /// once at signup (see src/lib/promo-pricing.ts) and never recomputed off
+  /// a later price-book edit.
+  discountAmount            Int       @default(0)
+  discountAppliedToChargeId String?
+  discountAppliedAt         DateTime?
+
+  /// registered (just signed up) | activated (first qualifying payment
+  /// landed, reward accrual ran) | reversed (admin voided — e.g. fraud)
+  status String @default("registered")
+
+  tenantId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  holds   PromoRedemptionHold[]
+  payouts PromoPayout[]
+
+  @@index([promoCodeId, createdAt])
+  @@index([status, createdAt])
+  @@index([tenantId])
+}
+
+/// Review-only holds on a redemption — same shape as the retired ReferralHold.
+model PromoRedemptionHold {
+  id           String          @id @default(cuid())
   redemptionId String
-  redemption   ReferralRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
+  redemption   PromoRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
   reason       String
-  heldAt       DateTime           @default(now())
+  heldAt       DateTime        @default(now())
   releasedAt   DateTime?
   resolvedById String?
   tenantId     String?
-  createdAt    DateTime           @default(now())
+  createdAt    DateTime        @default(now())
 
   @@index([tenantId])
   @@index([redemptionId, releasedAt])
   @@index([heldAt])
+}
+
+/// The money ledger — one row per accrued reward, for EITHER program: `kind`
+/// says which. Modeled on CommissionEntry's pending/approved lifecycle, with
+/// a third state (`credited`) because there is no automated payout rail —
+/// crediting is an admin-triggered, auditable bookkeeping action (see
+/// src/app/api/admin/promo-payouts/[id]/route.ts).
+model PromoPayout {
+  id String @id @default(cuid())
+
+  promoRedemptionId String
+  promoRedemption   PromoRedemption @relation(fields: [promoRedemptionId], references: [id], onDelete: Cascade)
+  promoCodeId       String
+  promoCode         PromoCode       @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+
+  /// The Payment that sized/triggered this payout. Nullable — a manual
+  /// admin-created adjustment has none.
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  /// Whole naira, same convention as CommissionEntry.amount.
+  amount Int
+  /// commission (influencer) | referral_credit (student referrer)
+  kind   String
+
+  /// pending | approved | credited
+  status       String    @default("pending")
+  approvedById String?
+  approvedBy   User?     @relation("PromoPayoutApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  /// How an approved amount was actually fulfilled. For a student referrer,
+  /// this is a waiver applied to one of THEIR OWN TuitionCharge rows (reusing
+  /// TuitionCharge.waivedAmount). For an influencer, there is no in-app
+  /// ledger to credit against, so this is a free-text record of the
+  /// off-system payout (bank transfer, etc).
+  creditedViaChargeId String?
+  creditedNote        String?
+  creditedById        String?
+  creditedBy          User?     @relation("PromoPayoutCreditor", fields: [creditedById], references: [id], onDelete: SetNull)
+  creditedAt          DateTime?
+
+  note      String?
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([promoCodeId, status])
+  @@index([promoRedemptionId])
+  @@index([tenantId])
 }
 
 /// ONE ROW PER LEVEL A STUDENT PASSES THROUGH — the debit side of tuition.

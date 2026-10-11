@@ -58,7 +58,24 @@ const ACCOUNTS = [
     adminCapabilities: { grant: [], revoke: ["integrations"] },
     blurb: "Comms and reporting. Integrations revoked by hand to test the diff.",
   },
+  {
+    email: "influencer@easyway.test",
+    name: "Demo Influencer",
+    password: "InfluencerPass123!",
+    adminRole: "influencer",
+    // The preset is just `influencer` — own code, own sign-ups, own payout
+    // ledger, nothing else.
+    adminCapabilities: null,
+    blurb: "Influencer. Only their own promo-code dashboard — no student records, no payments.",
+  },
 ];
+
+/** A test influencer promo code, so the demo account has something to see. */
+const DEMO_PROMO_CODE = {
+  code: "TESTINF01",
+  discountFlat: 5000,
+  commissionFlat: 2000,
+};
 
 function isLocalDatabase() {
   const url = process.env.DATABASE_URL ?? "";
@@ -99,6 +116,25 @@ async function main() {
     });
 
     console.log(`  ${user.email.padEnd(28)} ${account.password.padEnd(20)} ${account.blurb}`);
+
+    if (account.adminRole === "influencer") {
+      await prisma.promoCode.upsert({
+        where: { code: DEMO_PROMO_CODE.code },
+        update: { ownerUserId: user.id, discountFlat: DEMO_PROMO_CODE.discountFlat, commissionFlat: DEMO_PROMO_CODE.commissionFlat },
+        create: {
+          code: DEMO_PROMO_CODE.code,
+          type: "influencer",
+          status: "active",
+          ownerUserId: user.id,
+          discountFlat: DEMO_PROMO_CODE.discountFlat,
+          commissionFlat: DEMO_PROMO_CODE.commissionFlat,
+        },
+      });
+      console.log(
+        `    Promo code ${DEMO_PROMO_CODE.code}: ₦${DEMO_PROMO_CODE.discountFlat} off for a new student, ` +
+          `₦${DEMO_PROMO_CODE.commissionFlat} commission. Try /auth/signup?promo=${DEMO_PROMO_CODE.code}`,
+      );
+    }
   }
 
   console.log(

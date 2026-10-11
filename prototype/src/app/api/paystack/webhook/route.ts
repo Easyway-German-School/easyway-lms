@@ -9,6 +9,7 @@ import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 import { recordCommissionForPayment } from "@/lib/growth/commission";
+import { recordPromoRewardForPayment } from "@/lib/growth/promo-rewards";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped, setTenantScope } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
@@ -403,6 +404,12 @@ async function handlePOST(request: Request) {
     // in src/lib/growth/commission.ts — not wired to real pay yet.
     await recordCommissionForPayment(payment.id).catch((error) => {
       console.error("Paystack webhook: commission recording failed", { paymentId: payment.id, error });
+    });
+
+    // Promo/referral reward accrual: a no-op unless this payment's student
+    // signed up with a promo code. See src/lib/growth/promo-rewards.ts.
+    await recordPromoRewardForPayment(payment.id).catch((error) => {
+      console.error("Paystack webhook: promo reward recording failed", { paymentId: payment.id, error });
     });
 
     const notificationMessage =

@@ -4,7 +4,9 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeJson } from "@/lib/safe-json";
 import {
+  DEPOSIT_RATE,
   isLevelSellable,
+  isTravelPackagePathway,
   privateClassPriceForLevel,
   receivedPaymentFilter,
   REGISTRATION_FEE,
@@ -15,6 +17,7 @@ import {
 import { nextLevelAfter } from "@/lib/levels";
 import { signOffForCheckout } from "@/lib/graduation-server";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
+import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 /**
@@ -191,8 +194,7 @@ export async function POST(request: Request) {
     }
 
     const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType, pathway: studentRecord.pathway };
-    const normalizedTuitionFee = tuitionFeeFor(feeLookup);
-    const requiredDeposit = requiredDepositFor(feeLookup);
+    const grossTuitionFee = tuitionFeeFor(feeLookup);
 
     if (requestedStage !== "registration" && !isLevelSellable(billingLevel)) {
       return NextResponse.json(
@@ -203,6 +205,12 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+
+    // A promo/referral discount only ever applies to the level a student
+    // signed up with — never to a later "Continue to X" next-level purchase.
+    // Read from the student's own frozen PromoRedemption, never from the
+    // request body (see the comment on this route's price derivation above).
+    let discountAmount = 0;
 
     if (requestedStage !== "registration") {
       const charge = await ensureChargeForLevel({
@@ -216,7 +224,28 @@ export async function POST(request: Request) {
           { status: 503 },
         );
       }
+
+      if (!forNextLevel) {
+        // Best-effort fallback: normally already applied at signup (see
+        // api/auth/signup/route.ts) — this only matters if that best-effort
+        // step missed, so the discount still lands the first time this
+        // student actually reaches checkout.
+        await applyPromoDiscountIfNeeded(studentRecord.id, charge.chargeId).catch((error) => {
+          console.error("Promo discount application failed at checkout:", error);
+        });
+        const redemption = await prisma.promoRedemption.findUnique({
+          where: { redeemedByStudentId: studentRecord.id },
+          select: { discountAmount: true },
+        });
+        discountAmount = redemption?.discountAmount ?? 0;
+      }
     }
+
+    const normalizedTuitionFee = Math.max(0, grossTuitionFee - discountAmount);
+    const requiredDeposit =
+      discountAmount > 0 && !isTravelPackagePathway(feeLookup.pathway)
+        ? Math.round(normalizedTuitionFee * DEPOSIT_RATE)
+        : requiredDepositFor(feeLookup);
 
     // What is genuinely still owed at each stage — never more, so a student who
     // has already deposited is charged the balance instead of the whole fee again.
