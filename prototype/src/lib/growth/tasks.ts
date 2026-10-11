@@ -184,6 +184,8 @@ export async function completeTask(opts: {
   taskId: string;
   actorId: string;
   outcome: "done" | "skipped";
+  /** True when the system itself determined this, not a self-click — see autoCompleteTasksForLeadActivity. */
+  verified?: boolean;
 }): Promise<void> {
   const task = await prisma.salesTask.update({
     where: { id: opts.taskId },
@@ -194,8 +196,34 @@ export async function completeTask(opts: {
     await logLeadActivity({
       leadId: task.leadId,
       type: "task_completed",
-      payload: { taskId: task.id, outcome: opts.outcome, title: task.title },
+      payload: { taskId: task.id, outcome: opts.outcome, title: task.title, verified: opts.verified ?? false },
       actorId: opts.actorId,
     });
+  }
+}
+
+/**
+ * The system's own proof a rep actually worked a lead, replacing a
+ * self-click "Done" button for anything tied to a lead. Called right after
+ * a note, a call, or a stage change lands on one — from the person who
+ * logged it, never from whoever happens to be looking at the lead.
+ *
+ * Deliberately narrow: only completes THAT actor's own pending tasks on
+ * THAT lead. A Teamlead moving a stage on someone else's lead must never
+ * credit the assigned rep's queue for work the Teamlead did — that would
+ * just move the unverifiable claim up a level instead of removing it. See
+ * the handbook note at the top of this file on why "done" can no longer be
+ * asserted — only observed.
+ */
+export async function autoCompleteTasksForLeadActivity(opts: { leadId: string; actorId: string | null }): Promise<void> {
+  if (!opts.actorId) return;
+
+  const tasks = await prisma.salesTask.findMany({
+    where: { leadId: opts.leadId, assignedToId: opts.actorId, status: "pending" },
+    select: { id: true },
+  });
+
+  for (const task of tasks) {
+    await completeTask({ taskId: task.id, actorId: opts.actorId, outcome: "done", verified: true });
   }
 }

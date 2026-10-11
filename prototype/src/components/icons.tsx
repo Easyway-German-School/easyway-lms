@@ -621,6 +621,17 @@ export const InboxIcon = icon("InboxIcon", (
   </>
 ));
 
+export const PhoneIcon = icon("PhoneIcon", (
+  <path d="M4.5 4.5c0-.6.5-1 1-1h2.3c.5 0 1 .4 1.1.9l.8 3.2a1 1 0 0 1-.3 1l-1.6 1.5a13.5 13.5 0 0 0 6.1 6.1l1.5-1.6a1 1 0 0 1 1-.3l3.2.8c.5.1.9.6.9 1.1v2.3c0 .6-.5 1-1 1h-.5C9.5 19.5 4.5 14.5 4.5 5z" />
+));
+
+export const ChatBubbleIcon = icon("ChatBubbleIcon", (
+  <>
+    <path d="M4 5.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H9l-4.5 4V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z" />
+    <path d="M7.5 9.5h9M7.5 12.5h5.5" />
+  </>
+));
+
 export const BranchIcon = icon("BranchIcon", (
   <>
     <path d="M4 21V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v15" />

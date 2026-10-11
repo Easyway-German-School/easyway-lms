@@ -14,7 +14,25 @@ import {
   PlusIcon,
   UsersIcon,
   UploadIcon,
+  PhoneIcon,
+  ChatBubbleIcon,
 } from "@/components/icons";
+
+/**
+ * Nigerian-first phone normalisation for `tel:`/`wa.me` links, kept local
+ * and tiny rather than imported from src/lib/sms.ts — that module pulls in
+ * server-only SDKs, and this page is a client component. Importing it here
+ * would risk the exact "server code bundled into the client" failure mode
+ * already blocking the local dev server elsewhere in this app.
+ */
+function phoneDigits(raw: string | null): string | null {
+  const digits = (raw ?? "").replace(/[^\d]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("234") && digits.length === 13) return digits;
+  if (digits.startsWith("0") && digits.length === 11) return `234${digits.slice(1)}`;
+  if (digits.length === 10) return `234${digits}`;
+  return digits.length >= 10 ? digits : null;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -271,6 +289,17 @@ export default function GrowthDeskPage() {
     setRefreshKey((k) => k + 1);
   };
 
+  /**
+   * A note, a call, or a stage change can silently auto-complete a task on
+   * Today (see autoCompleteTasksForLeadActivity) — this pulls the queue back
+   * in sync so a cleared task doesn't keep sitting there until the next full
+   * refresh.
+   */
+  const refreshTasks = async () => {
+    const body = await fetch("/api/admin/growth/tasks", { cache: "no-store" }).then((r) => r.json());
+    if (!body?.error) setTasks(body.tasks ?? []);
+  };
+
   const sortedTasks = useMemo(() => [...tasks].sort((a, b) => b.priorityScore - a.priorityScore), [tasks]);
 
   return (
@@ -388,6 +417,7 @@ export default function GrowthDeskPage() {
               if (!res.ok) return setError(body.error || "Could not update that lead.");
               setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status } : l)));
               setNotice("Stage updated.");
+              void refreshTasks();
             }}
             onNote={async (leadId, note) => {
               const res = await fetch(`/api/admin/growth/leads/${leadId}/activity`, {
@@ -398,6 +428,7 @@ export default function GrowthDeskPage() {
               const body = await res.json();
               if (!res.ok) return setError(body.error || "Could not save that note.");
               setNotice("Note saved to the lead's history.");
+              void refreshTasks();
             }}
             onImport={async (csv) => {
               const res = await fetch("/api/admin/growth/leads", {
@@ -549,15 +580,48 @@ function TodayTab({
               </p>
               <p className="mt-1 text-xl font-bold">{next.title}</p>
               {next.lead ? <p className="mt-1 text-sm text-[var(--muted)]">{next.lead.email}</p> : null}
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => onTaskDone(next.id, "done")}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-                >
-                  <CheckIcon className="h-4 w-4" />
-                  Done
-                </button>
+              {next.lead ? (
+                <p className="mt-3 text-xs text-[var(--muted)]">
+                  Call them, log a note, or move their stage in Pipeline — this clears itself the moment you do.
+                  Nothing to click here to claim it done.
+                </p>
+              ) : null}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {next.lead?.phone && phoneDigits(next.lead.phone)
+                  ? (() => {
+                      const digits = phoneDigits(next.lead!.phone)!;
+                      return (
+                        <>
+                          <a
+                            href={`tel:+${digits}`}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+                          >
+                            <PhoneIcon className="h-4 w-4" />
+                            Call now
+                          </a>
+                          <a
+                            href={`https://wa.me/${digits}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+                          >
+                            <ChatBubbleIcon className="h-4 w-4" />
+                            WhatsApp
+                          </a>
+                        </>
+                      );
+                    })()
+                  : null}
+                {!next.lead ? (
+                  <button
+                    type="button"
+                    onClick={() => onTaskDone(next.id, "done")}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    <CheckIcon className="h-4 w-4" />
+                    Done
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => onTaskDone(next.id, "skipped")}
@@ -573,13 +637,17 @@ function TodayTab({
                 {rest.map((task) => (
                   <li key={task.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                     <span>{task.title}</span>
-                    <button
-                      type="button"
-                      onClick={() => onTaskDone(task.id, "done")}
-                      className="text-xs font-semibold text-[var(--accent-ink)] hover:underline"
-                    >
-                      Mark done
-                    </button>
+                    {task.lead ? (
+                      <span className="text-xs text-[var(--muted)]">clears on contact</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onTaskDone(task.id, "done")}
+                        className="text-xs font-semibold text-[var(--accent-ink)] hover:underline"
+                      >
+                        Mark done
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -778,6 +846,30 @@ function PipelineTab({
                     {lead.email} · {lead.branchName ?? "no branch"}
                     {scope === "team" ? ` · ${lead.assignedTo?.name || lead.assignedTo?.email || "unassigned"}` : ""}
                   </p>
+                  {(() => {
+                    const digits = phoneDigits(lead.phone);
+                    if (!digits) return null;
+                    return (
+                      <p className="mt-1.5 flex items-center gap-3">
+                        <a
+                          href={`tel:+${digits}`}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-ink)]"
+                        >
+                          <PhoneIcon className="h-3.5 w-3.5" />
+                          Call
+                        </a>
+                        <a
+                          href={`https://wa.me/${digits}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-ink)]"
+                        >
+                          <ChatBubbleIcon className="h-3.5 w-3.5" />
+                          WhatsApp
+                        </a>
+                      </p>
+                    );
+                  })()}
                   {lead.aiSignal && (
                     <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                       <Pill tone={lead.aiSignal.urgency === "high" ? "warn" : lead.aiSignal.buyingSignal === "strong" ? "good" : "default"}>

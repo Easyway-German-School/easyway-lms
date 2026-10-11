@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { logLeadActivity } from "@/lib/growth/activity";
-import { createFollowUpTask } from "@/lib/growth/tasks";
+import { createFollowUpTask, autoCompleteTasksForLeadActivity } from "@/lib/growth/tasks";
 import { pickRepForLead } from "@/lib/growth/intelligence";
 import { readGrowthAutoAssignSettings } from "@/lib/growth/auto-assign-settings";
 import { currentTenantId } from "@/lib/tenant/context";
@@ -88,6 +88,9 @@ export async function updateLeadStage(opts: {
     payload: { from: current.status, to: opts.status, note: opts.note ?? null },
     actorId: opts.actorId ?? null,
   });
+
+  // Moving the stage IS the proof of work — see autoCompleteTasksForLeadActivity.
+  await autoCompleteTasksForLeadActivity({ leadId: opts.leadId, actorId: opts.actorId ?? null });
 }
 
 /**
