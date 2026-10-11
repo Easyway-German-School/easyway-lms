@@ -166,6 +166,7 @@ const CAPABILITY_LABELS: Record<Capability, string> = {
   work_drive: "Work Drive - staff file store, workspaces and sharing",
   events: "Staff calendar, events and webinars",
   payroll: "Tutor payroll - pay rates and payout records (super admin)",
+  growth: "Growth Desk - sales pipeline, daily task queue, own commission entries",
 };
 
 /**
