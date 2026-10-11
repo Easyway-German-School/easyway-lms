@@ -113,6 +113,20 @@ export async function getDailyQueue(assignedToId: string) {
 }
 
 /**
+ * How many tasks this person has genuinely completed today — the Today
+ * tab's momentum ring, and the number the daily quota (see
+ * src/lib/growth/quota-settings.ts) is measured against. Counts every
+ * `done` SalesTask regardless of kind: a rep's are always lead-tied and
+ * can now only reach "done" via real contact, so for a rep this is
+ * already a fully verified figure with no extra filtering needed.
+ */
+export async function countDoneToday(assignedToId: string): Promise<number> {
+  return prisma.salesTask.count({
+    where: { assignedToId, status: "done", completedAt: { gte: startOfToday() } },
+  });
+}
+
+/**
  * The Growth Desk ops engine — what today's queue holds beyond raw lead
  * follow-ups, built around what each job actually does rather than one
  * generic list for everyone:

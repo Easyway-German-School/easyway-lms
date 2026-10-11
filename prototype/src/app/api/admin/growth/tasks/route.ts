@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { getDailyQueue, completeTask, ensureDailyOpsTasks, sendDailyDigestIfNeeded } from "@/lib/growth/tasks";
+import { getDailyQueue, completeTask, ensureDailyOpsTasks, sendDailyDigestIfNeeded, countDoneToday } from "@/lib/growth/tasks";
 import { normalizeGrowthTitle } from "@/lib/growth/titles";
+import { readGrowthQuotaSettings } from "@/lib/growth/quota-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,11 @@ export async function GET() {
   const title = normalizeGrowthTitle(user?.growthTitle);
   await ensureDailyOpsTasks(gate.admin.userId, title);
 
-  const tasks = await getDailyQueue(gate.admin.userId);
+  const [tasks, doneToday, quota] = await Promise.all([
+    getDailyQueue(gate.admin.userId),
+    countDoneToday(gate.admin.userId),
+    readGrowthQuotaSettings(gate.session.user.tenantId),
+  ]);
 
   // Awaited, not fire-and-forget: a serverless function can be frozen the
   // instant the response is sent, and an un-awaited promise here would race
@@ -26,7 +31,7 @@ export async function GET() {
   // swallows its own errors, so this never turns into a failed page load.
   await sendDailyDigestIfNeeded({ userId: gate.admin.userId, title, pendingTaskCount: tasks.length });
 
-  return NextResponse.json({ tasks });
+  return NextResponse.json({ tasks, doneToday, quota: quota.count });
 }
 
 /**

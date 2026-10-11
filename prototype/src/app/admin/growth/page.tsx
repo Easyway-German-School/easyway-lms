@@ -186,6 +186,46 @@ function Pill({ children, tone = "default" }: { children: ReactNode; tone?: "def
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${toneClass}`}>{children}</span>;
 }
 
+/**
+ * Today's real progress, as a ring instead of a number — the same trick as
+ * a fitness ring, for the same reason: "3 done" reads as a fact, a ring
+ * closing reads as momentum. With no quota set (quota === null) it still
+ * fills, slowly, toward an arbitrary visual ceiling — there's no target to
+ * hit, just today's count made visible.
+ */
+function MomentumRing({ done, quota }: { done: number; quota: number | null }) {
+  const target = quota ?? Math.max(done, 1);
+  const pct = Math.min(1, done / target);
+  const size = 72;
+  const stroke = 7;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--surface-alt)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - pct)}
+          style={{ transition: "stroke-dashoffset 0.4s ease" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-lg font-bold leading-none text-[var(--foreground)]">{done}</span>
+        {quota ? <span className="text-[10px] leading-none text-[var(--muted)]">of {quota}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -211,6 +251,8 @@ export default function GrowthDeskPage() {
   // viewer, not a load failure the page should show an error for.
   const [aiSettings, setAiSettings] = useState<{ enabled: boolean; keyConfigured: boolean } | null>(null);
   const [autoAssign, setAutoAssign] = useState<{ enabled: boolean; unassigned: number } | null>(null);
+  const [doneToday, setDoneToday] = useState(0);
+  const [quota, setQuota] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -249,6 +291,8 @@ export default function GrowthDeskPage() {
           setTab(DEFAULT_TAB[meBody.title] ?? "today");
         }
         setTasks(tasksBody.tasks ?? []);
+        setDoneToday(tasksBody.doneToday ?? 0);
+        setQuota(typeof tasksBody.quota === "number" ? tasksBody.quota : null);
         setLeads(leadsBody.leads ?? []);
         setCommission(commissionBody.entries ?? []);
         setPartners(partnersBody.partners ?? []);
@@ -297,7 +341,11 @@ export default function GrowthDeskPage() {
    */
   const refreshTasks = async () => {
     const body = await fetch("/api/admin/growth/tasks", { cache: "no-store" }).then((r) => r.json());
-    if (!body?.error) setTasks(body.tasks ?? []);
+    if (!body?.error) {
+      setTasks(body.tasks ?? []);
+      setDoneToday(body.doneToday ?? 0);
+      setQuota(typeof body.quota === "number" ? body.quota : null);
+    }
   };
 
   const sortedTasks = useMemo(() => [...tasks].sort((a, b) => b.priorityScore - a.priorityScore), [tasks]);
@@ -361,6 +409,8 @@ export default function GrowthDeskPage() {
             tasks={sortedTasks}
             myReport={myReport}
             teamReports={teamReports}
+            doneToday={doneToday}
+            quota={quota}
             onTaskDone={async (taskId, outcome) => {
               const res = await fetch("/api/admin/growth/tasks", {
                 method: "PATCH",
@@ -472,6 +522,20 @@ export default function GrowthDeskPage() {
               setAutoAssign({ enabled: body.enabled, unassigned: body.unassigned ?? 0 });
               setNotice(enabled ? "Auto-assign turned on — new leads route themselves again." : "Auto-assign turned off — new leads will wait for you to hand them out.");
             }}
+            quota={quota}
+            doneToday={doneToday}
+            canManageQuota={me?.title === "sales_lead"}
+            onSetQuota={async (count) => {
+              const res = await fetch("/api/admin/growth/quota", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ count }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not change the quota.");
+              setQuota(typeof body.count === "number" ? body.count : null);
+              setNotice(count ? `Daily quota set to ${count}.` : "Daily quota cleared.");
+            }}
           />
         ) : tab === "partners" ? (
           <PartnersTab
@@ -547,12 +611,16 @@ function TodayTab({
   tasks,
   myReport,
   teamReports,
+  doneToday,
+  quota,
   onTaskDone,
   onSubmitReport,
 }: {
   tasks: Task[];
   myReport: TeamReport | null;
   teamReports: TeamReport[];
+  doneToday: number;
+  quota: number | null;
   onTaskDone: (taskId: string, outcome: "done" | "skipped") => void;
   onSubmitReport: (achievement: string, problemSolved: string) => void;
 }) {
@@ -563,11 +631,20 @@ function TodayTab({
   return (
     <div className="space-y-5">
       <Card>
-        <div>
-          <h2 className="text-lg font-bold">Up next</h2>
-          <p className="text-sm text-[var(--muted)]">
-            One thing at a time. Whatever you don't get to today is still here tomorrow — nothing to carry over by hand.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold">Up next</h2>
+            <p className="text-sm text-[var(--muted)]">
+              One thing at a time. Whatever you don't get to today is still here tomorrow — nothing to carry over by
+              hand.
+            </p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {quota
+                ? `${doneToday} of ${quota} today — earned by contact, never by a click.`
+                : `${doneToday} earned today — no quota set yet.`}
+            </p>
+          </div>
+          <MomentumRing done={doneToday} quota={quota} />
         </div>
 
         {!next ? (
@@ -962,6 +1039,84 @@ function LearningRow({ label, rate, confident, sampleSize }: { label: string; ra
   );
 }
 
+/**
+ * The daily quota, set from the Team tab — phone or laptop, same as every
+ * other lever here. Local draft state so typing a number doesn't round-trip
+ * the whole page; only "Set" actually calls the API.
+ */
+function QuotaCard({
+  quota,
+  doneToday,
+  canManage,
+  onSetQuota,
+}: {
+  quota: number | null;
+  doneToday: number;
+  canManage: boolean;
+  onSetQuota: (count: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(quota != null ? String(quota) : "");
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">Daily quota</h2>
+          <p className="text-sm text-[var(--muted)]">
+            What each rep's momentum ring on Today fills toward. Counts only real contact — a note, a call, or a
+            stage change — never a self-click, so this number means what it says.
+          </p>
+          {quota ? (
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              You're at {doneToday} of {quota} yourself today.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-amber-700">No quota set — rings show today's count with no target.</p>
+          )}
+        </div>
+        {canManage ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="e.g. 5"
+              className="w-20 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const n = Number(draft);
+                if (Number.isFinite(n) && n > 0) onSetQuota(Math.round(n));
+              }}
+              disabled={!draft || !(Number(draft) > 0)}
+              className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Set
+            </button>
+            {quota ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft("");
+                  onSetQuota(null);
+                }}
+                className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <Pill tone={quota ? "good" : "default"}>{quota ? `${quota}/day` : "Not set"}</Pill>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function TeamTab({
   reps,
   sourceLearning,
@@ -971,6 +1126,10 @@ function TeamTab({
   autoAssign,
   canManageAutoAssign,
   onToggleAutoAssign,
+  quota,
+  doneToday,
+  canManageQuota,
+  onSetQuota,
 }: {
   reps: RepStat[];
   sourceLearning: SourceLearning[];
@@ -980,9 +1139,15 @@ function TeamTab({
   autoAssign: { enabled: boolean; unassigned: number } | null;
   canManageAutoAssign: boolean;
   onToggleAutoAssign: (enabled: boolean) => void;
+  quota: number | null;
+  doneToday: number;
+  canManageQuota: boolean;
+  onSetQuota: (count: number | null) => void;
 }) {
   return (
     <div className="space-y-5">
+      <QuotaCard quota={quota} doneToday={doneToday} canManage={canManageQuota} onSetQuota={onSetQuota} />
+
       {autoAssign && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1066,7 +1231,9 @@ function TeamTab({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Pill tone={rep.doneToday > 0 ? "good" : "default"}>{rep.doneToday} done today</Pill>
+                  <Pill tone={quota ? (rep.doneToday >= quota ? "good" : "default") : rep.doneToday > 0 ? "good" : "default"}>
+                    {quota ? `${rep.doneToday}/${quota} today` : `${rep.doneToday} done today`}
+                  </Pill>
                   <Pill tone={rep.pendingTasks > 5 ? "warn" : "default"}>{rep.pendingTasks} pending</Pill>
                   <Pill tone={rep.reportedToday ? "good" : "warn"}>
                     {rep.reportedToday ? "reported" : "no report yet"}
