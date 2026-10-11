@@ -163,6 +163,10 @@ model User {
   assignedSalesTasks    SalesTask[]              @relation("SalesTaskAssignee")
   commissionEntries     CommissionEntry[]        @relation("CommissionRep")
   commissionApprovals   CommissionEntry[]        @relation("CommissionApprover")
+  ownedPartners         Partner[]                @relation("PartnerOwner")
+  fundRequests          FundRequest[]            @relation("FundRequester")
+  fundRequestsApproved  FundRequest[]            @relation("FundApprover")
+  dailyReports          DailyReport[]
   analyticsConsentAt    DateTime?
   /**
    * Set only when the person has ASKED to be left out of learning analytics.
@@ -309,6 +313,9 @@ model Tenant {
   leadActivities          LeadActivity[]
   salesTasks              SalesTask[]
   commissionEntries       CommissionEntry[]
+  partners                Partner[]
+  fundRequests            FundRequest[]
+  dailyReports            DailyReport[]
   supportTickets          SupportTicket[]
   supportTicketMessages   SupportTicketMessage[]
   certificates            Certificate[]
@@ -4333,6 +4340,127 @@ model CommissionEntry {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([repId, status])
+  @@index([tenantId])
+}
+
+/// A corporate or organisational relationship — not a prospective student.
+/// The BDM's field work and the Strategic Relations side of Growth Desk.
+/// Deliberately simpler than Lead/LeadActivity: there is no commission tied
+/// to a Partner, so there is nothing here anyone has a reason to falsify,
+/// and a plain `notes` field plus `lastContactedAt` is enough to answer "are
+/// we keeping in touch with this one" without needing an immutable ledger.
+model Partner {
+  id String @id @default(cuid())
+
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+
+  /**
+   * corporate | partner — a corporate client vs. a referral/cooperation
+   * partner. Free-form string, same reasoning as every other status field
+   * in this schema: the vocabulary is a business decision, not a type.
+   */
+  type String @default("partner")
+
+  /**
+   * prospecting | engaged | cooperating | dormant
+   */
+  status String @default("prospecting")
+
+  ownerId String?
+  owner   User?   @relation("PartnerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  notes String?
+
+  /// Bumped every time someone logs a touchpoint — what the "keep partners
+  /// warm" reminder in the Partners tab is based on. A platform-wide
+  /// Webinar model already exists (LiveKit room, registration, landing
+  /// page) but has no creation flow wired up anywhere yet — building that
+  /// tonight is its own project, so "schedule the monthly webinar" stays a
+  /// nudge in the UI for now rather than a half-wired new table.
+  lastContactedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status])
+  @@index([tenantId])
+}
+
+/// A spend request that needs the Chief Operating Officer's sign-off —
+/// modelled on the handbook rule that an unanswered request escalates to
+/// Accounting after an hour. There is no background job doing that
+/// escalation yet (see src/lib/growth/fund-requests.ts for why a computed
+/// "is this overdue" read is the honest version of that rule for now,
+/// rather than a cron job this build does not have time to wire safely);
+/// `status` stays "pending" either way until someone acts on it.
+model FundRequest {
+  id String @id @default(cuid())
+
+  requesterId String
+  requester   User   @relation("FundRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  amount  Int
+  purpose String
+
+  /**
+   * marketing | mobility | other — what the spend is for, straight from the
+   * handbook's own wording.
+   */
+  category String @default("other")
+
+  /**
+   * pending | approved | rejected
+   */
+  status String @default("pending")
+
+  approvedById String?
+  approvedBy   User?     @relation("FundApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+  decisionNote String?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId, status])
+  @@index([tenantId])
+}
+
+/// One person's end-of-day log: what moved, and what problem was solved or
+/// flagged. The handbook asks every teamlead for this; Growth Desk is where
+/// it is built first. At most one per person per day — resubmitting the
+/// same day updates it rather than piling up duplicates, same reasoning as
+/// `captureLead` re-submitting an enquiry.
+model DailyReport {
+  id String @id @default(cuid())
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// Midnight of the day this report is for — the unique key, so "today"
+  /// has exactly one row regardless of time zone drift within the day.
+  reportDate DateTime
+
+  achievement   String
+  problemSolved String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([authorId, reportDate])
   @@index([tenantId])
 }
 

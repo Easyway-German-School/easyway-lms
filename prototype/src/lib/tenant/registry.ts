@@ -68,6 +68,9 @@ export const TENANT_OWNED_MODELS = [
   "LeadActivity",
   "SalesTask",
   "CommissionEntry",
+  "Partner",
+  "FundRequest",
+  "DailyReport",
   "Notification",
   "NotificationSetting",
   /**
