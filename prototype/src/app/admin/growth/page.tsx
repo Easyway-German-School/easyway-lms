@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import AdminShell from "@/components/AdminShell";
 import {
@@ -96,8 +96,30 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
+type Me = { name: string | null; title: string; titleLabel: string };
+
+/** Where each job's dashboard opens by default — the primary tool for that role. */
+const DEFAULT_TAB: Record<string, TabKey> = {
+  bdm: "partners",
+  sales_lead: "pipeline",
+  rep: "today",
+};
+
+const TITLE_GREETING: Record<string, string> = {
+  bdm: "Your partners and field work, at a glance.",
+  sales_lead: "Your team's pipeline and today's reports.",
+  rep: "Your queue for today.",
+};
+
 const date = (value: string) =>
   new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 // ---------------------------------------------------------------------------
 // Small shared pieces
@@ -127,6 +149,8 @@ function Pill({ children, tone = "default" }: { children: ReactNode; tone?: "def
 
 export default function GrowthDeskPage() {
   const [tab, setTab] = useState<TabKey>("today");
+  const [me, setMe] = useState<Me | null>(null);
+  const tabWasAutoSet = useRef(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [commission, setCommission] = useState<CommissionEntry[]>([]);
@@ -144,6 +168,7 @@ export default function GrowthDeskPage() {
     let active = true;
     setLoading(true);
     Promise.all([
+      fetch("/api/admin/growth/me", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/tasks", { cache: "no-store" }).then((r) => r.json()),
       fetch(`/api/admin/growth/leads?scope=${leadScope}`, { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/commission", { cache: "no-store" }).then((r) => r.json()),
@@ -151,10 +176,18 @@ export default function GrowthDeskPage() {
       fetch("/api/admin/growth/fund-requests", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/reports", { cache: "no-store" }).then((r) => r.json()),
     ])
-      .then(([tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody]) => {
+      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody]) => {
         if (!active) return;
-        for (const body of [tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody]) {
+        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody]) {
           if (body?.error) throw new Error(body.error);
+        }
+        setMe(meBody);
+        // Only ever auto-picks the tab once, on the first load — after that
+        // it's the person's own navigation, not something to override out
+        // from under them on every refresh.
+        if (!tabWasAutoSet.current) {
+          tabWasAutoSet.current = true;
+          setTab(DEFAULT_TAB[meBody.title] ?? "today");
         }
         setTasks(tasksBody.tasks ?? []);
         setLeads(leadsBody.leads ?? []);
@@ -189,8 +222,20 @@ export default function GrowthDeskPage() {
       <main className="mx-auto max-w-3xl space-y-5">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-[var(--foreground)]">Growth Desk</h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">Your day, your pipeline, nothing you can't see at a glance.</p>
+            <h1 className="text-2xl font-bold text-[var(--foreground)]">
+              {greeting()}{me?.name ? `, ${me.name.split(" ")[0]}` : ""}
+            </h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {me ? (
+                <>
+                  <span className="font-semibold text-[var(--foreground)]">{me.titleLabel}</span>
+                  {" — "}
+                  {TITLE_GREETING[me.title] ?? TITLE_GREETING.rep}
+                </>
+              ) : (
+                "Your Growth Desk."
+              )}
+            </p>
           </div>
           <button
             type="button"

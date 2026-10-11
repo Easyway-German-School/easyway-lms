@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { getDailyQueue, completeTask } from "@/lib/growth/tasks";
+import { getDailyQueue, completeTask, ensureDailyOpsTasks } from "@/lib/growth/tasks";
+import { normalizeGrowthTitle } from "@/lib/growth/titles";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +10,12 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const gate = await requireCapability("growth");
   if (!gate.ok) return gate.response;
+
+  const user = await prisma.user.findUnique({
+    where: { id: gate.admin.userId },
+    select: { growthTitle: true },
+  });
+  await ensureDailyOpsTasks(gate.admin.userId, normalizeGrowthTitle(user?.growthTitle));
 
   const tasks = await getDailyQueue(gate.admin.userId);
   return NextResponse.json({ tasks });

@@ -40,6 +40,17 @@ model User {
    */
   adminRole         String?
   /**
+   * Which job inside the Growth Desk, when adminRole is "growth": bdm |
+   * sales_lead | rep. Null for everyone else, and null is read as "rep" —
+   * see src/lib/growth/titles.ts. A second field rather than more adminRole
+   * values for the same reason platformRole is separate: every one of them
+   * holds the identical `growth` capability, so the office's own
+   * admin-role picker and GRANTS table do not need to know this exists.
+   * It only changes which dashboard a person lands on and what the daily
+   * task engine generates for them — see src/lib/growth/tasks.ts.
+   */
+  growthTitle       String?
+  /**
    * Platform operator, above every tenant rather than inside one.
    * `super` on adminRole means "runs this school". This means "runs the
    * platform the schools are on" — creates tenants, issues API keys, reads the
