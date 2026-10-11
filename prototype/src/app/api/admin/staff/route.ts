@@ -17,6 +17,7 @@ import {
   type Capability,
 } from "@/lib/admin-roles";
 import { tenantWhere } from "@/lib/auth";
+import { GROWTH_TITLES, GROWTH_TITLE_LABELS, normalizeGrowthTitle } from "@/lib/growth/titles";
 
 /**
  * Admin accounts: who they are, what they can reach, and how they get in.
@@ -89,6 +90,7 @@ export async function GET() {
       adminRole: true,
       adminCapabilities: true,
       adminBranchIds: true,
+      growthTitle: true,
       createdAt: true,
       totpEnabledAt: true,
       adminLockedAt: true,
@@ -134,6 +136,10 @@ export async function GET() {
         // Null means every branch — the default, and what every admin had
         // before branch scoping existed.
         branchIds: parseBranchIds(a.adminBranchIds),
+        // Only meaningful when adminRole is "growth" — see schema.prisma's
+        // comment on User.growthTitle. Still computed for everyone so the
+        // page never has to special-case a missing field.
+        growthTitle: adminRole === "growth" ? normalizeGrowthTitle(a.growthTitle) : null,
       };
     }),
     roles: ADMIN_ROLES.map((r) => ({
@@ -142,6 +148,9 @@ export async function GET() {
       capabilities: capabilitiesFor(r),
     })),
     allCapabilities: CAPABILITIES.map((value) => ({ value, label: CAPABILITY_LABELS[value] })),
+    // Only meaningful once adminRole is "growth" — the page shows this
+    // picker only then.
+    growthTitles: GROWTH_TITLES.map((value) => ({ value, label: GROWTH_TITLE_LABELS[value] })),
     branches,
   });
 }
@@ -188,6 +197,7 @@ export async function POST(req: NextRequest) {
     const adminRole = normalizeAdminRole(
       typeof body.adminRole === "string" ? body.adminRole : "secretary",
     );
+    const growthTitle = adminRole === "growth" ? normalizeGrowthTitle(body.growthTitle) : null;
 
     if (!name || !email || !password) {
       return NextResponse.json({ error: "Name, email and password are all required" }, { status: 400 });
@@ -223,6 +233,7 @@ export async function POST(req: NextRequest) {
         password: await bcryptjs.hash(password, 10),
         role: "ADMIN",
         adminRole,
+        growthTitle,
       },
       select: { id: true, name: true, email: true, createdAt: true },
     });
@@ -238,6 +249,7 @@ export async function POST(req: NextRequest) {
           overrides: { grant: [], revoke: [] },
           branchIds: null,
           mfaEnabled: false,
+          growthTitle,
         },
         // Echoed once so the super admin can pass it on. Never stored in the
         // clear and never returned again.
@@ -321,6 +333,7 @@ export async function PATCH(req: NextRequest) {
     const email = body.email === undefined ? null : normaliseEmail(body.email);
     const password = typeof body.password === "string" ? body.password : null;
     const lockProvided = typeof body.locked === "boolean";
+    const growthTitleProvided = Object.prototype.hasOwnProperty.call(body, "growthTitle");
     // Distinguished from "not sent" (leave alone) rather than folded into a
     // plain array check, because the way to LIFT a restriction is to send an
     // empty array, and that has to be tellable apart from the field being
@@ -339,8 +352,9 @@ export async function PATCH(req: NextRequest) {
       name === null &&
       email === null &&
       password === null &&
-      !branchIdsProvided
-      && !lockProvided
+      !branchIdsProvided &&
+      !lockProvided &&
+      !growthTitleProvided
     ) {
       return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
     }
@@ -350,7 +364,7 @@ export async function PATCH(req: NextRequest) {
 
     const target = await prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true, adminRole: true, adminCapabilities: true, email: true },
+      select: { role: true, adminRole: true, adminCapabilities: true, email: true, growthTitle: true },
     });
     if (!target || String(target.role).toLowerCase() !== "admin") {
       return NextResponse.json({ error: "That user is not an admin" }, { status: 404 });
@@ -415,6 +429,17 @@ export async function PATCH(req: NextRequest) {
     const nextRole = normalizeAdminRole(adminRole ?? target.adminRole);
     const preset = capabilitiesFor(nextRole);
 
+    // Cleared outright the moment the role moves off "growth" — a stale
+    // title sitting on a secretary account would be confusing and means
+    // nothing. Within "growth", an explicit send wins; otherwise keep what
+    // was there (defaulting to "rep" the same way the dashboard does).
+    const nextGrowthTitle =
+      nextRole !== "growth"
+        ? null
+        : growthTitleProvided
+          ? normalizeGrowthTitle(body.growthTitle)
+          : normalizeGrowthTitle(target.growthTitle);
+
     // The tick boxes are stored as a diff against the preset, so widening a
     // preset later still reaches the people who were adjusted by hand.
     const overrides = capabilities
@@ -441,6 +466,7 @@ export async function PATCH(req: NextRequest) {
       data: {
         ...account,
         adminRole: nextRole as AdminRole,
+        growthTitle: nextGrowthTitle,
         // An empty diff is stored as null, which reads as "just the preset".
         adminCapabilities:
           overrides.grant.length === 0 && overrides.revoke.length === 0 ? Prisma.DbNull : overrides,
@@ -466,6 +492,7 @@ export async function PATCH(req: NextRequest) {
         capabilities: effective,
         overrides,
         branchIds: parseBranchIds(updated.adminBranchIds),
+        growthTitle: nextGrowthTitle,
       },
       // Told back so the page can say "they must sign in again with this",
       // rather than the super admin having to remember what they typed.

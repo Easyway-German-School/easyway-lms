@@ -48,11 +48,15 @@ type Admin = {
   // Null means every branch — the default, and what every admin has until a
   // super admin deliberately narrows it below.
   branchIds: string[] | null;
+  // Only meaningful when adminRole is "growth" — which dashboard this
+  // person lands on. See src/lib/growth/titles.ts.
+  growthTitle: string | null;
 };
 
 type RoleOption = { value: string; label: string; capabilities: string[] };
 type CapabilityOption = { value: string; label: string };
 type BranchOption = { id: string; name: string };
+type GrowthTitleOption = { value: string; label: string };
 
 const ROLE_SUMMARY: Record<string, string> = {
   super: "Everything, including who else is an admin.",
@@ -65,6 +69,7 @@ const ROLE_SUMMARY: Record<string, string> = {
   // their file, enquiries, attendance and class questions — plus recording a
   // payment they made so their classes open. No fee book, no reports, no setup.
   support: "Student help desk: student files, enquiries, attendance, and recording a payment to unlock classes. No fee book.",
+  growth: "The sales pipeline, daily task queue, partners and fund requests. Pick a job below for the right dashboard.",
 };
 
 export default function AdminStaffPage() {
@@ -72,6 +77,7 @@ export default function AdminStaffPage() {
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [allCapabilities, setAllCapabilities] = useState<CapabilityOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [growthTitles, setGrowthTitles] = useState<GrowthTitleOption[]>([]);
   const [signInPath, setSignInPath] = useState("/auth/admin");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -87,7 +93,7 @@ export default function AdminStaffPage() {
 
   // Creating
   const [showNew, setShowNew] = useState(false);
-  const [draft, setDraft] = useState({ name: "", email: "", password: "", adminRole: "secretary" });
+  const [draft, setDraft] = useState({ name: "", email: "", password: "", adminRole: "secretary", growthTitle: "rep" });
   const [creating, setCreating] = useState(false);
   const [handover, setHandover] = useState<{ email: string; password: string } | null>(null);
 
@@ -112,6 +118,7 @@ export default function AdminStaffPage() {
       setRoles(data.roles ?? []);
       setAllCapabilities(data.allCapabilities ?? []);
       setBranches(data.branches ?? []);
+      setGrowthTitles(data.growthTitles ?? []);
       if (data.signInPath) setSignInPath(data.signInPath);
       setError("");
     } catch (e) {
@@ -146,6 +153,7 @@ export default function AdminStaffPage() {
       // entirely to leave it untouched.
       branchIds?: string[];
       locked?: boolean;
+      growthTitle?: string;
     },
   ) {
     setSavingId(userId);
@@ -184,7 +192,7 @@ export default function AdminStaffPage() {
       if (!res.ok) throw new Error(data.error ?? "Could not create that admin");
       // Shown once. The server stores a hash and cannot tell us again.
       setHandover({ email: data.admin.email, password: data.password });
-      setDraft({ name: "", email: "", password: "", adminRole: "secretary" });
+      setDraft({ name: "", email: "", password: "", adminRole: "secretary", growthTitle: "rep" });
       setShowNew(false);
       setError("");
       await load();
@@ -435,6 +443,21 @@ export default function AdminStaffPage() {
                   ))}
                 </select>
               </Field>
+              {draft.adminRole === "growth" && (
+                <Field label="Growth Desk job">
+                  <select
+                    value={draft.growthTitle}
+                    onChange={(e) => setDraft({ ...draft, growthTitle: e.target.value })}
+                    className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
+                  >
+                    {growthTitles.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
             </div>
 
             <p className="mt-2.5 text-xs text-[var(--muted)]">
@@ -589,6 +612,21 @@ export default function AdminStaffPage() {
                           </option>
                         ))}
                       </select>
+
+                      {admin.adminRole === "growth" && (
+                        <select
+                          value={admin.growthTitle ?? "rep"}
+                          disabled={busy}
+                          onChange={(e) => save(admin.id, { growthTitle: e.target.value })}
+                          className="min-w-0 flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60 lg:flex-none"
+                        >
+                          {growthTitles.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
 
                       <button
                         onClick={() => void toggleLock(admin)}
