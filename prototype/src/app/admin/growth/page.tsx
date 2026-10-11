@@ -12,6 +12,7 @@ import {
   CoinIcon,
   CheckIcon,
   PlusIcon,
+  UsersIcon,
 } from "@/components/icons";
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ const PARTNER_STATUSES = ["prospecting", "engaged", "cooperating", "dormant"];
 const TABS = [
   { key: "today", label: "Today", icon: TargetIcon },
   { key: "pipeline", label: "Pipeline", icon: ListIcon },
+  { key: "team", label: "Team", icon: UsersIcon },
   { key: "partners", label: "Partners", icon: BriefcaseIcon },
   { key: "funding", label: "Funding", icon: WalletIcon },
   { key: "commission", label: "Commission", icon: CoinIcon },
@@ -98,16 +100,32 @@ type TabKey = (typeof TABS)[number]["key"];
 
 type Me = { name: string | null; title: string; titleLabel: string };
 
+type RepStat = {
+  id: string;
+  name: string | null;
+  email: string;
+  title: string;
+  titleLabel: string;
+  pendingTasks: number;
+  doneToday: number;
+  leadsAssigned: number;
+  leadsConverted: number;
+  reportedToday: boolean;
+};
+
 /** Where each job's dashboard opens by default — the primary tool for that role. */
 const DEFAULT_TAB: Record<string, TabKey> = {
   bdm: "partners",
-  sales_lead: "pipeline",
+  // "Ensures team performance" is its own duty in the handbook, separate
+  // from driving sales — so the Teamlead's desk opens on who's keeping up,
+  // not the pipeline itself.
+  sales_lead: "team",
   rep: "today",
 };
 
 const TITLE_GREETING: Record<string, string> = {
   bdm: "Your partners and field work, at a glance.",
-  sales_lead: "Your team's pipeline and today's reports.",
+  sales_lead: "Your team, and whether today's moving.",
   rep: "Your queue for today.",
 };
 
@@ -158,6 +176,7 @@ export default function GrowthDeskPage() {
   const [fundRequests, setFundRequests] = useState<FundRequest[]>([]);
   const [teamReports, setTeamReports] = useState<TeamReport[]>([]);
   const [myReport, setMyReport] = useState<TeamReport | null>(null);
+  const [teamStats, setTeamStats] = useState<RepStat[]>([]);
   const [leadScope, setLeadScope] = useState<"mine" | "team">("mine");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -175,13 +194,15 @@ export default function GrowthDeskPage() {
       fetch("/api/admin/growth/partners", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/fund-requests", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/reports", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/admin/growth/team", { cache: "no-store" }).then((r) => r.json()),
     ])
-      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody]) => {
+      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody]) => {
         if (!active) return;
-        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody]) {
+        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody]) {
           if (body?.error) throw new Error(body.error);
         }
         setMe(meBody);
+        setTeamStats(teamBody.reps ?? []);
         // Only ever auto-picks the tab once, on the first load — after that
         // it's the person's own navigation, not something to override out
         // from under them on every refresh.
@@ -325,6 +346,8 @@ export default function GrowthDeskPage() {
               setNotice("Note saved to the lead's history.");
             }}
           />
+        ) : tab === "team" ? (
+          <TeamTab reps={teamStats} />
         ) : tab === "partners" ? (
           <PartnersTab
             partners={partners}
@@ -607,6 +630,47 @@ function PipelineTab({
                 >
                   Save
                 </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Team
+// ---------------------------------------------------------------------------
+
+function TeamTab({ reps }: { reps: RepStat[] }) {
+  return (
+    <Card>
+      <div>
+        <h2 className="text-lg font-bold">Team</h2>
+        <p className="text-sm text-[var(--muted)]">
+          What's on everyone's plate right now, and what actually moved today.
+        </p>
+      </div>
+
+      {reps.length === 0 ? (
+        <Empty>Nobody's been given a Growth Desk job yet.</Empty>
+      ) : (
+        <ul className="divide-y divide-[var(--border)]">
+          {reps.map((rep) => (
+            <li key={rep.id} className="flex flex-wrap items-center justify-between gap-3 py-3.5">
+              <div>
+                <p className="font-semibold">{rep.name || rep.email}</p>
+                <p className="text-xs text-[var(--muted)]">
+                  {rep.titleLabel} · {rep.leadsAssigned} leads · {rep.leadsConverted} converted
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Pill tone={rep.doneToday > 0 ? "good" : "default"}>{rep.doneToday} done today</Pill>
+                <Pill tone={rep.pendingTasks > 5 ? "warn" : "default"}>{rep.pendingTasks} pending</Pill>
+                <Pill tone={rep.reportedToday ? "good" : "warn"}>
+                  {rep.reportedToday ? "reported" : "no report yet"}
+                </Pill>
               </div>
             </li>
           ))}
