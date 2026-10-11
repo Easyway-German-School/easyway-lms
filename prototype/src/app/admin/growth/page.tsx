@@ -28,6 +28,8 @@ type Task = {
   lead: { id: string; name: string; email: string; phone: string | null; status: string } | null;
 };
 
+type AiSignal = { urgency: string; objection: string | null; buyingSignal: string; summary: string };
+
 type Lead = {
   id: string;
   name: string;
@@ -39,6 +41,7 @@ type Lead = {
   status: string;
   assignedTo: { id: string; name: string | null; email: string } | null;
   createdAt: string;
+  aiSignal: AiSignal | null;
 };
 
 type CommissionEntry = {
@@ -183,6 +186,11 @@ export default function GrowthDeskPage() {
   const [sourceLearning, setSourceLearning] = useState<SourceLearning[]>([]);
   const [repLearning, setRepLearning] = useState<RepLearning[]>([]);
   const [leadScope, setLeadScope] = useState<"mine" | "team">("mine");
+  // Null means "not the super admin, or not loaded yet" — the toggle card
+  // simply does not render. Fetched separately from the main Promise.all
+  // because a 403 here is the EXPECTED, ordinary case for almost every
+  // viewer, not a load failure the page should show an error for.
+  const [aiSettings, setAiSettings] = useState<{ enabled: boolean; keyConfigured: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -237,6 +245,21 @@ export default function GrowthDeskPage() {
       active = false;
     };
   }, [leadScope, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/growth/ai-settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (active && body && !body.error) setAiSettings({ enabled: body.enabled, keyConfigured: body.keyConfigured });
+      })
+      .catch(() => {
+        /* Not the super admin — the card just stays hidden. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
 
   const refresh = (message?: string) => {
     setError("");
@@ -355,7 +378,23 @@ export default function GrowthDeskPage() {
             }}
           />
         ) : tab === "team" ? (
-          <TeamTab reps={teamStats} sourceLearning={sourceLearning} repLearning={repLearning} />
+          <TeamTab
+            reps={teamStats}
+            sourceLearning={sourceLearning}
+            repLearning={repLearning}
+            aiSettings={aiSettings}
+            onToggleAi={async (enabled) => {
+              const res = await fetch("/api/admin/growth/ai-settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not change that setting.");
+              setAiSettings({ enabled: body.enabled, keyConfigured: body.keyConfigured });
+              setNotice(enabled ? "Growth Desk AI turned on." : "Growth Desk AI turned off.");
+            }}
+          />
         ) : tab === "partners" ? (
           <PartnersTab
             partners={partners}
@@ -606,6 +645,14 @@ function PipelineTab({
                     {lead.email} · {lead.branchName ?? "no branch"}
                     {scope === "team" ? ` · ${lead.assignedTo?.name || lead.assignedTo?.email || "unassigned"}` : ""}
                   </p>
+                  {lead.aiSignal && (
+                    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                      <Pill tone={lead.aiSignal.urgency === "high" ? "warn" : lead.aiSignal.buyingSignal === "strong" ? "good" : "default"}>
+                        AI: {lead.aiSignal.urgency} urgency · {lead.aiSignal.buyingSignal} signal
+                      </Pill>
+                      <span className="text-[var(--muted)]">{lead.aiSignal.summary}</span>
+                    </p>
+                  )}
                 </div>
                 <select
                   value={lead.status}
@@ -655,13 +702,45 @@ function TeamTab({
   reps,
   sourceLearning,
   repLearning,
+  aiSettings,
+  onToggleAi,
 }: {
   reps: RepStat[];
   sourceLearning: SourceLearning[];
   repLearning: RepLearning[];
+  aiSettings: { enabled: boolean; keyConfigured: boolean } | null;
+  onToggleAi: (enabled: boolean) => void;
 }) {
   return (
     <div className="space-y-5">
+      {aiSettings && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold">Growth Desk AI</h2>
+              <p className="text-sm text-[var(--muted)]">
+                When on, Claude reads a lead's notes after a rep saves one and adds an urgency/objection read to the
+                queue — see the Pipeline tab. The built-in scoring above never depends on this; it's an addition, not
+                a replacement.
+              </p>
+              {!aiSettings.keyConfigured && (
+                <p className="mt-1 text-xs text-amber-700">No API key is configured yet — this stays off either way until one is added.</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => onToggleAi(!aiSettings.enabled)}
+              disabled={!aiSettings.keyConfigured}
+              className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+                aiSettings.enabled ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
+              }`}
+            >
+              {aiSettings.enabled ? "On — turn off" : "Off — turn on"}
+            </button>
+          </div>
+        </Card>
+      )}
+
       <Card>
         <div>
           <h2 className="text-lg font-bold">Team</h2>

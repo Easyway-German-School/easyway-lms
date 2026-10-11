@@ -991,6 +991,72 @@ Return JSON: {"title": "...", "message": "..."}${JSON_ONLY}`;
 }
 
 /**
+ * Growth Desk: read a lead's free-text activity notes and extract the
+ * signal the adaptive scoring model (src/lib/growth/intelligence.ts)
+ * cannot see on its own — that model only learns from structured outcomes
+ * (source, converted yes/no), and is blind to what a rep actually wrote.
+ *
+ * Same non-destructive shape as draftClassAnnouncement and
+ * suggestPrivateClassTimes: this PROPOSES a read of the notes, it never
+ * changes a Lead's status or score by itself — the caller decides what, if
+ * anything, to do with the result. Returns null on any failure (no key, no
+ * credit, an empty note history, a bad reply); the caller's fallback is the
+ * Bayesian score computed with no AI input at all, exactly as it worked
+ * before this existed — see GROWTH_LEARNING_NOTES in intelligence.ts for
+ * why that fallback is the point, not an afterthought.
+ */
+export async function analyzeLeadSignal(input: {
+  leadName: string;
+  /** Most recent first. Only the free text a rep actually wrote — never Lead.status or other structured fields, which the Bayesian model already uses directly. */
+  notes: string[];
+}): Promise<{
+  urgency: "low" | "medium" | "high";
+  objection: string | null;
+  buyingSignal: "weak" | "moderate" | "strong";
+  summary: string;
+} | null> {
+  if (input.notes.length === 0) return null;
+
+  const prompt = `You are helping a sales rep at a German language school in Nigeria prioritise their leads.
+
+Lead: ${input.leadName}
+
+Notes the rep has logged so far, most recent first:
+"""
+${input.notes.slice(0, 10).join("\n---\n").slice(0, 2000)}
+"""
+
+Read these notes and assess:
+- urgency: how time-sensitive this lead feels right now (low, medium, high)
+- objection: the single biggest obstacle mentioned, in a few words, or null if none is mentioned
+- buyingSignal: how close to enrolling this lead sounds (weak, moderate, strong)
+- summary: one short sentence a rep can scan in a list
+
+Base this ONLY on what the notes actually say. Do not invent details not present in the notes.
+
+Return JSON: {"urgency": "...", "objection": "..." or null, "buyingSignal": "...", "summary": "..."}${JSON_ONLY}`;
+
+  // Direct to Claude, not callHostedText's Claude->Groq->DeepSeek chain —
+  // this is a back-office read, nobody is waiting on a spinner, and a
+  // smaller free-tier model misreading an objection is worse than simply
+  // not having one yet. No key configured, or no credit: null, same as
+  // every other caller in this file.
+  const parsed = parseJsonReply<{ urgency?: unknown; objection?: unknown; buyingSignal?: unknown; summary?: unknown }>(
+    await callClaude(prompt, 400, "backoffice"),
+  );
+  if (!parsed) return null;
+
+  const urgency = parsed.urgency === "high" || parsed.urgency === "low" ? parsed.urgency : "medium";
+  const buyingSignal = parsed.buyingSignal === "strong" || parsed.buyingSignal === "moderate" ? parsed.buyingSignal : "weak";
+  const objection = typeof parsed.objection === "string" && parsed.objection.trim() ? parsed.objection.trim().slice(0, 120) : null;
+  const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 200) : "";
+  // A reply with no summary is not usable — nothing for the UI to show.
+  if (!summary) return null;
+
+  return { urgency, objection, buyingSignal, summary };
+}
+
+/**
  * "Suggest times" for a private-class booking — fills the candidate chips a
  * tutor or admin can click, never books anything itself. Same non-destructive
  * shape as `draftClassAnnouncement`: the model proposes, a human still picks

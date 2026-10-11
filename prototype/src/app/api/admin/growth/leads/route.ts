@@ -28,24 +28,39 @@ export async function GET(req: NextRequest) {
     include: {
       branch: { select: { name: true } },
       assignedTo: { select: { id: true, name: true, email: true } },
+      // Claude's read of this lead's notes, if the AI switch is on and one
+      // has ever run — see src/lib/ai.ts's analyzeLeadSignal. Most recent
+      // only; an older read is superseded, not shown alongside it.
+      activities: { where: { type: "ai_signal" }, orderBy: { createdAt: "desc" }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
 
   return NextResponse.json({
-    leads: leads.map((l) => ({
-      id: l.id,
-      name: l.name,
-      email: l.email,
-      phone: l.phone,
-      branchName: l.branch?.name ?? null,
-      interestedLevel: l.interestedLevel,
-      source: l.source,
-      status: l.status,
-      assignedTo: l.assignedTo,
-      createdAt: l.createdAt,
-    })),
+    leads: leads.map((l) => {
+      const signalPayload = l.activities[0]?.payload as Record<string, unknown> | undefined;
+      return {
+        id: l.id,
+        name: l.name,
+        email: l.email,
+        phone: l.phone,
+        branchName: l.branch?.name ?? null,
+        interestedLevel: l.interestedLevel,
+        source: l.source,
+        status: l.status,
+        assignedTo: l.assignedTo,
+        createdAt: l.createdAt,
+        aiSignal: signalPayload
+          ? {
+              urgency: signalPayload.urgency,
+              objection: signalPayload.objection,
+              buyingSignal: signalPayload.buyingSignal,
+              summary: signalPayload.summary,
+            }
+          : null,
+      };
+    }),
   });
 }
 
