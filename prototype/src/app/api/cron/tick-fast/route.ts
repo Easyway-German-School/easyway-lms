@@ -22,12 +22,13 @@
  *
  * So this is deliberately narrow: just the mail queue, nothing else.
  *
- * Schedule is */15, not */5 (the original 2026-09-28 version). A ping every
- * 5 minutes never let Neon's compute fully auto-suspend — the endpoint sat
- * "active" around the clock instead of only during real school traffic, and
- * tripled the monthly bill within two weeks. 15 minutes still beats the
- * 56-minute stall this was built to fix, while leaving enough idle time
- * between runs for the database to actually go back to sleep.
+ * Schedule is every 15 minutes, not every 5 (the original 2026-09-28
+ * version). A ping every 5 minutes never let Neon's compute fully
+ * auto-suspend — the endpoint sat active around the clock instead of only
+ * during real school traffic, and tripled the monthly bill within two
+ * weeks. 15 minutes still beats the 56-minute stall this was built to fix,
+ * while leaving enough idle time between runs for the database to actually
+ * go back to sleep.
  */
 
 import { NextRequest, NextResponse } from "next/server";
