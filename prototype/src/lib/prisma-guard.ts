@@ -91,6 +91,7 @@ export const FULLY_AUDITED_MODELS = new Set<string>([
   "Partner",
   "FundRequest",
   "DailyReport",
+  "StaffChannel",
 ]);
 
 /**
