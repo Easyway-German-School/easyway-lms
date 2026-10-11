@@ -15,16 +15,44 @@ import type { GrowthTitle } from "@/lib/growth/titles";
  * it is done or skipped.
  */
 
+/** How much Claude's read of a lead's notes can move its priority — see aiSignalBoost. */
+const URGENCY_BOOST: Record<string, number> = { low: 0, medium: 10, high: 25 };
+const BUYING_SIGNAL_BOOST: Record<string, number> = { weak: 0, moderate: 15, strong: 35 };
+
 /**
- * Higher sorts first. Recency matters (a lead goes cold fast); source
- * quality is now the school's own learned conversion rate for that source,
- * not a number somebody guessed once and never revisited.
+ * Zero when the Growth Desk AI switch is off, no key is configured, or
+ * nobody has logged a note Claude could read yet — the scoring function
+ * calling this never knows or cares which, it just gets 0 and carries on
+ * exactly as it did before this existed. See src/lib/ai.ts's
+ * analyzeLeadSignal for where the "ai_signal" LeadActivity this reads
+ * actually gets written.
  */
-export async function priorityScoreForLead(lead: { source: string; createdAt: Date }): Promise<number> {
+async function aiSignalBoost(leadId: string): Promise<number> {
+  const latest = await prisma.leadActivity.findFirst({
+    where: { leadId, type: "ai_signal" },
+    orderBy: { createdAt: "desc" },
+    select: { payload: true },
+  });
+  if (!latest?.payload || typeof latest.payload !== "object") return 0;
+  const payload = latest.payload as Record<string, unknown>;
+  const urgency = typeof payload.urgency === "string" ? payload.urgency : "medium";
+  const buyingSignal = typeof payload.buyingSignal === "string" ? payload.buyingSignal : "weak";
+  return (URGENCY_BOOST[urgency] ?? 0) + (BUYING_SIGNAL_BOOST[buyingSignal] ?? 0);
+}
+
+/**
+ * Higher sorts first. Three layers, each optional on top of the one
+ * before: recency always applies; source quality is the school's own
+ * learned conversion rate, not a number somebody guessed once; and an AI
+ * read of the lead's notes, when one exists, nudges it further — never the
+ * whole score, never required for the score to mean something.
+ */
+export async function priorityScoreForLead(lead: { id: string; source: string; createdAt: Date }): Promise<number> {
   const rate = await sourceConversionRate(lead.source);
   const hoursOld = (Date.now() - lead.createdAt.getTime()) / (1000 * 60 * 60);
   const recencyBoost = Math.max(0, 48 - hoursOld);
-  return rate * 100 + recencyBoost;
+  const aiBoost = await aiSignalBoost(lead.id);
+  return rate * 100 + recencyBoost + aiBoost;
 }
 
 export async function createFollowUpTask(opts: {
@@ -36,7 +64,7 @@ export async function createFollowUpTask(opts: {
 }): Promise<void> {
   const lead = await prisma.lead.findUnique({
     where: { id: opts.leadId },
-    select: { source: true, createdAt: true },
+    select: { id: true, source: true, createdAt: true },
   });
 
   await prisma.salesTask.create({
@@ -49,6 +77,26 @@ export async function createFollowUpTask(opts: {
       priorityScore: lead ? await priorityScoreForLead(lead) : 0,
       autoAssigned: opts.autoAssigned ?? false,
     },
+  });
+}
+
+/**
+ * Called after Claude reads a lead's notes and finds something — see
+ * src/app/api/admin/growth/leads/[id]/activity/route.ts. Re-scores every
+ * OPEN task on this lead so the new signal actually changes queue order
+ * today, not just for the next task created.
+ */
+export async function rescoreOpenTasksForLead(leadId: string): Promise<void> {
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: { id: true, source: true, createdAt: true },
+  });
+  if (!lead) return;
+
+  const score = await priorityScoreForLead(lead);
+  await prisma.salesTask.updateMany({
+    where: { leadId, status: "pending" },
+    data: { priorityScore: score },
   });
 }
 

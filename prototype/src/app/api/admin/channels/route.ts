@@ -6,14 +6,39 @@ import {
   normalizeChannelAudience,
   requireStaffOrLecturer,
   CHANNEL_AUDIENCE_LABELS,
+  type ChannelAudience,
 } from "@/lib/staff-channels";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * The four channels the handbook names as standing infrastructure, not
+ * one-off sends: Admin staff, Tutors, a Growth Desk team channel, and one
+ * company-wide. Created once, lazily — the same idempotent-on-first-use
+ * shape as ensureDailyOpsTasks in src/lib/growth/tasks.ts — so nobody ever
+ * opens this page to an empty "no channels yet" with no way forward.
+ */
+const DEFAULT_CHANNELS: Array<{ name: string; description: string; audience: ChannelAudience }> = [
+  { name: "Admin Staff", description: "Office-wide coordination and announcements.", audience: "admin" },
+  { name: "Tutors", description: "For tutors, with HR and Digital Communications keeping a read on it.", audience: "tutors" },
+  { name: "Growth Desk Team", description: "Sales & Business Development.", audience: "growth" },
+  { name: "Easyway Community", description: "Everyone — admin staff and tutors.", audience: "all_staff" },
+];
+
+async function ensureDefaultChannels(): Promise<void> {
+  const existing = await prisma.staffChannel.count();
+  if (existing > 0) return;
+  await prisma.staffChannel.createMany({
+    data: DEFAULT_CHANNELS.map((c) => ({ name: c.name, description: c.description, audience: c.audience })),
+  });
+}
 
 /** GET — every channel the signed-in tutor or admin can open, with a preview of the last message. */
 export async function GET() {
   const gate = await requireStaffOrLecturer();
   if (!gate.ok) return gate.response;
+
+  await ensureDefaultChannels();
 
   const channels = await prisma.staffChannel.findMany({
     orderBy: { createdAt: "asc" },
