@@ -84,6 +84,11 @@ const capabilityOf = (item: NavItem) => capabilityForAdminPath(item.href);
 // grouping headers were doing all the work.
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <DashboardIcon />, group: 'Main' },
+  // No capability prefix registered for this in admin-routes.ts on purpose —
+  // an unmapped path is reachable by every admin role (see
+  // canReachAdminPath), which is exactly right for something meant to
+  // include Admin staff as one of its own channels.
+  { label: 'Staff Channels', href: '/admin/channels', icon: <SendIcon />, group: 'Main' },
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },

@@ -71,6 +71,8 @@ export const TENANT_OWNED_MODELS = [
   "Partner",
   "FundRequest",
   "DailyReport",
+  "StaffChannel",
+  "StaffChannelMessage",
   "Notification",
   "NotificationSetting",
   /**

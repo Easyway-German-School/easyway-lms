@@ -34,6 +34,7 @@ import {
   MenuIcon,
   PrivateClassIcon,
   QuizIcon,
+  SendIcon,
   SettingsIcon,
   TimetableIcon,
   UsersIcon,
@@ -119,6 +120,10 @@ const navGroups: NavGroup[] = [
       // both what Messages did and what Announcements added (urgent flag,
       // the AI drafting aid).
       { label: 'Messages', href: '/lecturer/messages', icon: <MailIcon /> },
+      // Staff-only, not the class — the Tutors channel (and anything marked
+      // "everyone") reaches the office directly instead of through a
+      // WhatsApp group nobody official can search.
+      { label: 'Staff Channels', href: '/lecturer/channels', icon: <SendIcon /> },
     ],
   },
   {

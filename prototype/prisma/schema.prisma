@@ -178,6 +178,8 @@ model User {
   fundRequests          FundRequest[]            @relation("FundRequester")
   fundRequestsApproved  FundRequest[]            @relation("FundApprover")
   dailyReports          DailyReport[]
+  staffChannelsCreated  StaffChannel[]           @relation("StaffChannelCreator")
+  staffChannelMessages  StaffChannelMessage[]    @relation("StaffChannelAuthor")
   analyticsConsentAt    DateTime?
   /**
    * Set only when the person has ASKED to be left out of learning analytics.
@@ -327,6 +329,8 @@ model Tenant {
   partners                Partner[]
   fundRequests            FundRequest[]
   dailyReports            DailyReport[]
+  staffChannels           StaffChannel[]
+  staffChannelMessages    StaffChannelMessage[]
   supportTickets          SupportTicket[]
   supportTicketMessages   SupportTicketMessage[]
   certificates            Certificate[]
@@ -4472,6 +4476,74 @@ model DailyReport {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([authorId, reportDate])
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Staff channels — the Digital Communications piece of the handbook.
+//
+// Deliberately separate from the student Community system (Space/Message
+// above): that model is keyed to one branch+level+sitting cohort, which has
+// no meaning for "everyone on the Tutors channel" or "the whole office".
+// This is plain staff-to-staff: who can see a channel is computed from role
+// (see src/lib/staff-channels.ts), not a membership table, the same way
+// capability checks already decide what a person can reach rather than a
+// list somebody has to maintain by hand.
+//
+// In-app only for now — no push, no email. Read src/lib/staff-channels.ts
+// before wiring notifications on top of this: that is a deliberate, separate
+// decision, not an oversight.
+// ---------------------------------------------------------------------------
+
+/// A persistent staff channel. `audience` decides who can open it — see
+/// CHANNEL_AUDIENCES in src/lib/staff-channels.ts.
+model StaffChannel {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+
+  /**
+   * admin | tutors | growth | all_staff
+   */
+  audience String @default("all_staff")
+
+  createdById String?
+  createdBy   User?   @relation("StaffChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  messages StaffChannelMessage[]
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([audience])
+  @@index([tenantId])
+}
+
+/// One post in a channel. Plain text, no edit history — this is a bulletin
+/// board, not a document; see the Community system above for threaded,
+/// reaction-bearing chat if that is ever what a channel needs to become.
+model StaffChannelMessage {
+  id String @id @default(cuid())
+
+  channelId String
+  channel   StaffChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  authorId String?
+  author   User?   @relation("StaffChannelAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  body String
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, createdAt])
   @@index([tenantId])
 }
 
