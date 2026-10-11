@@ -2,36 +2,29 @@ import { prisma } from "@/lib/prisma";
 import { logLeadActivity } from "@/lib/growth/activity";
 import { isPartnerStale } from "@/lib/growth/partners";
 import { startOfToday } from "@/lib/growth/reports";
+import { sourceConversionRate } from "@/lib/growth/intelligence";
 import type { GrowthTitle } from "@/lib/growth/titles";
 
 /**
- * The daily queue, v1: rules-based, not ML — there is no history yet to
- * train anything on, coming straight off a Google Sheet. See the schema
- * comment on SalesTask for why there is no separate "carry over" step: a
- * pending task simply keeps showing up until it is done or skipped.
+ * The daily queue. Scoring is no longer a fixed per-source constant — see
+ * src/lib/growth/intelligence.ts for the Bayesian estimator this now calls,
+ * which starts at the same defaults these constants used to hardcode and
+ * shifts toward this school's own observed conversion rates as real data
+ * accumulates. See the schema comment on SalesTask for why there is no
+ * separate "carry over" step: a pending task simply keeps showing up until
+ * it is done or skipped.
  */
-
-/** Freshly-created leads get a head start; older sources get less urgency. */
-const SOURCE_WEIGHT: Record<string, number> = {
-  walk_in: 30,
-  website: 20,
-  csv_import: 10,
-};
-
-function sourceWeight(source: string): number {
-  return SOURCE_WEIGHT[source] ?? 15;
-}
 
 /**
- * Higher sorts first. Recency matters most (a lead goes cold fast), source
- * quality second. Tune the constants once there is real completion data to
- * judge them against — see LeadActivity, which already records what a rep
- * actually did with a lead.
+ * Higher sorts first. Recency matters (a lead goes cold fast); source
+ * quality is now the school's own learned conversion rate for that source,
+ * not a number somebody guessed once and never revisited.
  */
-export function priorityScoreForLead(lead: { source: string; createdAt: Date }): number {
+export async function priorityScoreForLead(lead: { source: string; createdAt: Date }): Promise<number> {
+  const rate = await sourceConversionRate(lead.source);
   const hoursOld = (Date.now() - lead.createdAt.getTime()) / (1000 * 60 * 60);
   const recencyBoost = Math.max(0, 48 - hoursOld);
-  return sourceWeight(lead.source) + recencyBoost;
+  return rate * 100 + recencyBoost;
 }
 
 export async function createFollowUpTask(opts: {
@@ -53,7 +46,7 @@ export async function createFollowUpTask(opts: {
       kind: "follow_up",
       title: opts.title,
       dueDate: opts.dueDate ?? new Date(),
-      priorityScore: lead ? priorityScoreForLead(lead) : 0,
+      priorityScore: lead ? await priorityScoreForLead(lead) : 0,
       autoAssigned: opts.autoAssigned ?? false,
     },
   });

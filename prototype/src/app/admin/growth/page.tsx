@@ -113,6 +113,9 @@ type RepStat = {
   reportedToday: boolean;
 };
 
+type SourceLearning = { source: string; rate: number; sampleSize: number; confident: boolean };
+type RepLearning = { id: string; name: string | null; email: string; rate: number; sampleSize: number; confident: boolean };
+
 /** Where each job's dashboard opens by default — the primary tool for that role. */
 const DEFAULT_TAB: Record<string, TabKey> = {
   bdm: "partners",
@@ -177,6 +180,8 @@ export default function GrowthDeskPage() {
   const [teamReports, setTeamReports] = useState<TeamReport[]>([]);
   const [myReport, setMyReport] = useState<TeamReport | null>(null);
   const [teamStats, setTeamStats] = useState<RepStat[]>([]);
+  const [sourceLearning, setSourceLearning] = useState<SourceLearning[]>([]);
+  const [repLearning, setRepLearning] = useState<RepLearning[]>([]);
   const [leadScope, setLeadScope] = useState<"mine" | "team">("mine");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -195,14 +200,17 @@ export default function GrowthDeskPage() {
       fetch("/api/admin/growth/fund-requests", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/reports", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/team", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/admin/growth/intelligence", { cache: "no-store" }).then((r) => r.json()),
     ])
-      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody]) => {
+      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody]) => {
         if (!active) return;
-        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody]) {
+        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody]) {
           if (body?.error) throw new Error(body.error);
         }
         setMe(meBody);
         setTeamStats(teamBody.reps ?? []);
+        setSourceLearning(intelBody.sources ?? []);
+        setRepLearning(intelBody.reps ?? []);
         // Only ever auto-picks the tab once, on the first load — after that
         // it's the person's own navigation, not something to override out
         // from under them on every refresh.
@@ -347,7 +355,7 @@ export default function GrowthDeskPage() {
             }}
           />
         ) : tab === "team" ? (
-          <TeamTab reps={teamStats} />
+          <TeamTab reps={teamStats} sourceLearning={sourceLearning} repLearning={repLearning} />
         ) : tab === "partners" ? (
           <PartnersTab
             partners={partners}
@@ -643,40 +651,100 @@ function PipelineTab({
 // Team
 // ---------------------------------------------------------------------------
 
-function TeamTab({ reps }: { reps: RepStat[] }) {
+function TeamTab({
+  reps,
+  sourceLearning,
+  repLearning,
+}: {
+  reps: RepStat[];
+  sourceLearning: SourceLearning[];
+  repLearning: RepLearning[];
+}) {
   return (
-    <Card>
-      <div>
-        <h2 className="text-lg font-bold">Team</h2>
-        <p className="text-sm text-[var(--muted)]">
-          What's on everyone's plate right now, and what actually moved today.
-        </p>
-      </div>
+    <div className="space-y-5">
+      <Card>
+        <div>
+          <h2 className="text-lg font-bold">Team</h2>
+          <p className="text-sm text-[var(--muted)]">
+            What's on everyone's plate right now, and what actually moved today.
+          </p>
+        </div>
 
-      {reps.length === 0 ? (
-        <Empty>Nobody's been given a Growth Desk job yet.</Empty>
-      ) : (
-        <ul className="divide-y divide-[var(--border)]">
-          {reps.map((rep) => (
-            <li key={rep.id} className="flex flex-wrap items-center justify-between gap-3 py-3.5">
-              <div>
-                <p className="font-semibold">{rep.name || rep.email}</p>
-                <p className="text-xs text-[var(--muted)]">
-                  {rep.titleLabel} · {rep.leadsAssigned} leads · {rep.leadsConverted} converted
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Pill tone={rep.doneToday > 0 ? "good" : "default"}>{rep.doneToday} done today</Pill>
-                <Pill tone={rep.pendingTasks > 5 ? "warn" : "default"}>{rep.pendingTasks} pending</Pill>
-                <Pill tone={rep.reportedToday ? "good" : "warn"}>
-                  {rep.reportedToday ? "reported" : "no report yet"}
-                </Pill>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
+        {reps.length === 0 ? (
+          <Empty>Nobody's been given a Growth Desk job yet.</Empty>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {reps.map((rep) => (
+              <li key={rep.id} className="flex flex-wrap items-center justify-between gap-3 py-3.5">
+                <div>
+                  <p className="font-semibold">{rep.name || rep.email}</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    {rep.titleLabel} · {rep.leadsAssigned} leads · {rep.leadsConverted} converted
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Pill tone={rep.doneToday > 0 ? "good" : "default"}>{rep.doneToday} done today</Pill>
+                  <Pill tone={rep.pendingTasks > 5 ? "warn" : "default"}>{rep.pendingTasks} pending</Pill>
+                  <Pill tone={rep.reportedToday ? "good" : "warn"}>
+                    {rep.reportedToday ? "reported" : "no report yet"}
+                  </Pill>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card>
+        <div>
+          <h2 className="text-lg font-bold">What the algorithm has learned</h2>
+          <p className="text-sm text-[var(--muted)]">
+            New leads are routed and ranked off these numbers — a weighted pick, not always the top name, so
+            everyone keeps getting a fair shot and the numbers keep improving. Rates with little real data yet
+            lean on a sensible starting guess, flagged below.
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">By lead source</p>
+            <ul className="mt-2 space-y-1.5">
+              {sourceLearning.length === 0 ? (
+                <li className="text-sm text-[var(--muted)]">No leads yet.</li>
+              ) : (
+                sourceLearning.map((s) => (
+                  <li key={s.source} className="flex items-center justify-between text-sm">
+                    <span className="capitalize">{s.source.replace("_", " ")}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-semibold tabular-nums">{Math.round(s.rate * 100)}%</span>
+                      {!s.confident && <Pill tone="warn">still learning · {s.sampleSize}</Pill>}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">By rep</p>
+            <ul className="mt-2 space-y-1.5">
+              {repLearning.length === 0 ? (
+                <li className="text-sm text-[var(--muted)]">Nobody assigned yet.</li>
+              ) : (
+                repLearning.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between text-sm">
+                    <span>{r.name || r.email}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-semibold tabular-nums">{Math.round(r.rate * 100)}%</span>
+                      {!r.confident && <Pill tone="warn">still learning · {r.sampleSize}</Pill>}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { logLeadActivity } from "@/lib/growth/activity";
 import { createFollowUpTask } from "@/lib/growth/tasks";
+import { pickRepForLead } from "@/lib/growth/intelligence";
 
 /**
  * The Growth Desk pipeline layer over Lead.
@@ -64,41 +65,15 @@ export async function updateLeadStage(opts: {
 }
 
 /**
- * The rep with the fewest open tasks right now, among everyone holding the
- * `growth` admin role. Ties go to whoever `findMany` returns first — not
- * worth a tie-breaker until there is a second rep to actually tie.
- *
- * Returns null when there is nobody to assign to yet, which simply leaves
- * the lead unassigned rather than failing the request that created it.
- */
-export async function pickLeastLoadedRep(): Promise<string | null> {
-  const reps = await prisma.user.findMany({
-    where: { role: "ADMIN", adminRole: "growth", deletedAt: null },
-    select: { id: true },
-  });
-  if (reps.length === 0) return null;
-
-  const loads = await Promise.all(
-    reps.map(async (rep) => ({
-      id: rep.id,
-      openTasks: await prisma.salesTask.count({
-        where: { assignedToId: rep.id, status: "pending" },
-      }),
-    })),
-  );
-
-  loads.sort((a, b) => a.openTasks - b.openTasks);
-  return loads[0].id;
-}
-
-/**
  * Called right after a Lead is created (captureLead in src/lib/leads.ts).
- * Picks the least-loaded rep and opens their first follow-up task. Silent
- * no-op when there is no rep to hand it to yet — the lead just sits in the
- * unassigned pool until a Teamlead claims it by hand.
+ * Who it goes to is now learned, not just least-loaded — see
+ * src/lib/growth/intelligence.ts's pickRepForLead for the weighted-random
+ * policy and why it is deliberately not "send it to whoever converts
+ * best". Silent no-op when there is no rep to hand it to yet — the lead
+ * just sits in the unassigned pool until a Teamlead claims it by hand.
  */
 export async function autoAssignNewLead(leadId: string, leadName: string): Promise<void> {
-  const repId = await pickLeastLoadedRep();
+  const repId = await pickRepForLead();
   if (!repId) return;
 
   await assignLead({ leadId, assignedToId: repId, actorId: null });
