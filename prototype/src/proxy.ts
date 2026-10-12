@@ -48,10 +48,26 @@ type PortalRule = {
   apiPattern: RegExp;
   allowedRoles: string[];
   signInPath: string;
+  /**
+   * Only set on the admin portal. Lets a well-formed `Authorization: Bearer
+   * eak_...` header through this edge check with NO session cookie at all —
+   * this gate cannot look the key up (no DB access at the edge, and
+   * ADMIN_API_KEYS_ENABLED may be off), so it only checks the shape and
+   * defers the real hash lookup, revocation/expiry check and capability scope
+   * to requireCapability() inside the route, same as every session-based
+   * request already does. See AdminApiKey in schema.prisma.
+   */
+  allowApiKey?: boolean;
 };
 
 const PORTALS: PortalRule[] = [
-  { pagePattern: /^\/admin(\/|$)/, apiPattern: /^\/api\/admin(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+  {
+    pagePattern: /^\/admin(\/|$)/,
+    apiPattern: /^\/api\/admin(\/|$)/,
+    allowedRoles: ["admin"],
+    signInPath: "/auth/admin",
+    allowApiKey: true,
+  },
   {
     pagePattern: /^\/lecturer(\/|$)/,
     apiPattern: /^\/api\/lecturer(\/|$)/,
@@ -90,11 +106,29 @@ const normalizeRole = (value: unknown) => String(value || "student").toLowerCase
  */
 const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
 
+/** Shape-only check — `eak_<prefix>_<secret>` — not a lookup. */
+function hasAdminApiKeyHeader(request: NextRequest): boolean {
+  const header = request.headers.get("authorization");
+  if (!header) return false;
+  const [scheme, ...rest] = header.split(" ");
+  if (scheme?.toLowerCase() !== "bearer") return false;
+  return rest.join(" ").trim().startsWith("eak_");
+}
+
 async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
   if (path === IMPERSONATION_END_PATH) return null;
 
   const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
   if (!portal) return null;
+
+  if (
+    portal.allowApiKey &&
+    portal.apiPattern.test(path) &&
+    process.env.ADMIN_API_KEYS_ENABLED === "true" &&
+    hasAdminApiKeyHeader(request)
+  ) {
+    return null;
+  }
 
   /**
    * secureCookie must be forced, not inferred.
@@ -265,7 +299,7 @@ function contentSecurityPolicy(): string {
     `img-src 'self' data: blob: ${media.join(" ")}`,
     `media-src 'self' blob: ${media.join(" ")}`,
     "font-src 'self' data:",
-    `connect-src 'self' https://api.paystack.co http://127.0.0.1:7524 ${livekit.join(" ")} ${media.join(" ")}`,
+    `connect-src 'self' https://api.paystack.co ${livekit.join(" ")} ${media.join(" ")}`,
     "frame-src 'self' https://checkout.paystack.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",

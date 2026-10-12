@@ -103,29 +103,6 @@ export default function LiveCallDock() {
 
   const onMinimize = useCallback(() => setDockState("minimized"), [setDockState]);
 
-  useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-      body: JSON.stringify({
-        sessionId: "9fa38c",
-        hypothesisId: "B",
-        location: "LiveCallDock.tsx:dockState",
-        message: "live dock parent may remount classroom",
-        data: {
-          dockState,
-          pathname,
-          hasCall: Boolean(activeCall),
-          role: activeCall?.session.role ?? null,
-          roomName: activeCall?.session.roomName ?? null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [dockState, pathname, activeCall]);
-
   if (!activeCall || !activeCall.session.url || !activeCall.session.token) return null;
 
   const minimized = dockState === "minimized";

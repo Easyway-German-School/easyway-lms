@@ -40,13 +40,25 @@ export const MONTH_NAMES = [
  * "August" → 7. Case- and space-tolerant, because this reads month names that
  * came from a signup form, a spreadsheet import and an admin edit box.
  *
+ * Also tolerates a trailing year — "September 2026" — which is exactly what
+ * `resolveBatchWindow` below prints back out as a teaching month label, and
+ * what a bulk import or an admin typing the label back in produces. Without
+ * stripping it this returned null for anything written that way, which
+ * silently zeroed out `batchOfAdmission` for the student: on production this
+ * was 229 of 789 active students with a batch set, each invisibly dropped out
+ * of every batch-pinned material, notification and live-room check that reads
+ * their own admission record (see /api/student/materials, belongsToLecturer).
+ * The admission JSON itself is left alone — this only widens what the reader
+ * accepts.
+ *
  * Lives here rather than in `schedule.ts` (where it used to) so that every
  * batch question has one home and `schedule.ts` can depend on this file
  * instead of the other way round.
  */
 export function monthNameToIndex(name: unknown): number | null {
   if (typeof name !== "string") return null;
-  const index = MONTH_NAMES.findIndex((m) => m.toLowerCase() === name.trim().toLowerCase());
+  const cleaned = name.trim().replace(/\s+\d{4}$/, "");
+  const index = MONTH_NAMES.findIndex((m) => m.toLowerCase() === cleaned.toLowerCase());
   return index >= 0 ? index : null;
 }
 

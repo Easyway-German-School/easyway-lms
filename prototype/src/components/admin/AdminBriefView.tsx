@@ -40,6 +40,7 @@ export type Brief = {
   period: "daily" | "weekly" | "monthly";
   rangeLabel: string;
   comparedTo: string;
+  windowLabel: string;
   generatedAt: string;
   headline: string;
   metrics: BriefMetric[];
@@ -97,7 +98,13 @@ export default function AdminBriefView({
 
   return (
     <div className="space-y-5">
-      <p className="text-lg font-bold leading-snug text-[var(--foreground)]">{brief.headline}</p>
+      <div>
+        <p className="text-lg font-bold leading-snug text-[var(--foreground)]">{brief.headline}</p>
+        {/* The literal dates behind "the last 7 days" etc. — a rolling window
+            is confusing on faith but not when you can see what it actually
+            spans, especially right after it rolls onto a new calendar day. */}
+        <p className="mt-0.5 text-xs text-[var(--muted)]">{brief.windowLabel}</p>
+      </div>
 
       <div
         className={`grid gap-3 ${
