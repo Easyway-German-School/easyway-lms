@@ -9,7 +9,7 @@ import AdminObserver from "@/components/live/AdminObserver";
 import { CINEMA } from "@/components/live/LiveKitClassroom";
 import ClassNotesHealth from "@/components/admin/ClassNotesHealth";
 import LiveClassHistory from "@/components/admin/LiveClassHistory";
-import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon, ClockIcon } from "@/components/icons";
+import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon, ClockIcon, BellIcon } from "@/components/icons";
 
 /**
  * WHO IS LIVE RIGHT NOW — the school's own version of the dashboard LiveKit
@@ -85,6 +85,8 @@ export default function AdminLivePage() {
   const [participantsError, setParticipantsError] = useState("");
   const [participantsBusy, setParticipantsBusy] = useState(false);
   const [tab, setTab] = useState<"live" | "history">("live");
+  const [renotifying, setRenotifying] = useState<string | null>(null);
+  const [renotifyResult, setRenotifyResult] = useState<{ sessionId: string; message: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -130,6 +132,34 @@ export default function AdminLivePage() {
       setParticipantsError("Could not load who's in this room");
     } finally {
       setParticipantsBusy(false);
+    }
+  }
+
+  async function resendNotifications(sessionId: string) {
+    setRenotifying(sessionId);
+    setRenotifyResult(null);
+    try {
+      const res = await fetch("/api/admin/live/renotify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRenotifyResult({ sessionId, message: data.error || "Could not resend notifications." });
+        return;
+      }
+      setRenotifyResult({
+        sessionId,
+        message:
+          typeof data.namedStudentsConsidered === "number"
+            ? `Resent. Anyone already notified was skipped — ${data.namedStudentsConsidered} named/hybrid/online student${data.namedStudentsConsidered === 1 ? "" : "s"} were checked.`
+            : "Resent to this class's roster.",
+      });
+    } catch {
+      setRenotifyResult({ sessionId, message: "Could not resend notifications." });
+    } finally {
+      setRenotifying(null);
     }
   }
 
@@ -243,6 +273,28 @@ export default function AdminLivePage() {
                     <span
                       role="button"
                       tabIndex={0}
+                      title="Re-send the 'your class is live' ping to this tutor's roster — use this when some students report they never got the notification or a join code."
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void resendNotifications(session.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          void resendNotifications(session.id);
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] px-3 py-1 text-xs font-semibold text-white transition hover:border-[#FF7A1A] hover:text-[#FFB273] ${
+                        renotifying === session.id ? "opacity-60" : ""
+                      }`}
+                    >
+                      <BellIcon className="h-3.5 w-3.5" />
+                      {renotifying === session.id ? "Resending…" : "Resend notifications"}
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
                       onClick={(event) => {
                         event.stopPropagation();
                         setObserving({ roomName: session.roomName, title: session.title });
@@ -269,6 +321,12 @@ export default function AdminLivePage() {
                     />
                   </div>
                 </button>
+
+                {renotifyResult && renotifyResult.sessionId === session.id ? (
+                  <p className="border-t border-white/[0.08] px-5 py-2.5 text-xs text-[#9A9690]">
+                    {renotifyResult.message}
+                  </p>
+                ) : null}
 
                 {expanded === session.roomName ? (
                   <div className="border-t border-white/[0.08] p-5">

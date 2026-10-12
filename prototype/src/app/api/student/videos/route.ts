@@ -30,7 +30,11 @@ export async function GET() {
 
     const student = await prisma.student.findUnique({
       where: { userId: session.user.id },
-      include: { payments: true, branch: { select: { name: true } } },
+      include: {
+        payments: true,
+        branch: { select: { name: true } },
+        coTutors: { select: { lecturerId: true } },
+      },
     });
 
     if (!student) {
@@ -74,6 +78,14 @@ export async function GET() {
     // deliberately carries NO level (see class-recorder.ts) — it was booked
     // for them specifically via the `privateClasses` relation.
     const now = new Date();
+    // The tutor named onto this student — primary or any co-tutor. A recording
+    // of their tutor's class is theirs to watch even when the room ran under a
+    // branch/level/sitting that never matched their own record (see the same
+    // escape hatch in liveSessionForStudent, live-presence.ts, and
+    // `row.lecturerId` in class-recorder.ts).
+    const teacherIds = [student.tutorId, ...student.coTutors.map((link) => link.lecturerId)].filter(
+      (id): id is string => Boolean(id),
+    );
     const candidates = await prisma.material.findMany({
       where: {
         kind: { in: ["video", "recording"] },
@@ -83,6 +95,14 @@ export async function GET() {
               { level: student.level },
               { course: { level: student.level } },
               { privateClasses: { some: { studentId: student.id } } },
+              // `privateClassId: null` is load-bearing: without it a private
+              // one-to-one tape would leak onto every OTHER student this same
+              // tutor teaches, since lecturerId alone does not single out
+              // which student the private lesson was for. A private
+              // recording stays visible only through the relation above.
+              ...(teacherIds.length
+                ? [{ recording: { lecturerId: { in: teacherIds }, privateClassId: null } }]
+                : []),
             ],
           },
           // Office targeting NARROWS, same as the Materials page: an upload may

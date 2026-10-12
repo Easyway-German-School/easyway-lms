@@ -30,7 +30,7 @@ import { classDayBounds, heldParts, otherPartsOf, otherPartsSeconds, type PartRo
 import { schedulerHint } from "@/lib/recorder-control";
 import { decideFallback, fallbackPolicy, liveKitMinutes, monthStartUtc, type FallbackDecision } from "@/lib/recording-fallback";
 import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
-import { batchOfRoomName } from "@/lib/class-batch";
+import { batchOfRoomName, studentSeesBatch } from "@/lib/class-batch";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
@@ -100,6 +100,13 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
     });
     if (active) return active.egressId;
 
+    // Denormalised onto the row now, same as branchId/level/sessionSlot, so a
+    // student named onto this tutor can be matched to the recording later
+    // even if their own branch/level/sitting never lined up with this room.
+    const startedByLecturer = input.startedByUserId
+      ? await prisma.lecturer.findUnique({ where: { userId: input.startedByUserId }, select: { id: true } })
+      : null;
+
     // A capture that LiveKit still has running but we lost the row for — a
     // restarted dev server, say. Adopt it rather than starting a second one.
     const live = await client.listEgress({ roomName: input.roomName, active: true });
@@ -114,6 +121,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
           level: input.level ?? null,
           sessionSlot: input.sessionSlot ?? null,
           startedByUserId: input.startedByUserId ?? null,
+          lecturerId: startedByLecturer?.id ?? null,
           privateClassId: input.privateClassId ?? null,
           status: "active",
         },
@@ -188,6 +196,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
         level: input.level ?? null,
         sessionSlot: input.sessionSlot ?? null,
         startedByUserId: input.startedByUserId ?? null,
+        lecturerId: startedByLecturer?.id ?? null,
         privateClassId: input.privateClassId ?? null,
         status: "active",
         variant,
@@ -644,6 +653,39 @@ export async function finaliseRecording(egress: {
         link: `/materials/watch/${material.id}`,
         dedupeKey: `recording:${row.egressId}`,
       });
+
+      // The same by-name gap the live-join popup had (see the big comment on
+      // `liveSessionForStudent` in live-presence.ts): a student named onto this
+      // tutor (`Student.tutorId` / co-tutors) whose own branch/level/sitting
+      // never lined up with the room the class ran in is invisible to the
+      // cohort broadcast above. They sat the class the same way everyone else
+      // did, so they get told the recording is ready the same way — shares the
+      // same dedupe key, so a student the cohort broadcast ALSO reached is not
+      // told twice. `row.lecturerId` is null on recordings captured before it
+      // existed, so this is simply a no-op for those.
+      if (row.lecturerId) {
+        const batch = batchOfRoomName(row.roomName) || null;
+        const named = await prisma.student.findMany({
+          where: {
+            deletedAt: null,
+            OR: [{ tutorId: row.lecturerId }, { coTutors: { some: { lecturerId: row.lecturerId } } }],
+          },
+          select: { id: true, admission: true },
+        });
+        const inBatch = batch
+          ? named.filter((student) => studentSeesBatch(batch, student.admission))
+          : named;
+        if (inBatch.length) {
+          notifyInBackground({
+            to: { studentIds: inBatch.map((student) => student.id) },
+            kind: KIND.materialPublished,
+            title: "Your class recording is ready",
+            message: `${material.title} is now on the Watch shelf in Materials.`,
+            link: `/materials/watch/${material.id}`,
+            dedupeKey: `recording:${row.egressId}`,
+          });
+        }
+      }
     }
 
     // This part proved the class was real: any EARLIER part of it that was held as "too short"
