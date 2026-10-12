@@ -159,7 +159,7 @@ const TILE_SIZE: Record<QualityMode, string> = {
  * at night"; a second, unrelated palette lifted wholesale from a mockup
  * would have read as a different product bolted on.
  */
-const CINEMA = {
+export const CINEMA = {
   /** Flat near-black, for small translucent surfaces that take an opacity modifier. */
   ground: "#0a1213",
   /** Tile/panel surface — a quiet diagonal gradient instead of a flat fill. */

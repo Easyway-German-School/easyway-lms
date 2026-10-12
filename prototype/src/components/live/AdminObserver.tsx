@@ -39,6 +39,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { Room, RoomEvent, Track, type Participant, type RemoteParticipant } from "livekit-client";
 import { createPortal } from "react-dom";
 import BrandLoader from "@/components/BrandLoader";
+import { CINEMA } from "@/components/live/LiveKitClassroom";
 import {
   BroadcastMessageIcon,
   CameraIcon,
@@ -263,20 +264,29 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
   }, []);
 
   const overlay = (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-slate-950 text-white">
+    <div
+      className="fixed inset-0 z-[60] flex flex-col text-white"
+      // Same multi-layer dark gradient the cinema redesign uses for the
+      // classroom's own immersive ground (see LiveKitClassroom.tsx) — this
+      // overlay is always full-screen, so it is always "immersive".
+      style={{
+        background:
+          "radial-gradient(1100px 620px at 6% -10%, rgba(63,195,198,0.16), transparent 55%), radial-gradient(900px 560px at 98% -4%, rgba(255,122,26,0.12), transparent 55%), linear-gradient(180deg, #030607 0%, #050b0c 45%, #04090a 100%)",
+      }}
+    >
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span
             className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
-              mode === "speak" ? "bg-amber-500/20 text-amber-300" : "bg-amber-500/15 text-amber-300"
+              mode === "speak" ? "bg-[#D9A64E]/20 text-[#D9A64E]" : "bg-[#D9A64E]/15 text-[#D9A64E]"
             }`}
           >
             {mode === "speak" ? <BroadcastMessageIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{title}</p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[#9A9690]">
               Room {roomName} ·{" "}
               {phase === "watching"
                 ? `${remotes.length} in the class`
@@ -295,7 +305,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
             mode === "watch" ? (
               <button
                 onClick={startSpeaking}
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                className={`inline-flex items-center gap-2 rounded-xl ${CINEMA.ctaBg} px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:brightness-110`}
               >
                 <BroadcastMessageIcon className="h-4 w-4" />
                 Speak to the class
@@ -320,9 +330,11 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
         </div>
       </div>
 
-      {/* Mode banner — always on, never dismissible. What it says is the whole point. */}
+      {/* Mode banner — always on, never dismissible. What it says is the whole point.
+          Amber here is the palette's "being handled" tone, same as a device
+          notice in the classroom itself — this is an ongoing state, not a problem. */}
       {mode === "watch" ? (
-        <div className="flex items-center gap-2.5 bg-amber-500/15 px-5 py-2 text-xs font-medium text-amber-200">
+        <div className="flex items-center gap-2.5 bg-[#D9A64E]/15 px-5 py-2 text-xs font-medium text-[#E8C988]">
           <EyeIcon className="h-4 w-4 shrink-0" />
           <span>
             You are watching silently. The tutor and students have <span className="font-bold">not</span> been told
@@ -331,7 +343,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           </span>
         </div>
       ) : (
-        <div className="flex items-center gap-2.5 bg-amber-500 px-5 py-2 text-xs font-medium text-white">
+        <div className="flex items-center gap-2.5 bg-[#D9A64E] px-5 py-2 text-xs font-medium text-white">
           <BroadcastMessageIcon className="h-4 w-4 shrink-0" />
           <span>
             You are visible now, connected as <span className="font-bold">&ldquo;The Office&rdquo;</span> — the class
@@ -342,11 +354,11 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
       )}
 
       {phase === "watching" && mode === "speak" ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-slate-900 px-5 py-3">
+        <div className={`flex flex-wrap items-center gap-2 border-b border-white/[0.08] ${CINEMA.tileBg} px-5 py-3`}>
           <button
             onClick={toggleMic}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              micOn ? "bg-emerald-500 text-white hover:brightness-110" : "bg-white/10 text-white hover:bg-white/20"
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition hover:brightness-110 ${
+              micOn ? `${CINEMA.ctaBg} text-white` : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             {micOn ? <MicIcon className="h-4 w-4" /> : <MicOffIcon className="h-4 w-4" />}
@@ -354,8 +366,8 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           </button>
           <button
             onClick={toggleCam}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              camOn ? "bg-emerald-500 text-white hover:brightness-110" : "bg-white/10 text-white hover:bg-white/20"
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition hover:brightness-110 ${
+              camOn ? `${CINEMA.ctaBg} text-white` : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <CameraIcon className="h-4 w-4" />
@@ -374,7 +386,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
       {audioBlocked && phase === "watching" ? (
         <button
           onClick={enableAudio}
-          className="flex w-full items-center justify-center gap-3 bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+          className={`flex w-full items-center justify-center gap-3 ${CINEMA.ctaBg} px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110`}
         >
           <SpeakerOffIcon className="h-5 w-5" />
           Tap to turn on the sound
@@ -402,7 +414,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           </div>
         ) : phase === "ended" ? (
           <div className="grid h-full place-items-center p-6">
-            <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-sm text-slate-300">
+            <div className={`max-w-md rounded-2xl border border-white/[0.08] ${CINEMA.tileBg} p-6 text-center text-sm text-[#9A9690]`}>
               <p className="font-semibold text-white">This class has ended</p>
               <p className="mt-2">There is nothing more to watch here.</p>
               <button
@@ -419,7 +431,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
               {mainTile ? (
                 <VideoTile participant={mainTile.participant} source={mainTile.source} revision={topology} full />
               ) : (
-                <div className="grid h-full place-items-center rounded-2xl bg-slate-900 text-sm text-slate-400">
+                <div className={`grid h-full place-items-center rounded-2xl ${CINEMA.tileBg} text-sm text-[#9A9690]`}>
                   Nobody has their camera on yet — the audio is still live.
                 </div>
               )}
@@ -442,7 +454,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
               own view exactly.
             */}
             {mode === "speak" && camOn && room ? (
-              <div className="pointer-events-none absolute bottom-4 right-4 h-28 w-44 overflow-hidden rounded-2xl ring-2 ring-amber-400">
+              <div className="pointer-events-none absolute bottom-4 right-4 h-28 w-44 overflow-hidden rounded-2xl ring-2 ring-[#D9A64E]">
                 <VideoTile participant={room.localParticipant} source={Track.Source.Camera} revision={topology} />
               </div>
             ) : null}
@@ -501,7 +513,7 @@ function VideoTile({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-slate-900 ring-1 ring-white/10 ${
+      className={`relative overflow-hidden rounded-2xl ${CINEMA.tileBg} ring-1 ring-white/10 ${
         full ? "h-full w-full" : "h-full w-full"
       }`}
     >
@@ -513,7 +525,7 @@ function VideoTile({
         className={`h-full w-full ${isScreen ? "object-contain" : "object-cover"} ${hasVideo ? "" : "hidden"}`}
       />
       {!hasVideo ? (
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900">
+        <div className={`flex h-full w-full items-center justify-center ${CINEMA.tileBg}`}>
           <div
             className={`grid place-items-center rounded-full bg-white/10 font-semibold text-white ${
               full ? "h-20 w-20 text-2xl" : "h-9 w-9 text-xs"
@@ -524,7 +536,7 @@ function VideoTile({
         </div>
       ) : null}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
-        {isScreen ? <ScreenShareIcon className="h-3 w-3 shrink-0 text-slate-300" /> : null}
+        {isScreen ? <ScreenShareIcon className="h-3 w-3 shrink-0 text-[#9A9690]" /> : null}
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-white">
           {name}
           {isScreen ? " — screen" : ""}
