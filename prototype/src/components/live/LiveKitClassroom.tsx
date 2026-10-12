@@ -214,6 +214,21 @@ function ParticipantTile({
   const [confirmRemove, setConfirmRemove] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * The stage slot now keeps the same `ParticipantTile` instance across a
+   * speaker swap instead of remounting (see the comment at the stage's call
+   * site) — which means a moderation menu opened against the OLD occupant
+   * would otherwise still be sitting open, visually attached to whoever the
+   * stage swapped to next. The menu's own click handlers already read
+   * `participant.identity` fresh at click time, so this was never a
+   * mistargeting bug, only a confusing one: closing it on every identity
+   * change is what a remount used to do for free.
+   */
+  useEffect(() => {
+    setMenuOpen(false);
+    setConfirmRemove(false);
+  }, [participant.identity]);
+
   // A menu left open when the finger lands somewhere else is a menu that
   // stays open forever on a phone, where there is no hover-away to close it.
   useEffect(() => {
@@ -1832,37 +1847,53 @@ export default function LiveKitClassroom({
             {stageParticipant ? (
               <div className="relative">
                 {/*
-                  Crossfade rather than a hard cut. Combined with the dwell time
-                  above, the stage now changes rarely and gently instead of
-                  often and abruptly — the two together are what stop it feeling
-                  cheap. `mode="popLayout"` lets the outgoing tile fade over the
-                  incoming one; both attach the same track, which livekit-client
-                  supports, so nothing goes black in between.
+                  THE STAGE SLOT IS ONE PERSISTENT `ParticipantTile`, NEVER
+                  RE-KEYED BY IDENTITY — this is the fix for the "blinking
+                  when two or more people have mic and camera on" report.
+                  It used to be `<AnimatePresence><motion.div
+                  key={stageParticipant.identity}>...` on the theory that a
+                  crossfade would hide the swap. It didn't: changing the key
+                  makes React unmount the outgoing tile and mount a brand
+                  new one for the incoming participant, which means a brand
+                  new <video> element that has to attach a fresh track and
+                  paint its first frame from nothing — a real black flash,
+                  not a stylistic hard cut, regardless of the opacity
+                  animation wrapped around it.
+
+                  That swap is rare with one open mic (the stage only ever
+                  moves tutor → the one student who talks, once). With two
+                  or more participants unmuted on both mic and camera, the
+                  stage-follows-speaker logic above (`speakingIds.has(...)
+                  && participants.length > 1`) re-fires every time the loudest
+                  identity changes — which, in an ordinary back-and-forth
+                  conversation (or just two open mics picking up room noise),
+                  is often faster than people reading this comment. Every one
+                  of those swaps was a full tear-down/rebuild of the big video
+                  element, i.e. the blink the tutor described.
+
+                  Rendering the same `ParticipantTile` instance regardless of
+                  who currently occupies it fixes this: the `participant` prop
+                  changes, the component's own attach effect (keyed on
+                  `participant`) detaches the old track and attaches the new
+                  one to the SAME <video> element, in the SAME on-screen size
+                  — no element destruction, no simulcast re-negotiation from a
+                  size change, no black frame. We lose the crossfade; a clean
+                  cut beats a flickering one.
                 */}
-                <AnimatePresence mode="popLayout" initial={false}>
-                  <motion.div
-                    key={stageParticipant.identity}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.22, ease: "easeInOut" }}
-                  >
-                    <ParticipantTile
-                      participant={stageParticipant}
-                      mode={mode}
-                      large
-                      isSpeaking={ringIds.has(stageParticipant.identity)}
-                      revision={topologyRevision}
-                      levels={levels}
-                      handPosition={handPositions.get(stageParticipant.identity) ?? null}
-                      light={lightFor(stageParticipant)}
-                      viewerRole={role}
-                      moderationBusy={moderationBusy}
-                      onMute={muteParticipant}
-                      onRemove={removeParticipant}
-                    />
-                  </motion.div>
-                </AnimatePresence>
+                <ParticipantTile
+                  participant={stageParticipant}
+                  mode={mode}
+                  large
+                  isSpeaking={ringIds.has(stageParticipant.identity)}
+                  revision={topologyRevision}
+                  levels={levels}
+                  handPosition={handPositions.get(stageParticipant.identity) ?? null}
+                  light={lightFor(stageParticipant)}
+                  viewerRole={role}
+                  moderationBusy={moderationBusy}
+                  onMute={muteParticipant}
+                  onRemove={removeParticipant}
+                />
 
                 {/* Over the video, so the tutor catches them without looking away. */}
                 <ReactionLayer reactions={interactions.reactions} />
