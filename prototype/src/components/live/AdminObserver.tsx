@@ -491,19 +491,42 @@ function VideoTile({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
+  /**
+   * `revision` bumps on ANY topology event from ANY participant (see its
+   * `.on(...)` list above this component) — a mute, a join, a screen-share
+   * start three tiles away. This effect has to re-run on every bump because
+   * THIS tile's own publication can change too, but most bumps have nothing
+   * to do with this tile's actual track. Re-running used to mean
+   * `track.detach(el)` then `track.attach(el)` on the SAME still-valid
+   * track — a real, if brief, blank frame each time, visible as a blink.
+   * With more participants' mics/cameras active there are simply more
+   * topology events per second, so the blinking scaled with room size —
+   * exactly the pattern reported. Guard on the actual track object: only
+   * detach/reattach when the track THIS tile should show has genuinely
+   * changed, not on every unrelated bump.
+   */
+  const attachedTrackRef = useRef<Track | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
     const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
     const cameraPub = participant.getTrackPublication(Track.Source.Camera);
     const pub = source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub;
-    if (el && pub?.track) {
-      pub.track.attach(el);
+    const track = pub?.track ?? null;
+
+    if (el && track) {
       setHasVideo(true);
+      if (attachedTrackRef.current === track) return; // same track already attached — nothing to do
+      track.attach(el);
+      attachedTrackRef.current = track;
       return () => {
-        pub.track?.detach(el);
+        if (attachedTrackRef.current === track) {
+          track.detach(el);
+          attachedTrackRef.current = null;
+        }
       };
     }
+    attachedTrackRef.current = null;
     setHasVideo(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [participant, source, revision]);
@@ -554,16 +577,27 @@ function VideoTile({
 /** Hidden playback for one participant's microphone. */
 function ParticipantAudio({ participant, revision }: { participant: RemoteParticipant; revision: number }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  // Same guard as VideoTile, same reason: `revision` bumps on every
+  // participant's mute/unmute, not just this one's — without this, a busy
+  // room re-attaches a perfectly fine audio track constantly.
+  const attachedTrackRef = useRef<Track | null>(null);
 
   useEffect(() => {
     const pub = participant.getTrackPublication(Track.Source.Microphone);
     const el = audioRef.current;
-    if (el && pub?.track) {
-      pub.track.attach(el);
+    const track = pub?.track ?? null;
+    if (el && track) {
+      if (attachedTrackRef.current === track) return;
+      track.attach(el);
+      attachedTrackRef.current = track;
       return () => {
-        pub.track?.detach(el);
+        if (attachedTrackRef.current === track) {
+          track.detach(el);
+          attachedTrackRef.current = null;
+        }
       };
     }
+    attachedTrackRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [participant, revision]);
 
