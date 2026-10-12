@@ -14,7 +14,7 @@ import { slotTitle } from "@/lib/school-settings";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { defaultBatchMonth, readIntakeStartDayOverrides } from "@/lib/intake-server";
-import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { ensureChargeForLevel, reconcileCurrentLevelChargeForPathway } from "@/lib/tuition-charges";
 import { isTravelPackagePathway } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
@@ -867,6 +867,29 @@ export async function PATCH(request: Request) {
     }
 
     /**
+     * EVERY OTHER PATHWAY CHANGE — the general case Travel Package's own
+     * repair above does not cover. Changing a student's pathway here (fixing
+     * an "Exam Preparatory" picked by mistake, say) silently left the price
+     * exactly where it was: `TuitionCharge.amount` is frozen on purpose, and
+     * only Travel Package had a repair for it, and only going ONTO that
+     * pathway — switching back OFF it, or between any two ordinary pathways,
+     * left the sticker price stuck. `reconcileCurrentLevelChargeForPathway`
+     * fixes the current level's own charge to the new pathway's real price,
+     * but only while nothing has been paid toward it yet — a naira already
+     * allocated against the old price is left for a person to reconcile by
+     * hand, not silently rewritten.
+     */
+    const pathwayChanged = Boolean(pathway && pathway !== student.pathway);
+    let pathwayReprice: Awaited<ReturnType<typeof reconcileCurrentLevelChargeForPathway>> = null;
+    if (pathwayChanged && !movedToTravelPackage) {
+      try {
+        pathwayReprice = await reconcileCurrentLevelChargeForPathway(studentId);
+      } catch (repriceError) {
+        console.error("Pathway re-price failed on admin edit", { studentId, repriceError });
+      }
+    }
+
+    /**
      * Enrolment history — see lib/student-enrolment.ts. Two things can end or
      * start a stint here, independently of the "Promotions" flow in
      * promotion.ts, which already handles the normal level-up case:
@@ -1052,6 +1075,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({
       success: true,
       ...(travelPackageReconcile ? { travelPackage: travelPackageReconcile } : {}),
+      ...(pathwayReprice ? { pathwayReprice } : {}),
     });
   } catch (error) {
     return NextResponse.json({ error: "Unable to update student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
