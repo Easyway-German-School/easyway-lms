@@ -1,27 +1,16 @@
 /**
  * WHO GETS THE NEW LOOK — decided in one place.
  *
- * The student portal is being reshaped for the young learner: a phone tab bar,
- * avatars, a profile that reads like a feed, and a livelier community. That is
- * a real change to how the product feels, so the school sets a default by age
- * and the student always has the last word.
+ * Used to be split by age (an under-25 "wave" got it by default, everyone
+ * else was invited to opt in). That rollout is over: every student gets the
+ * new look by default now, regardless of age — it is just the portal. Age and
+ * the school's wave setting (`LookWave`) are kept as inputs for backward
+ * compatibility with the admin reporting and the stored `SchoolSetting` row,
+ * but `resolveLook` no longer lets either one change the outcome — see the
+ * comment there.
  *
- * Two cohorts, and a student belongs to exactly one:
- *
- *   WAVE     Under 25 (configurable). Gets the new look BY DEFAULT, and Becca
- *            tells them once — "we gave the app a fresh look, keep it or go
- *            back".
- *
- *   INVITED  Everyone else — including anybody whose age we cannot work out.
- *            Nothing changes for them, but Becca offers the choice once: try
- *            the new look, or stay exactly where you are. (This used to be
- *            only 25–34s who were demonstrably phone-heavy. That quietly hid
- *            the offer from most of the roster — a laptop user, a student with
- *            no birth date on file, anyone over 34 — so nobody who tested the
- *            portal as one of them ever saw it. The choice is now everyone's.)
- *
- * On top of that, the student's own choice wins over all of it, in both
- * directions, forever.
+ * The student's own choice still wins over the default, in both directions,
+ * forever — see `LookSwitch` on /profile.
  *
  * What each look means for the community is decided from the same answer — see
  * lib/community-skin.ts: the new look gets the lively, avatar-first chat; the
@@ -89,14 +78,19 @@ export function resolveLook(input: {
   choice: Look | null | undefined;
   wave?: LookWave;
 }): LookDecision {
-  const wave = input.wave ?? DEFAULT_LOOK_WAVE;
-  const age = typeof input.age === "number" && Number.isFinite(input.age) ? input.age : null;
-  const inWave = age === null ? wave.includeUnknownAge : age <= wave.maxAge;
-  const cohort: Cohort = inWave ? "wave" : "invited";
+  /**
+   * Age-based rollout retired — everyone is "in the wave" now, regardless of
+   * age or the stored LookWave setting. `age`/`wave` are still accepted (and
+   * still typed) so none of the thirteen-odd callers — the admin cohort
+   * report, the look-wave API, the student decision path — need to change,
+   * but neither one is read here any more. The only thing that still moves
+   * the outcome is the student's own choice, below.
+   */
+  const inWave = true;
+  const cohort: Cohort = "wave";
 
   if (input.choice) return { look: input.choice, reason: "chosen", cohort, inWave };
-  if (cohort === "wave") return { look: "youth", reason: "wave", cohort, inWave };
-  return { look: "classic", reason: "default", cohort, inWave };
+  return { look: "youth", reason: "wave", cohort, inWave };
 }
 
 /**
@@ -104,12 +98,12 @@ export function resolveLook(input: {
  * not been told before, and anyone who already picked a look themselves has
  * already answered the question.
  *
- * Everyone else gets one quiet banner on their next visit: wave students hear
- * that the look is theirs, everyone else is invited to try it. Join date and
- * account age used to hide this from most of the roster — new joiners, unknown
- * dates, anyone under two days — so the people who most needed the choice
- * never saw it. The banner itself waits its turn in the moment queue and can
- * be dismissed without a competing "skip" button.
+ * Now that the rollout is everyone's, `cohort` is always "wave", so this
+ * always announces ("we gave the app a fresh look") rather than inviting —
+ * the "invite" branch is dead with the age split retired, but left in place
+ * since `LookDecision.cohort` still exists for the admin reporting's sake.
+ * The banner itself waits its turn in the moment queue and can be dismissed
+ * without a competing "skip" button.
  */
 export function promptFor(decision: LookDecision, promptedBefore: boolean): "announce" | "invite" | null {
   if (promptedBefore || decision.reason === "chosen") return null;
