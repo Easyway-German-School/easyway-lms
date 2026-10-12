@@ -25,12 +25,12 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "EasyWay German Language School",
+    name: "Easyway German Language School",
     // What actually fits under an icon. Anything past ~12 characters is
     // ellipsised on an Android home screen, so the long name never shows there.
-    short_name: "EasyWay",
+    short_name: "Easyway",
     description:
-      "Your German classes, timetable, live lessons, materials and results — for students, tutors and staff at EasyWay German Language School.",
+      "Your German classes, timetable, live lessons, materials and results — for students, tutors and staff at Easyway German Language School.",
     start_url: "/",
     scope: "/",
     display: "standalone",

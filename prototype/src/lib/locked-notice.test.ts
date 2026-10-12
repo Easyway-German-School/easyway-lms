@@ -45,7 +45,7 @@ describe("lockedStatus", () => {
 describe("buildLockedNotice", () => {
   it("is personal, links to payments and never threatens", () => {
     const n = buildLockedNotice(base);
-    expect(n.title).toBe("Ada, an update on your EasyWay portal");
+    expect(n.title).toBe("Ada, an update on your Easyway portal");
     expect(n.html).toContain("Hallo Ada,");
     expect(n.html).toContain("/payments");
     expect(n.html).toContain("Reply to this email");

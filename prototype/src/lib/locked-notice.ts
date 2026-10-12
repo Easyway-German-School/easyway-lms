@@ -99,14 +99,14 @@ export function lockedStatus(facts: LockedFacts): { headline: string; whatUnlock
 export function buildLockedNotice(facts: LockedFacts): LockedNotice {
   const { headline, whatUnlocks } = lockedStatus(facts);
   const hi = facts.firstName ? `${facts.firstName}, ` : "";
-  const title = `${hi}an update on your EasyWay portal`;
+  const title = `${hi}an update on your Easyway portal`;
   const message = `${headline} ${whatUnlocks}`;
   const url = absoluteUrl("/payments", process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "");
   const { ink, muted, orange, teal, font, line } = EMAIL_BRAND;
 
   const html = emailShell({
     title,
-    senderName: "EasyWay German School",
+    senderName: "Easyway German School",
     footer:
       "Reply to this email and a real person at the school will answer. If you have already paid, please reply with your receipt and we will sort it out the same day.",
     preheader: message.slice(0, 120),

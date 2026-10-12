@@ -1161,7 +1161,7 @@ export async function draftEmailBlocks(input: {
 }): Promise<{ subject: string; blocks: EmailDraftBlock[]; engine: string } | null> {
   const audience = input.audience?.trim() || "students at a German language school in Nigeria";
 
-  const prompt = `You are writing an email for EasyWay German Language School to ${audience}.
+  const prompt = `You are writing an email for Easyway German Language School to ${audience}.
 
 What the school wants to say:
 """

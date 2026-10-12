@@ -640,8 +640,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       if (isOnline) {
         setSuccessMessage(
           parentEnabled
-            ? "Welcome to EasyWay Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
-            : "Welcome to EasyWay Online. Taking you to your dashboard…",
+            ? "Welcome to Easyway Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
+            : "Welcome to Easyway Online. Taking you to your dashboard…",
         );
         setShowSuccess(true);
 
@@ -698,7 +698,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         */}
         <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-6 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · EasyWay German</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · Easyway German</p>
             <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Start your German journey"}</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85">
               A few short steps and you are enrolled — your level, your class times, your tutor. Registering for your

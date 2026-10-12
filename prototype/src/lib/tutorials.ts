@@ -88,7 +88,7 @@ export function buildWelcomeTutorial(onboarding: OnboardingProfile): Tutorial {
 
   return {
     id: "welcome",
-    title: "Welcome to EasyWay",
+    title: "Welcome to Easyway",
     blurb: "Your very first tour — everything you'll actually use, from Becca.",
     estMinutes: 3,
     onFinish: () => {

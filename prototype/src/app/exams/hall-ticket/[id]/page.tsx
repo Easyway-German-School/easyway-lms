@@ -111,7 +111,7 @@ export default function HallTicketPage() {
           </span>
         </div>
 
-        <h1 className="mt-6 text-2xl font-extrabold text-[var(--foreground)]">{ticket.examBody === "internal" ? "EasyWay" : ticket.examBody} exam</h1>
+        <h1 className="mt-6 text-2xl font-extrabold text-[var(--foreground)]">{ticket.examBody === "internal" ? "Easyway" : ticket.examBody} exam</h1>
         <p className="text-sm text-[var(--muted)]">{examWhen(ticket.examDate)}</p>
         <p className="mt-1 text-xs font-semibold text-[var(--accent)]">Please arrive 30 minutes early.</p>
 

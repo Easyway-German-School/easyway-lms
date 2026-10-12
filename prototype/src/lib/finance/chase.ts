@@ -74,12 +74,12 @@ export function chaseMessage(input: {
         const batch = finance.batchLabel ?? "upcoming";
         title = `Confirm your ${batch} seat`;
         body =
-          `${hi}you are registered with EasyWay German School, but no tuition has been paid yet, so your ${batch} seat is not confirmed. ` +
+          `${hi}you are registered with Easyway German School, but no tuition has been paid yet, so your ${batch} seat is not confirmed. ` +
           `${naira(finance.owedOnDeposit)} confirms it before classes open (full tuition is ${naira(finance.tuitionFee)}). ${tail}`;
       } else {
         title = "Your seat is waiting";
         body =
-          `${hi}you are registered with EasyWay German School, but no tuition has been paid yet, so your classes have not opened. ` +
+          `${hi}you are registered with Easyway German School, but no tuition has been paid yet, so your classes have not opened. ` +
           `${naira(finance.owedOnDeposit)} opens them (full tuition is ${naira(finance.tuitionFee)}). ${tail}`;
       }
       break;

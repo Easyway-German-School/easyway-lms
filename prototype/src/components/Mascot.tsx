@@ -302,7 +302,7 @@ export default function Mascot({
       <motion.div className="relative h-full w-full" animate={float} style={{ transformOrigin: "50% 100%" }}>
         <img
           src={image}
-          alt="Your EasyWay guide"
+          alt="Your Easyway guide"
           className="h-full w-full select-none"
           onError={(event) => {
             // A pose whose photo hasn't been supplied yet (new moods get coded

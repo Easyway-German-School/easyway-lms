@@ -91,7 +91,7 @@ export function usePushNotifications(): PushState {
       const result = await permissionRequest;
       setPermission(result);
       if (result !== "granted") {
-        throw new Error("Notifications were blocked. You can turn them on in Settings > Notifications > EasyWay.");
+        throw new Error("Notifications were blocked. You can turn them on in Settings > Notifications > Easyway.");
       }
 
       const config = await fetch("/api/push/subscribe").then((r) => r.json());
