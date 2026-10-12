@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { verdictKeyLabel } from "@/lib/portal-verdict";
 import BackendMap from "./BackendMap";
 import DiagnosePanel, { type DiagnoseTarget } from "./DiagnosePanel";
-import PatternsPanel from "./PatternsPanel";
+import PatternsPanel, { type AutoHealStats } from "./PatternsPanel";
 import RecoveryPanel from "./RecoveryPanel";
 import RiskRadarPanel from "./RiskRadarPanel";
 import Sparkline from "./Sparkline";
@@ -559,14 +559,21 @@ function ActiveFeed({ onOpen }: { onOpen: (id: string) => void }) {
 
 function AccessPanel({ onDiagnose }: { onDiagnose: (target: NonNullable<DiagnoseTarget>) => void }) {
   const [data, setData] = useState<Overview["access"] | null>(null);
+  const [autoHeal, setAutoHeal] = useState<AutoHealStats | null>(null);
   usePoll(async () => {
     try {
-      const response = await fetch("/api/admin/developer/overview", { cache: "no-store" });
-      if (response.ok) setData((await response.json()).access);
+      const [overviewRes, autoHealRes] = await Promise.all([
+        fetch("/api/admin/developer/overview", { cache: "no-store" }),
+        fetch("/api/admin/developer/auto-heal", { cache: "no-store" }),
+      ]);
+      if (overviewRes.ok) setData((await overviewRes.json()).access);
+      if (autoHealRes.ok) setAutoHeal((await autoHealRes.json()).stats);
     } catch {
       /* keep last */
     }
   }, 15_000);
+
+  const nudged24h = autoHeal ? (autoHeal.last24h.nudged ?? 0) + (autoHeal.last24h.dry_run_nudge ?? 0) : 0;
 
   return (
     <div className="space-y-6">
@@ -578,7 +585,7 @@ function AccessPanel({ onDiagnose }: { onDiagnose: (target: NonNullable<Diagnose
           justify, or it is running on data older than the database by more than a race explains.
         </p>
         {data && (
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="mt-4 grid gap-4 sm:grid-cols-4">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Lock on screen, database says open</p>
               <p className={`mt-1 text-3xl font-bold ${data.showingLockWhileOpen ? "text-red-500" : "text-emerald-500"}`}>{data.showingLockWhileOpen}</p>
@@ -590,6 +597,13 @@ function AccessPanel({ onDiagnose }: { onDiagnose: (target: NonNullable<Diagnose
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Open · locked</p>
               <p className="mt-1 text-3xl font-bold">{data.openCount}<span className="text-base font-medium text-[var(--muted)]"> · {data.lockedCount}</span></p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                Auto-resynced, last 24h{autoHeal?.pattern.dryRun ? " (dry-run)" : ""}
+              </p>
+              <p className="mt-1 text-3xl font-bold">{nudged24h}</p>
+              {autoHeal && !autoHeal.pattern.enabled && <p className="mt-0.5 text-[11px] font-semibold text-amber-600">off — see Patterns</p>}
             </div>
           </div>
         )}
@@ -608,6 +622,15 @@ function AccessPanel({ onDiagnose }: { onDiagnose: (target: NonNullable<Diagnose
 
 function PatternsTab() {
   const [resilience, setResilience] = useState<React.ComponentProps<typeof PatternsPanel>["resilience"]>([]);
+  const [autoHeal, setAutoHeal] = useState<AutoHealStats | null>(null);
+  const loadAutoHeal = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/developer/auto-heal", { cache: "no-store" });
+      if (response.ok) setAutoHeal((await response.json()).stats);
+    } catch {
+      /* keep the last reading */
+    }
+  }, []);
   usePoll(async () => {
     try {
       const response = await fetch("/api/admin/developer/overview", { cache: "no-store" });
@@ -615,8 +638,26 @@ function PatternsTab() {
     } catch {
       /* keep the last reading */
     }
+    await loadAutoHeal();
   }, 10_000);
-  return <PatternsPanel resilience={resilience} />;
+
+  const toggleAutoHeal = useCallback(
+    async (patch: { enabled?: boolean; dryRun?: boolean }) => {
+      try {
+        const response = await fetch("/api/admin/developer/auto-heal", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        if (response.ok) setAutoHeal((await response.json()).stats);
+      } catch {
+        /* the next poll will reconcile */
+      }
+    },
+    [],
+  );
+
+  return <PatternsPanel resilience={resilience} autoHeal={autoHeal} onToggleAutoHeal={toggleAutoHeal} />;
 }
 
 /* ------------------------------------------------------------------------ */
