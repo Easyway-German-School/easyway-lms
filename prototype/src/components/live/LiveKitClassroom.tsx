@@ -765,66 +765,10 @@ export default function LiveKitClassroom({
     });
 
     roomRef.current = room;
-    let urlHost = "";
-    try {
-      urlHost = new URL(url.replace(/^ws/i, "http")).host;
-    } catch {
-      urlHost = "unparseable";
-    }
-    const connectStartedAt = Date.now();
-    // #region agent log
-    fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-      body: JSON.stringify({
-        sessionId: "9fa38c",
-        hypothesisId: "A",
-        location: "LiveKitClassroom.tsx:connect.start",
-        message: "room.connect starting",
-        data: { role, retryKey, urlHost, roomName, publishesVideo: qualitySpec(initialQuality).publishesVideo },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    const onCspViolation = (event: SecurityPolicyViolationEvent) => {
-      fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-        body: JSON.stringify({
-          sessionId: "9fa38c",
-          hypothesisId: "C",
-          location: "LiveKitClassroom.tsx:csp",
-          message: "CSP blocked a live-class request",
-          data: {
-            role,
-            retryKey,
-            urlHost,
-            blockedURI: event.blockedURI,
-            violatedDirective: event.violatedDirective,
-            effectiveDirective: event.effectiveDirective,
-            disposition: event.disposition,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    };
-    document.addEventListener("securitypolicyviolation", onCspViolation);
     const attemptLabelRef = { current: "default" as "default" | "relay" };
     const hangTimer = window.setTimeout(() => {
       if (cancelled || room.state === "connected") return;
       if (attemptLabelRef.current !== "default") return;
-      fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-        body: JSON.stringify({
-          sessionId: "9fa38c",
-          runId: "post-fix",
-          hypothesisId: "A",
-          location: "LiveKitClassroom.tsx:connect.hang",
-          message: "still not connected after 16s — aborting this attempt",
-          data: { role, retryKey, urlHost, roomState: room.state, elapsedMs: Date.now() - connectStartedAt },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
       try {
         room.disconnect();
       } catch {
@@ -841,53 +785,10 @@ export default function LiveKitClassroom({
           : "Still trying. Switch Wi‑Fi ↔ mobile data if this stays.",
       );
     }, 8_000);
-    // #endregion
 
     room
-      .on(RoomEvent.SignalConnected, () => {
-        // #region agent log
-        fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-          body: JSON.stringify({
-            sessionId: "9fa38c",
-            hypothesisId: "A",
-            location: "LiveKitClassroom.tsx:SignalConnected",
-            message: "signaling websocket up, ICE not finished",
-            data: {
-              role,
-              retryKey,
-              elapsedMs: Date.now() - connectStartedAt,
-              roomState: room.state,
-              urlHost,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-      })
       .on(RoomEvent.Connected, () => {
         if (cancelled) return;
-        // #region agent log
-        fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-          body: JSON.stringify({
-            sessionId: "9fa38c",
-            hypothesisId: "A",
-            location: "LiveKitClassroom.tsx:Connected",
-            message: "LiveKit room connected",
-            data: {
-              role,
-              retryKey,
-              elapsedMs: Date.now() - connectStartedAt,
-              roomState: room.state,
-              urlHost,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         // The clock the end screen reports starts here, not at mount: the
         // seconds spent negotiating a connection are not minutes of lesson.
         joinedAtRef.current = Date.now();
@@ -969,6 +870,21 @@ export default function LiveKitClassroom({
       .on(RoomEvent.ActiveSpeakersChanged, bump)
       .on(RoomEvent.LocalTrackPublished, bumpAll)
       .on(RoomEvent.LocalTrackUnpublished, bumpAll)
+      .on(RoomEvent.LocalTrackUnpublished, (publication) => {
+        /**
+         * The browser or OS can end a screen-share track on its own — the
+         * "Stop sharing" bar Chrome puts up, or (per a tutor's report) the
+         * capture dying when the app is backgrounded. Either way LiveKit
+         * unpublishes the track whether or not our own button asked it to,
+         * and without this the `screenSharing` state stays stuck on `true`:
+         * the toolbar still reads "Stop sharing" over a share that has
+         * already ended, so the only way out looks like "restart the whole
+         * screen-sharing process" — tap Stop (which is now a no-op) then
+         * Share again. Syncing state here means the button already reads
+         * "Share screen" the moment this happens, with nothing to restart.
+         */
+        if (publication.source === Track.Source.ScreenShare) setScreenSharing(false);
+      })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!room.canPlaybackAudio))
       .on(RoomEvent.ConnectionQualityChanged, (connectionQuality, participant) => {
         // Only our own link matters for the pill — a classmate's bad network
@@ -1004,85 +920,13 @@ export default function LiveKitClassroom({
         const attempt = attempts[i];
         attemptLabelRef.current = attempt.label;
         setConnectHint(attempt.hint);
-        // #region agent log
-        fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-          body: JSON.stringify({
-            sessionId: "9fa38c",
-            runId: "post-fix",
-            hypothesisId: "A",
-            location: "LiveKitClassroom.tsx:connect.attempt",
-            message: "room.connect attempt",
-            data: {
-              role,
-              retryKey,
-              urlHost,
-              attempt: attempt.label,
-              attemptIndex: i,
-              elapsedMs: Date.now() - connectStartedAt,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         try {
           await room.connect(url, token, attempt.opts);
           lastError = null;
-          // #region agent log
-          fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-            body: JSON.stringify({
-              sessionId: "9fa38c",
-              runId: "post-fix",
-              hypothesisId: "A",
-              location: "LiveKitClassroom.tsx:connect.resolved",
-              message: "room.connect resolved",
-              data: {
-                role,
-                retryKey,
-                urlHost,
-                attempt: attempt.label,
-                elapsedMs: Date.now() - connectStartedAt,
-                roomState: room.state,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           break;
         } catch (connectError) {
           lastError = connectError;
           console.error("LiveKit connect failed", connectError);
-          // #region agent log
-          fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-            body: JSON.stringify({
-              sessionId: "9fa38c",
-              runId: "post-fix",
-              hypothesisId: "A",
-              location: "LiveKitClassroom.tsx:connect.catch",
-              message: "room.connect rejected",
-              data: {
-                role,
-                retryKey,
-                attempt: attempt.label,
-                elapsedMs: Date.now() - connectStartedAt,
-                urlHost,
-                roomState: room.state,
-                errorName: connectError instanceof Error ? connectError.name : typeof connectError,
-                errorMessage: connectError instanceof Error ? connectError.message : String(connectError),
-                errorReason:
-                  connectError && typeof connectError === "object" && "reason" in connectError
-                    ? String((connectError as { reason?: unknown }).reason)
-                    : null,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           if (cancelled) return;
           if (i < attempts.length - 1) {
             try {
@@ -1164,29 +1008,8 @@ export default function LiveKitClassroom({
 
     return () => {
       cancelled = true;
-      // #region agent log
       window.clearTimeout(hangTimer);
       window.clearTimeout(slowTimer);
-      document.removeEventListener("securitypolicyviolation", onCspViolation);
-      fetch("http://127.0.0.1:7524/ingest/173cd525-1936-48b2-bdbb-f19d45dbddf3", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9fa38c" },
-        body: JSON.stringify({
-          sessionId: "9fa38c",
-          hypothesisId: "B",
-          location: "LiveKitClassroom.tsx:connect.cleanup",
-          message: "connect effect cleaning up (possible remount)",
-          data: {
-            role,
-            retryKey,
-            urlHost,
-            roomState: room.state,
-            elapsedMs: Date.now() - connectStartedAt,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       room.disconnect();
       roomRef.current = null;
     };
