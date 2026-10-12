@@ -60,7 +60,7 @@ export default function InstallForNotesMoment() {
         <Mascot mood="presenting" className="mx-auto h-20 w-20" />
         <h2 className="mt-3 text-lg font-bold text-[var(--foreground)]">Notes in your pocket</h2>
         <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-          Install the EasyWay app and your class notes — the ready-made ones and your own — come with you, even with
+          Install the Easyway app and your class notes — the ready-made ones and your own — come with you, even with
           no signal. Add it from your browser menu: <strong>“Add to Home Screen”</strong>.
         </p>
         <div className="mt-5 flex flex-col gap-2">

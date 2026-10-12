@@ -94,7 +94,7 @@ export default function DownloadButton({
       <div className="rounded-2xl border border-[#FF6600]/30 bg-[#FF6600]/10 p-4 text-sm">
         <p className="font-semibold text-[var(--foreground)]">Watch this offline</p>
         <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-          Install the EasyWay app and you can download this class to your phone — it plays with no signal, on the
+          Install the Easyway app and you can download this class to your phone — it plays with no signal, on the
           train, anywhere. Downloads only work inside the app.
         </p>
       </div>

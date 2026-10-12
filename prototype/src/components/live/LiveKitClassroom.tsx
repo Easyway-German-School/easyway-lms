@@ -1722,7 +1722,7 @@ export default function LiveKitClassroom({
       <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] ${CINEMA.tileBg} px-5 py-3 text-white`}>
         <div className="flex min-w-0 items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-mark.png" alt="EasyWay" className="h-9 w-9 shrink-0 rounded-lg object-contain" />
+          <img src="/logo-mark.png" alt="Easyway" className="h-9 w-9 shrink-0 rounded-lg object-contain" />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{displayName}</p>
             <p className="text-xs text-[#9A9690]">

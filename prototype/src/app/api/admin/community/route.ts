@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     // "Lagos · A1 · Morning · September batch" next to "… · October batch".
     const spaces = spaceRows.map((space) => ({
       ...space,
-      label: spaceName(space.branch?.name ?? "EasyWay", space.level, space.sessionSlot, space.batch),
+      label: spaceName(space.branch?.name ?? "Easyway", space.level, space.sessionSlot, space.batch),
     }));
 
     return NextResponse.json({ messages, spaces });

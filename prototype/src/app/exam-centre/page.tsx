@@ -32,7 +32,7 @@ export default async function ExamCentrePage() {
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Examination centre</p>
             <h1 className="mt-2 text-4xl font-bold">Book your German exam</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-              EasyWay is preparing to sit candidates for ÖSD and telc directly, open to anyone — not only enrolled
+              Easyway is preparing to sit candidates for ÖSD and telc directly, open to anyone — not only enrolled
               students.
             </p>
           </div>
@@ -47,7 +47,7 @@ export default async function ExamCentrePage() {
                 <h3 className="font-semibold">Prefer to sit Goethe instead?</h3>
                 <p className="mt-1 text-sm text-[var(--muted)]">
                   Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not
-                  EasyWay — this takes you straight to their official booking page.
+                  Easyway — this takes you straight to their official booking page.
                 </p>
               </div>
               <a

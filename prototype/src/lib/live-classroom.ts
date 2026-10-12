@@ -191,7 +191,7 @@ export function roomDisplayName({
 }): string {
   const slot = String(sessionSlot || "morning");
   const intake = batchTitle(batch);
-  return `${branchName || "EasyWay"} · ${String(level || "A1").toUpperCase()} · ${slot.charAt(0).toUpperCase()}${slot.slice(1)}${intake ? ` · ${intake}` : ""}`;
+  return `${branchName || "Easyway"} · ${String(level || "A1").toUpperCase()} · ${slot.charAt(0).toUpperCase()}${slot.slice(1)}${intake ? ` · ${intake}` : ""}`;
 }
 
 // ---------------------------------------------------------------------------

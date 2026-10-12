@@ -345,7 +345,7 @@ export default function HelpLauncher() {
   const officeName = useMemo(() => {
     const lastStaff = [...messages].reverse().find((m) => !m.mine);
     if (threadTopic === "tutor") return firstNameOf(lastStaff?.authorName, "Your tutor");
-    return firstNameOf(lastStaff?.authorName, "EasyWay Support");
+    return firstNameOf(lastStaff?.authorName, "Easyway Support");
   }, [messages, threadTopic]);
 
   const headerTitle =

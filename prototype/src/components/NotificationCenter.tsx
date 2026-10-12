@@ -394,7 +394,7 @@ export default function NotificationCenter({
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-[var(--foreground)]">Get alerts on your iPhone</p>
                         <p className="mt-0.5 text-[11px] leading-4 text-[var(--muted)]">
-                          iPhone only sends alerts to apps on your Home Screen. Install EasyWay first.
+                          iPhone only sends alerts to apps on your Home Screen. Install Easyway first.
                         </p>
                       </div>
                       <button

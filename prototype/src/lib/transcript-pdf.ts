@@ -176,7 +176,7 @@ export async function buildTranscriptPdf(input: TranscriptPdfInput): Promise<Buf
   const pageCount = doc.getPageCount();
   for (let i = 0; i < pageCount; i += 1) {
     const page = doc.getPage(i);
-    page.drawText(`Page ${i + 1} of ${pageCount} · EasyWay`, {
+    page.drawText(`Page ${i + 1} of ${pageCount} · Easyway`, {
       x: MARGIN,
       y: 28,
       size: 8,

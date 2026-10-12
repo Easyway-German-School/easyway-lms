@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   const result = await sendSms({
     to: phone,
-    message: "EasyWay LMS: this is a test message confirming SMS delivery is working. You can ignore this.",
+    message: "Easyway LMS: this is a test message confirming SMS delivery is working. You can ignore this.",
   });
 
   if (!result.ok) {

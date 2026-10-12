@@ -35,9 +35,15 @@ export default function ResultSheet({ sheet }: { sheet: ResultSheetData }) {
       `}</style>
 
       <header className="mb-6 flex items-start justify-between border-b-2 border-slate-900 pb-4">
-        <div>
-          <p className="text-lg font-bold tracking-tight">EasyWay German Language School</p>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Student result sheet</p>
+        <div className="flex items-center gap-3">
+          {/* Plain <img>, not BrandLogo — this page is printed/exported to PDF,
+              and BrandLogo's probe-then-swap can still be mid-check at the
+              moment window.print() fires. Same reasoning as CertificateDocument. */}
+          <img src="/logo-mark.png" alt="" className="h-12 w-12 shrink-0 object-contain" />
+          <div>
+            <p className="text-lg font-bold tracking-tight">Easyway German Language School</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Student result sheet</p>
+          </div>
         </div>
         <div className="text-right text-xs text-slate-500">
           <p>Generated {fmtDate(sheet.generatedAt)}</p>

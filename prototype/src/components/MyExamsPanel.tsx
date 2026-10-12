@@ -73,7 +73,7 @@ type ExamFilter = "all" | "easyway" | "osd";
 
 const FILTER_LABELS: Record<ExamFilter, string> = {
   all: "All exams",
-  easyway: "EasyWay exams",
+  easyway: "Easyway exams",
   osd: "ÖSD exam",
 };
 
@@ -218,7 +218,7 @@ export default function MyExamsPanel() {
           <div className="min-w-0">
             <h3 className="font-semibold">Prefer to sit Goethe instead?</h3>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not EasyWay —
+              Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not Easyway —
               this takes you straight to their official booking page.
             </p>
           </div>

@@ -38,7 +38,7 @@ export default async function SharedNotesPage({ params }: { params: Promise<{ to
     <div className="min-h-screen bg-[var(--background)] px-6 py-12 text-[var(--foreground)]">
       <div className="mx-auto max-w-2xl space-y-6">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Shared class notes · EasyWay</p>
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Shared class notes · Easyway</p>
           <h1 className="mt-2 text-2xl font-bold">{material?.title ?? "Class notes"}</h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {[
@@ -59,7 +59,7 @@ export default async function SharedNotesPage({ params }: { params: Promise<{ to
           }}
         />
 
-        <p className="pt-4 text-xs text-[var(--muted)]">Shared from an EasyWay German-language class recap.</p>
+        <p className="pt-4 text-xs text-[var(--muted)]">Shared from an Easyway German-language class recap.</p>
       </div>
     </div>
   );

@@ -37,7 +37,7 @@ export default function DownloadNoteButton({
   if (!installed) {
     return (
       <p className="rounded-xl border border-[#FF6600]/30 bg-[#FF6600]/10 px-3 py-2 text-xs text-[var(--muted)]">
-        Install the EasyWay app to keep this on your phone for offline reading.
+        Install the Easyway app to keep this on your phone for offline reading.
       </p>
     );
   }
