@@ -656,7 +656,7 @@ export default function LiveKitClassroom({
    * whole feature is worthless if turning it on is a one-way door.
    */
   const [focusMode, setFocusMode] = useState(false);
-  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | "materials" | null>(null);
+  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | "devices" | "materials" | null>(null);
   /**
    * A quiz the tutor has unlocked for this cohort, or null.
    *
@@ -936,6 +936,7 @@ export default function LiveKitClassroom({
       .on(RoomEvent.ActiveSpeakersChanged, bump)
       .on(RoomEvent.LocalTrackPublished, bumpAll)
       .on(RoomEvent.LocalTrackUnpublished, bumpAll)
+      .on(RoomEvent.ActiveDeviceChanged, bumpAll)
       .on(RoomEvent.LocalTrackUnpublished, (publication) => {
         /**
          * The browser or OS can end a screen-share track on its own — the
@@ -1755,7 +1756,7 @@ export default function LiveKitClassroom({
              * see the "dropped" outcome on the end screen for that honest case.
              */
             <span className="rounded-full bg-[#FF7A1A]/15 px-3 py-1 text-xs font-medium text-[#FFB273]">
-              Reconnecting — you're still in class
+              Reconnecting — you&apos;re still in class
             </span>
           ) : null}
           <button
@@ -2044,7 +2045,7 @@ export default function LiveKitClassroom({
                 panel === "materials" ? "lg:w-96" : "lg:w-80"
               }`}
             >
-              <div className="mb-2 flex items-center gap-1 rounded-xl bg-white/5 p-1">
+              <div className="mb-2 flex flex-wrap items-center gap-1 rounded-xl bg-white/5 p-1">
                 <button
                   onClick={() => setPanel("hands")}
                   className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
@@ -2075,7 +2076,15 @@ export default function LiveKitClassroom({
                     panel === "switch" ? "bg-white/15 text-white" : "text-[#9A9690] hover:text-white"
                   }`}
                 >
-                  Device
+                  Transfer
+                </button>
+                <button
+                  onClick={() => setPanel("devices")}
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+                    panel === "devices" ? "bg-white/15 text-white" : "text-[#9A9690] hover:text-white"
+                  }`}
+                >
+                  A/V devices
                 </button>
                 <button
                   onClick={() => setPanel(null)}
@@ -2105,6 +2114,8 @@ export default function LiveKitClassroom({
                 </div>
               ) : panel === "switch" ? (
                 <SwitchDevicePanel />
+              ) : panel === "devices" && room ? (
+                <DeviceInputPanel room={room} />
               ) : (
                 <ChatPanel chat={interactions.chat} onSend={interactions.sendChat} />
               )}
@@ -2208,6 +2219,16 @@ export default function LiveKitClassroom({
         >
           <DeviceIcon className="h-4 w-4" />
           Switch device
+        </button>
+
+        <button
+          onClick={() => setPanel(panel === "devices" ? null : "devices")}
+          title="Change the camera, microphone, or speaker used in this class."
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            panel === "devices" ? "bg-white/20 text-white" : "bg-white/10 text-white hover:bg-white/20"
+          }`}
+        >
+          <CameraIcon /> Audio &amp; video
         </button>
 
         {role === "tutor" && others.length > 0 ? (
@@ -2388,6 +2409,123 @@ function SwitchDevicePanel() {
         className="w-full rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-60"
       >
         {sent ? "Sent — check your other device" : sending ? "Sending…" : "Send myself a link instead"}
+      </button>
+    </div>
+  );
+}
+
+function DeviceInputPanel({ room }: { room: Room }) {
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selected, setSelected] = useState<Partial<Record<MediaDeviceKind, string>>>({});
+  const [busy, setBusy] = useState<MediaDeviceKind | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const refreshDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setNotice("This browser does not support selecting audio or video devices.");
+      return;
+    }
+    try {
+      const available = await navigator.mediaDevices.enumerateDevices();
+      setDevices(available);
+      setSelected((current) => {
+        const next = { ...current };
+        for (const kind of ["videoinput", "audioinput", "audiooutput"] as const) {
+          const choices = available.filter((device) => device.kind === kind);
+          const active = room.getActiveDevice(kind);
+          if (!choices.some((device) => device.deviceId === next[kind])) {
+            next[kind] =
+              (active && choices.some((device) => device.deviceId === active) ? active : undefined) ??
+              choices[0]?.deviceId;
+          }
+        }
+        return next;
+      });
+    } catch (error) {
+      console.error("Could not list classroom media devices", error);
+      setNotice("Could not list devices. Check your browser permissions and try again.");
+    }
+  }, [room]);
+
+  useEffect(() => {
+    void refreshDevices();
+    const mediaDevices = navigator.mediaDevices;
+    mediaDevices?.addEventListener?.("devicechange", refreshDevices);
+    return () => mediaDevices?.removeEventListener?.("devicechange", refreshDevices);
+  }, [refreshDevices]);
+
+  const changeDevice = useCallback(
+    async (kind: MediaDeviceKind, deviceId: string) => {
+      setSelected((current) => ({ ...current, [kind]: deviceId }));
+      setBusy(kind);
+      setNotice(null);
+      try {
+        const switched = await room.switchActiveDevice(kind, deviceId, true);
+        if (!switched) {
+          setNotice("That device could not be selected. Choose another device and try again.");
+          setSelected((current) => ({ ...current, [kind]: room.getActiveDevice(kind) }));
+          return;
+        }
+        setNotice("Device changed. Your class connection is still active.");
+      } catch (error) {
+        console.error(`Could not switch classroom ${kind}`, error);
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "Could not switch devices. Check that the device is connected and try again.",
+        );
+        setSelected((current) => ({ ...current, [kind]: room.getActiveDevice(kind) }));
+        await refreshDevices();
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refreshDevices, room],
+  );
+
+  const controls = [
+    { kind: "videoinput", title: "Camera" },
+    { kind: "audioinput", title: "Microphone" },
+    { kind: "audiooutput", title: "Speaker" },
+  ] as const;
+
+  return (
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm text-[#C9C5BF]">
+      <p>Choose which camera, microphone, and speaker this class uses. Switching keeps you in the room.</p>
+      {controls.map(({ kind, title }) => {
+        const choices = devices.filter((device) => device.kind === kind);
+        return (
+          <label key={kind} className="block space-y-1.5">
+            <span className="font-semibold text-white">{title}</span>
+            <select
+              aria-label={title}
+              value={selected[kind] ?? ""}
+              disabled={choices.length === 0 || busy !== null}
+              onChange={(event) => void changeDevice(kind, event.target.value)}
+              className="w-full rounded-xl border border-white/15 bg-[#10191A] px-3 py-2.5 text-sm text-white disabled:opacity-60"
+            >
+              {choices.length === 0 ? <option value="">No {title.toLowerCase()} found</option> : null}
+              {choices.map((device, index) => (
+                <option key={device.deviceId || `${kind}-${index}`} value={device.deviceId}>
+                  {device.label || `${title} ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        );
+      })}
+      {busy ? <p role="status">Switching device…</p> : null}
+      {notice ? (
+        <p role="status" className="rounded-xl bg-white/5 px-3 py-2 text-xs leading-5">
+          {notice}
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => void refreshDevices()}
+        className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+      >
+        Refresh devices
       </button>
     </div>
   );
