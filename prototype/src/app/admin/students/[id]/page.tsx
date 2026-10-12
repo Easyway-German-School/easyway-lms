@@ -664,6 +664,7 @@ export default function StudentDossierPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editNotice, setEditNotice] = useState<string | null>(null);
   const [branches, setBranches] = useState<Array<{ id: string; name: string; mode?: string | null }>>([]);
   const [sessionCfg, setSessionCfg] = useState<SessionSettings>(() => defaultSessionSettings());
   const [editForm, setEditForm] = useState({
@@ -818,6 +819,7 @@ export default function StudentDossierPage() {
     if (!id) return;
     setEditBusy(true);
     setEditError(null);
+    setEditNotice(null);
     try {
       const response = await fetch("/api/admin/students", {
         method: "PATCH",
@@ -826,6 +828,17 @@ export default function StudentDossierPage() {
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json?.error || "Could not save these changes");
+      // Pathway changes used to leave the tuition charge priced at whatever
+      // it was before — this is the server confirming it actually re-priced
+      // it, so the admin knows the fee really moved and is not stuck.
+      if (json?.pathwayReprice?.repriced) {
+        const { from, to, level } = json.pathwayReprice;
+        setEditNotice(`${level} tuition re-priced: ₦${Number(from).toLocaleString("en-NG")} → ₦${Number(to).toLocaleString("en-NG")}.`);
+      } else if (json?.pathwayReprice?.reason === "already_paid") {
+        setEditNotice(
+          "Pathway changed, but this level already has a payment allocated against it at the old price — the tuition charge was left as-is for the office to reconcile by hand.",
+        );
+      }
       setEditOpen(false);
       void load(false);
     } catch (saveErr) {
@@ -1389,6 +1402,22 @@ export default function StudentDossierPage() {
               </Link>
               .
             </p>
+          </div>
+        )}
+
+        {/* Pathway-reprice confirmation. Rendered at page level, not inside
+            the Edit panel, because saving a edit closes that panel — a
+            notice shown only inside it would vanish before anyone read it. */}
+        {editNotice && (
+          <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-emerald-300 bg-emerald-50 p-5 text-sm text-emerald-900">
+            <p className="min-w-0">{editNotice}</p>
+            <button
+              type="button"
+              onClick={() => setEditNotice(null)}
+              className="ml-auto text-xs font-semibold text-emerald-700 underline"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 

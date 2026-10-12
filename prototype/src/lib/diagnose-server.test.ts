@@ -8,6 +8,8 @@ const m = vi.hoisted(() => ({
   assignCode: vi.fn(),
   audit: vi.fn(),
   fetch: vi.fn(),
+  accessFromStudent: vi.fn(),
+  ensureCharge: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -24,8 +26,9 @@ vi.mock("@/lib/student-code", () => ({ assignStudentCode: (...a: unknown[]) => m
 vi.mock("@/lib/payment-plans", () => ({ planStatusForStudent: async () => null, planSuppressesLock: () => false }));
 vi.mock("@/lib/student-access", () => ({
   STUDENT_ACCESS_SELECT: {},
-  accessFromStudent: () => ({ hasAccess: true, lockReason: null, totalPaid: 0, tuitionFee: 400_000, requiredDeposit: 240_000, outstanding: 240_000, graceUntil: null, batchLabel: null }),
+  accessFromStudent: (...a: unknown[]) => m.accessFromStudent(...a),
 }));
+vi.mock("@/lib/tuition-charges", () => ({ ensureChargeForLevel: (...a: unknown[]) => m.ensureCharge(...a) }));
 vi.mock("@/lib/guarded-fetch", () => ({
   guardedFetch: (...a: unknown[]) => m.fetch(...a),
   isCircuitOpen: (e: unknown) => (e as Error)?.name === "BreakerOpenError",
@@ -70,6 +73,10 @@ beforeEach(() => {
     world.code = "EW/2026/B1/SEP/A002";
     return world.code;
   });
+  m.accessFromStudent.mockImplementation(() => ({
+    hasAccess: true, lockReason: null, totalPaid: 0, currentLevelPaid: 0, tuitionFee: 400_000, requiredDeposit: 240_000, outstanding: 240_000, graceUntil: null, batchLabel: null,
+  }));
+  m.ensureCharge.mockImplementation(async () => ({ created: true, chargeId: "c1", level: "B1", amount: 400_000 }));
 });
 
 describe("runDiagnosis", () => {
@@ -212,6 +219,55 @@ describe("runRepair — assign_student_code", () => {
     world.code = null;
     m.assignCode.mockResolvedValue(null);
     expect(await runRepair({ studentId: "s1", repairId: "assign_student_code" })).toMatchObject({ ok: false, verified: false });
+  });
+});
+
+describe("runRepair — sync_tuition_charge", () => {
+  // The B1 student has paid ₦400,000 lifetime (enough to cover the ₦400,000
+  // B1 fee) but the ledger credits none of it to B1 — the exact "level
+  // correction skipped ensureChargeForLevel" drift this repair exists for.
+  // `healed` stands in for the real DB: false until ensureChargeForLevel
+  // "runs", so the server's own re-derive-and-verify step sees a real change,
+  // the same way world.payments/world.code do for the other two repairs.
+  const drifted = () => ({
+    hasAccess: false, lockReason: "unpaid_deposit", totalPaid: 400_000, currentLevelPaid: 0,
+    tuitionFee: 400_000, requiredDeposit: 240_000, outstanding: 240_000, graceUntil: null, batchLabel: null,
+  });
+  const settled = () => ({ ...drifted(), hasAccess: true, lockReason: null, currentLevelPaid: 400_000, outstanding: 0 });
+
+  it("raises the missing charge, verifies the finding clears, and audits", async () => {
+    let healed = false;
+    m.accessFromStudent.mockImplementation(() => (healed ? settled() : drifted()));
+    m.ensureCharge.mockImplementation(async () => {
+      healed = true;
+      return { created: true, chargeId: "c1", level: "B1", amount: 400_000 };
+    });
+
+    const outcome = await runRepair({ studentId: "s1", repairId: "sync_tuition_charge" });
+    expect(m.ensureCharge).toHaveBeenCalledTimes(1);
+    expect(m.ensureCharge).toHaveBeenCalledWith({ studentId: "s1", level: "B1", origin: "admin" });
+    expect(outcome).toMatchObject({ ok: true, verified: true });
+    expect(outcome.message).toContain("Raised");
+    expect(m.audit).toHaveBeenCalledTimes(1);
+    expect(m.audit.mock.calls[0][1].summary).toContain("sync_tuition_charge");
+  });
+
+  it("does nothing when the ledger already credits this level (stale click, or someone else fixed it)", async () => {
+    // Default beforeEach fixture is already healthy — nothing for this rule to find.
+    const outcome = await runRepair({ studentId: "s1", repairId: "sync_tuition_charge" });
+    expect(m.ensureCharge).not.toHaveBeenCalled();
+    expect(outcome.message).toMatch(/nothing to do/i);
+  });
+
+  it("reports honestly when the charge could not be raised", async () => {
+    m.accessFromStudent.mockImplementation(drifted);
+    m.ensureCharge.mockResolvedValue(null);
+    const outcome = await runRepair({ studentId: "s1", repairId: "sync_tuition_charge" });
+    expect(outcome).toMatchObject({ ok: false, verified: false });
+  });
+
+  it("names the capability it needs", () => {
+    expect(repairCapability("sync_tuition_charge")).toBe("payments");
   });
 });
 
