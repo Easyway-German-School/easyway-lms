@@ -1701,6 +1701,19 @@ model ClassRecording {
   startedByUserId String?
 
   /**
+   * The Lecturer behind `startedByUserId`, denormalised the same way
+   * branchId/level/sessionSlot are above. This is what lets a student named
+   * onto this tutor (`Student.tutorId` / co-tutors) see the recording on
+   * their shelf even when their own branch/level/sitting never lined up with
+   * the room the class ran in — the same by-name escape hatch
+   * `liveSessionForStudent` uses for live join, mirrored here for recordings.
+   * Null on rows captured before this existed; those keep resolving on
+   * level/branch/slot alone, same as always.
+   */
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  /**
    * Set only for a private one-to-one capture — see class-recorder.ts and
    * live/session/route.ts for why this used to be excluded outright. A
    * private recording's Material is deliberately never given `level`, so it
@@ -2865,6 +2878,7 @@ model Lecturer {
   enrolments         StudentEnrolment[]
   payRate            TutorPayRate?
   payrollPayments    PayrollPayment[]
+  classRecordings    ClassRecording[]
   /// Students shared onto this tutor as an EXTRA teacher. See Student.coTutors.
   coTutoredStudents  StudentCoTutor[]
   /**
