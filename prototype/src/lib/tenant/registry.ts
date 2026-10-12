@@ -393,6 +393,25 @@ export const GLOBAL_MODELS = {
   Incident: "platform-wide problem register; written by sessionless paths, read by the developer console",
 
   /**
+   * The kill switch and audit trail for Mission Control's one automatic
+   * repair (src/lib/auto-heal.ts) — same shape and same reasoning as
+   * Incident: written by a cron job with no tenant in context, read only
+   * through the developer console. AutoHealLog's tenantId is an audit
+   * column, same as Incident's.
+   */
+  AutoHealPattern: "platform-wide kill switch, one row per pattern; configured only from the developer console",
+  AutoHealLog: "platform-wide decision log for auto-heal; written by a sessionless cron job, read by the developer console",
+
+  /**
+   * A self-serve Bearer credential for calling /api/admin/* without a
+   * browser session (src/lib/admin-api-key.ts). It belongs to one admin
+   * User, but the key is looked up by its hash before any tenant is in
+   * context — same trap as PasswordResetToken/SignupToken above. `tenantId`
+   * on the row is an audit column; the real boundary is the admin it names.
+   */
+  AdminApiKey: "looked up by hash, pre-session; tenant is the admin User it was issued to",
+
+  /**
    * Carries its own tenantId already and is the join point for the others.
    */
   User: "tenant column already present; scoped by the extension directly",
