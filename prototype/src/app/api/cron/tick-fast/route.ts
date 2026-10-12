@@ -29,6 +29,13 @@
  * weeks. 15 minutes still beats the 56-minute stall this was built to fix,
  * while leaving enough idle time between runs for the database to actually
  * go back to sleep.
+ *
+ * 2026-10-11: one more job rides along, for the same cost reason above —
+ * Mission Control's auto-resync (lib/auto-heal.ts) needs to run every few
+ * minutes, and adding its own cron entry would wake Neon on a second,
+ * independent schedule and risk the same billing mistake. It is cheap (one
+ * indexed read of a handful of rows) and failure-isolated from the mail
+ * drain below, so it shares this wake-up instead of getting its own.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -45,17 +52,25 @@ async function handleGET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const { drainQueue } = await import("@/lib/email-queue");
-    const result = await drainQueue(50);
-    return NextResponse.json({ ok: true, result });
-  } catch (error) {
-    console.error("tick-fast: email drain failed:", error);
-    return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
-    );
-  }
+  const [emailResult, autoHealResult] = await Promise.allSettled([
+    (async () => {
+      const { drainQueue } = await import("@/lib/email-queue");
+      return drainQueue(50);
+    })(),
+    (async () => {
+      const { runPortalResync } = await import("@/lib/auto-heal");
+      return runPortalResync();
+    })(),
+  ]);
+
+  if (emailResult.status === "rejected") console.error("tick-fast: email drain failed:", emailResult.reason);
+  if (autoHealResult.status === "rejected") console.error("tick-fast: auto-heal failed:", autoHealResult.reason);
+
+  return NextResponse.json({
+    ok: emailResult.status === "fulfilled" && autoHealResult.status === "fulfilled",
+    result: emailResult.status === "fulfilled" ? emailResult.value : { error: String(emailResult.reason) },
+    autoHeal: autoHealResult.status === "fulfilled" ? autoHealResult.value : { error: String(autoHealResult.reason) },
+  });
 }
 
 export const GET = withUnscoped(
