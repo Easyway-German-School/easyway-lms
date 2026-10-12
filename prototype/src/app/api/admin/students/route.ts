@@ -903,6 +903,22 @@ export async function PATCH(request: Request) {
           await closeOpenEnrolment(studentId, { outcome: "completed" });
         }
 
+        /**
+         * An ad-hoc level correction from this form is a level change exactly
+         * like a Promotions-flow advance (promotion.ts always calls this), but
+         * this path never did — so a student bumped to a new level here (the
+         * "returning student starting A2" case, typically) got a `Student.level`
+         * of A2 with NO TuitionCharge ever raised for it. The ledger
+         * (src/lib/finance/ledger.ts) then has nothing to match their level
+         * against, so any A2 money reads as paid toward nothing: the portal
+         * locks them out for "unpaid tuition" no matter how much they paid, and
+         * the office sees them as a correctly-paid, settled student. Idempotent
+         * — a level that already has a charge is a no-op (see ensureChargeForLevel).
+         */
+        if (levelChanged) {
+          await ensureChargeForLevel({ studentId, level: level || student.level, origin: "admin" });
+        }
+
         if (levelChanged || leavingTerminal) {
           const effectiveAdmission = (updateStudent.admission ?? student.admission ?? {}) as Record<string, unknown>;
           await openEnrolment({

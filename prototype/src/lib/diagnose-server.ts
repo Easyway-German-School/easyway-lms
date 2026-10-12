@@ -23,6 +23,7 @@ import type { Capability } from "@/lib/admin-roles";
 import { hasProfilePhoto } from "@/lib/access";
 import {
   diagnose,
+  naira,
   toPaystackTx,
   type Diagnosis,
   type Facts,
@@ -38,6 +39,7 @@ import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
 import { assignStudentCode } from "@/lib/student-code";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
 
 // ---------------------------------------------------------------------------
 // Finding the student
@@ -201,6 +203,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       hasAccess: access.hasAccess,
       lockReason: access.lockReason,
       totalPaid: access.totalPaid,
+      currentLevelPaid: access.currentLevelPaid,
       tuitionFee: access.tuitionFee,
       requiredDeposit: access.requiredDeposit,
       outstanding: access.outstanding,
@@ -316,6 +319,23 @@ const REPAIRS: Record<RepairId, RepairDef> = {
       return code ? { ok: true, message: `Issued student ID ${code}.` } : { ok: false, message: "Could not allocate a free student ID after several tries. Nothing was changed." };
     },
     resolved: (diagnosis) => !diagnosis.findings.some((f) => f.rule === "missing-student-code"),
+  },
+
+  sync_tuition_charge: {
+    needs: "payments",
+    needsPaystack: false,
+    stillApplies: (finding) => finding.rule === "missing-level-charge",
+    async act(facts) {
+      const result = await ensureChargeForLevel({ studentId: facts.student.id, level: facts.student.level, origin: "admin" });
+      if (!result) return { ok: false, message: "Could not raise the tuition charge — the student record could not be read." };
+      return {
+        ok: true,
+        message: result.created
+          ? `Raised a ${facts.student.level} tuition charge of ${naira(result.amount)}. The ledger will now credit their existing payments against it.`
+          : `${facts.student.level} already had a tuition charge of ${naira(result.amount)} — nothing to change there.`,
+      };
+    },
+    resolved: (diagnosis) => !diagnosis.findings.some((f) => f.rule === "missing-level-charge"),
   },
 };
 

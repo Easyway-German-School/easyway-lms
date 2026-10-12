@@ -186,6 +186,15 @@ export const TENANT_OWNED_MODELS = [
    * instead.
    */
   "ApiKey",
+  /**
+   * The admin-facing twin of ApiKey above — a credential that borrows its
+   * creating admin's own identity rather than a third party's scoped slice.
+   * Tenant-owned for the same reason: one school's admin must never list or
+   * revoke another school's keys. The lookup by hash in resolveAdminApiKey()
+   * is the one query that runs on the raw client, same exception as
+   * resolveApiKey() above and for the same reason.
+   */
+  "AdminApiKey",
   "IdempotencyRecord",
 
   /**
@@ -393,23 +402,22 @@ export const GLOBAL_MODELS = {
   Incident: "platform-wide problem register; written by sessionless paths, read by the developer console",
 
   /**
-   * The kill switch and audit trail for Mission Control's one automatic
-   * repair (src/lib/auto-heal.ts) — same shape and same reasoning as
-   * Incident: written by a cron job with no tenant in context, read only
-   * through the developer console. AutoHealLog's tenantId is an audit
-   * column, same as Incident's.
+   * The kill switch for one self-healing pattern (src/lib/auto-heal.ts),
+   * keyed by a pattern name ("portal-witness-resync"), not by tenant — there
+   * is one on/off/dry-run setting per pattern, platform-wide, same as every
+   * other developer-console toggle.
    */
-  AutoHealPattern: "platform-wide kill switch, one row per pattern; configured only from the developer console",
-  AutoHealLog: "platform-wide decision log for auto-heal; written by a sessionless cron job, read by the developer console",
+  AutoHealPattern: "one global on/off/dry-run switch per self-healing pattern, not per tenant",
 
   /**
-   * A self-serve Bearer credential for calling /api/admin/* without a
-   * browser session (src/lib/admin-api-key.ts). It belongs to one admin
-   * User, but the key is looked up by its hash before any tenant is in
-   * context — same trap as PasswordResetToken/SignupToken above. `tenantId`
-   * on the row is an audit column; the real boundary is the admin it names.
+   * The decision log behind AutoHealPattern: written by a cron job with no
+   * session in context (same sessionless-writer shape as Incident above), and
+   * deliberately not a hard relation to Student/tenant (see the model doc in
+   * schema.prisma) so a derived log row can never block on, or be cascaded
+   * by, the record it is about. `tenantId` on the row is an audit column,
+   * read only through the developer console's Patterns tab.
    */
-  AdminApiKey: "looked up by hash, pre-session; tenant is the admin User it was issued to",
+  AutoHealLog: "self-heal decision log; written by cron with no tenant in session, read by the developer console",
 
   /**
    * Carries its own tenantId already and is the join point for the others.

@@ -177,6 +177,21 @@ export type StudentAccess = {
   /** True once anything at all has been paid — the registration fee. */
   registrationPaid: boolean;
   totalPaid: number;
+  /**
+   * What the LEDGER actually credits to the student's CURRENT level — not the
+   * raw lifetime sum. With a ledger this is the current-level charge's FIFO
+   * allocation (so it is 0 when every charge the student has is for a level
+   * other than the one they are in now, and never counts old arrears as if
+   * they paid for today's level); without one it is the raw total, exactly as
+   * before. Anything that wants to say "this student has settled their
+   * CURRENT level" — tuition-offer's "paid in full" screen, a certificate,
+   * an admin summary — must compare against THIS, not `totalPaid`. Comparing
+   * `totalPaid` (lifetime, every level) against `tuitionFee` (this level
+   * only) is exactly the bug that let a student with old, unsettled arrears
+   * see "Tuition paid in full — certificate issued clean" while the portal
+   * itself, reading the same ledger correctly, kept them locked out.
+   */
+  currentLevelPaid: number;
   tuitionFee: number;
   requiredDeposit: number;
   /** What is still owed before classes open. */
@@ -418,6 +433,7 @@ export function deriveStudentAccess({
     depositCleared: depositPaid,
     registrationPaid: paid > 0,
     totalPaid: paid,
+    currentLevelPaid: towardDeposit,
     tuitionFee: fee,
     requiredDeposit: currentLevelDeposit,
     outstanding: outstandingDeposit,
