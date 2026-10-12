@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { assignLead, updateLeadStage } from "@/lib/growth/leads";
+import { importLeadsFromCsv } from "@/lib/leads";
 
 export const dynamic = "force-dynamic";
 
@@ -28,25 +29,63 @@ export async function GET(req: NextRequest) {
     include: {
       branch: { select: { name: true } },
       assignedTo: { select: { id: true, name: true, email: true } },
+      // Claude's read of this lead's notes, if the AI switch is on and one
+      // has ever run — see src/lib/ai.ts's analyzeLeadSignal. Most recent
+      // only; an older read is superseded, not shown alongside it.
+      activities: { where: { type: "ai_signal" }, orderBy: { createdAt: "desc" }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
 
   return NextResponse.json({
-    leads: leads.map((l) => ({
-      id: l.id,
-      name: l.name,
-      email: l.email,
-      phone: l.phone,
-      branchName: l.branch?.name ?? null,
-      interestedLevel: l.interestedLevel,
-      source: l.source,
-      status: l.status,
-      assignedTo: l.assignedTo,
-      createdAt: l.createdAt,
-    })),
+    leads: leads.map((l) => {
+      const signalPayload = l.activities[0]?.payload as Record<string, unknown> | undefined;
+      return {
+        id: l.id,
+        name: l.name,
+        email: l.email,
+        phone: l.phone,
+        branchName: l.branch?.name ?? null,
+        interestedLevel: l.interestedLevel,
+        source: l.source,
+        status: l.status,
+        assignedTo: l.assignedTo,
+        createdAt: l.createdAt,
+        aiSignal: signalPayload
+          ? {
+              urgency: signalPayload.urgency,
+              objection: signalPayload.objection,
+              buyingSignal: signalPayload.buyingSignal,
+              summary: signalPayload.summary,
+            }
+          : null,
+      };
+    }),
   });
+}
+
+/**
+ * POST — paste or upload the Google Sheet. Every row goes through the same
+ * captureLead() the public enquiry form uses, which is also what triggers
+ * auto-assignment and scoring (src/lib/growth/leads.ts's
+ * autoAssignNewLead) — a sheet uploaded here is not a separate pile of
+ * data somebody has to work by hand; by the time this returns, every row
+ * that could be assigned already has a rep and a ranked place in their
+ * queue, exactly like a lead that came in one at a time.
+ */
+export async function POST(req: NextRequest) {
+  const gate = await requireCapability("growth");
+  if (!gate.ok) return gate.response;
+
+  const body = await req.json().catch(() => null);
+  const { csv } = (body || {}) as Record<string, unknown>;
+  if (typeof csv !== "string" || !csv.trim()) {
+    return NextResponse.json({ error: "Paste or upload CSV content first" }, { status: 400 });
+  }
+
+  const result = await importLeadsFromCsv(csv, { source: "csv_import" });
+  return NextResponse.json(result);
 }
 
 /**

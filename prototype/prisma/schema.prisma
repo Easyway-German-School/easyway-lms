@@ -478,6 +478,41 @@ model ApiKey {
   @@index([tenantId, revokedAt])
 }
 
+/// A self-issued credential for calling the ADMIN api (/api/admin/*) without a
+/// browser session — the opposite direction from ApiKey above, which is a
+/// third party calling in. This one borrows a real admin account's identity:
+/// requireCapability() (src/lib/admin-roles.ts) resolves it to that user's
+/// tenant and capabilities, then narrows to whatever `capabilities` this key
+/// was issued with. Only ever checked when ADMIN_API_KEYS_ENABLED=true, which
+/// is set in .env.local and deliberately never in a deployed environment.
+model AdminApiKey {
+  id       String  @id @default(cuid())
+  userId   String
+  tenantId String?
+
+  /// What the admin who created it calls it. Shown in the UI, never used for auth.
+  name String
+
+  /// The non-secret half — `eak_a1b2c3d4`. Safe to log and to show in the list.
+  prefix String @unique
+
+  /// sha256 of the whole key. The secret half exists once, in the response
+  /// that created it, exactly like ApiKey.keyHash above.
+  tokenHash String @unique
+
+  /// Comma-separated Capability values (see admin-roles.ts), capped at
+  /// whatever the underlying user already has at request time.
+  capabilities String
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tenantId])
+}
+
 /// The answer we already gave to a request the partner is repeating.
 ///
 /// Networks time out after the work is done. Without this, a partner's retry
@@ -6882,6 +6917,50 @@ model AccessSnapshot {
   @@index([tenantId])
 }
 
+/**
+ * THE ONE FULLY-AUTOMATIC REPAIR, and the kill switch for it.
+ *
+ * Every repair in diagnose-server.ts needs a human to click, because it can
+ * mutate money or identity. This table gates the one pattern that does not —
+ * see lib/auto-heal.ts for what it actually does and why it is safe. One row
+ * per pattern key; `enabled: false` or `dryRun: true` stops it cold with no
+ * redeploy, which is the whole point of a kill switch living in the database
+ * instead of in code.
+ */
+model AutoHealPattern {
+  key         String   @id
+  enabled     Boolean  @default(true)
+  /// true: decide and log, but never actually act (no push sent). The safe
+  /// way to watch a new pattern run for real before it touches a student.
+  dryRun      Boolean  @default(true)
+  /// A pattern that is somehow matching far more than usual stops itself
+  /// rather than run away — see lib/auto-heal.ts's rate check.
+  maxPerHour  Int      @default(30)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+/**
+ * The record of every decision AutoHealPattern's engine made, acted on or
+ * not. This is what "learns from patterns" means here: not a model, a real
+ * count of what happened, read live by the Patterns tab. Never throws (same
+ * discipline as incidents.ts) and is deliberately NOT keyed to require a
+ * student/tenant relation — a derived record must not block on, or be
+ * cascaded by, anything that happens to the row it is about.
+ */
+model AutoHealLog {
+  id        String   @id @default(cuid())
+  pattern   String
+  /// skipped_fresh | nudged | dry_run_nudge | cooldown | rate_limited | expired
+  action    String
+  studentId String?
+  tenantId  String?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([pattern, createdAt])
+  @@index([pattern, studentId, action, createdAt])
+}
 
 /**
  * CAMPUS — the student-facing "who is here" world. See src/lib/campus.ts for

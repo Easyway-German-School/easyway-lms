@@ -72,6 +72,8 @@ export const KIND = {
   influencerHelpRequest: "influencer.help_request",
   /** A new high/critical incident appeared in Mission Control. */
   missionControlIncident: "mission_control.incident",
+  /** Mission Control's auto-heal: this student's screen stopped checking in while stale; a nudge to reopen the app. See src/lib/auto-heal.ts. */
+  portalResync: "portal.resync",
   /** A student asked the office for help, or wrote back on a thread. */
   supportTicket: "support.ticket",
   /** The office answered. This is the one the student is waiting on. */

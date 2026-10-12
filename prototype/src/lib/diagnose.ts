@@ -81,6 +81,13 @@ export type Facts = {
     hasAccess: boolean;
     lockReason: string | null;
     totalPaid: number;
+    /**
+     * What the ledger actually credits to the CURRENT level (see
+     * StudentAccess.currentLevelPaid) — optional only so older call sites /
+     * fixtures that predate this field still type-check; every real caller
+     * now supplies it.
+     */
+    currentLevelPaid?: number;
     tuitionFee: number;
     requiredDeposit: number;
     outstanding: number;
@@ -102,7 +109,7 @@ export type Facts = {
 
 export type Severity = "problem" | "warning" | "info";
 
-export type RepairId = "record_paystack_payment" | "assign_student_code";
+export type RepairId = "record_paystack_payment" | "assign_student_code" | "sync_tuition_charge";
 
 export type RepairOffer = {
   id: RepairId;
@@ -135,7 +142,7 @@ export type Diagnosis = {
   ruleErrors: Array<{ rule: string; error: string }>;
 };
 
-const naira = (n: number) => `₦${Math.round(n).toLocaleString("en-NG")}`;
+export const naira = (n: number) => `₦${Math.round(n).toLocaleString("en-NG")}`;
 const kobo = (n: number) => naira(n / 100);
 const when = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "never");
 
@@ -255,6 +262,66 @@ const rulePortalLocked: Rule = {
   },
 };
 
+/**
+ * THE "PAID IN FULL BUT LOCKED" DRIFT.
+ *
+ * A student's CURRENT level has no TuitionCharge the ledger can match — most
+ * often because `Student.level` was changed somewhere that never calls
+ * `ensureChargeForLevel` (an ad-hoc level correction, a returning student
+ * re-added by hand). The ledger then has nowhere to allocate their money for
+ * this level: it reads as 0 paid toward it, however much they actually sent,
+ * and src/lib/finance/ledger.ts's FIFO logic faithfully reports the fee as
+ * outstanding. The portal locks them out; the checkout screen (once it also
+ * reads the ledger — see access.ts's `currentLevelPaid`) stops lying about
+ * being settled, but nobody is actually better off until the missing charge
+ * is raised. That is this repair: it does not move any money, it only makes
+ * sure the debit side of the ledger exists so the credit side (their real
+ * payments) has somewhere to land.
+ */
+const ruleMissingLevelCharge: Rule = {
+  id: "missing-level-charge",
+  run(facts) {
+    const { access } = facts;
+    if (access.currentLevelPaid === undefined) return null;
+    if (access.tuitionFee <= 0) return null;
+    // They have, somewhere on their record, at least as much money as this
+    // level costs — but the ledger has not credited this level with it.
+    if (access.totalPaid < access.tuitionFee) return null;
+    if (access.currentLevelPaid >= access.tuitionFee) return null;
+
+    return {
+      rule: "missing-level-charge",
+      severity: "problem",
+      title: `${facts.student.level} has no priced tuition charge the ledger can credit`,
+      detail:
+        `This student has paid ${naira(access.totalPaid)} in total — enough to cover ${facts.student.level}'s ` +
+        `${naira(access.tuitionFee)} fee — but the ledger shows only ${naira(access.currentLevelPaid)} allocated to ` +
+        `${facts.student.level} itself, usually because no TuitionCharge row was ever raised for this level (a level ` +
+        "correction made outside Promotions, or a returning student re-added by hand). The portal locks them out for " +
+        "unpaid tuition on a level they have, in reality, already paid for.",
+      evidence: [
+        { label: "Current level", value: facts.student.level },
+        { label: "Paid in total", value: naira(access.totalPaid) },
+        { label: `Credited to ${facts.student.level}`, value: naira(access.currentLevelPaid) },
+        { label: `${facts.student.level} tuition fee`, value: naira(access.tuitionFee) },
+        { label: "Portal", value: access.hasAccess ? "open" : `locked (${access.lockReason ?? "unknown"})` },
+      ],
+      offers: [
+        {
+          id: "sync_tuition_charge",
+          label: `Raise the missing ${facts.student.level} tuition charge`,
+          preview:
+            `Make sure a priced TuitionCharge exists for ${facts.student.level} at this student's current fee, the same ` +
+            "way signup, promotion and a recorded payment already would. No money moves and nothing already on file is " +
+            "rewritten — this only gives their existing payments a row to be credited against.",
+          needs: "payments" as Capability,
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
 const ruleMissingCode: Rule = {
   id: "missing-student-code",
   run(facts) {
@@ -334,7 +401,14 @@ const ruleStaleScreen: Rule = {
 };
 
 /** The order is the order findings are computed in; severity decides display order. */
-export const RULES: Rule[] = [ruleUnrecordedPayment, ruleTenantMismatch, ruleStaleScreen, ruleMissingCode, rulePortalLocked];
+export const RULES: Rule[] = [
+  ruleUnrecordedPayment,
+  ruleTenantMismatch,
+  ruleStaleScreen,
+  ruleMissingLevelCharge,
+  ruleMissingCode,
+  rulePortalLocked,
+];
 
 const SEVERITY_RANK: Record<Severity, number> = { problem: 0, warning: 1, info: 2 };
 

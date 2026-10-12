@@ -6,6 +6,13 @@ type Snapshot =
   | { kind: "breaker"; name: string; state: "closed" | "open" | "half-open"; consecutiveFailures: number; rejected: number; lastError: string | null }
   | { kind: "bulkhead"; name: string; active: number; queued: number; maxConcurrent: number; maxQueue: number; rejected: number };
 
+export type AutoHealStats = {
+  pattern: { key: string; enabled: boolean; dryRun: boolean; maxPerHour: number; updatedAt: string };
+  last24h: Partial<Record<string, number>>;
+  last7d: Partial<Record<string, number>>;
+  lastRunAt: string | null;
+} | null;
+
 const card = "min-w-0 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm";
 
 type Status = "here" | "new" | "next";
@@ -16,7 +23,7 @@ const STATUS: Record<Status, { label: string; tone: string }> = {
 };
 
 /* ---------------------------------------------------------------------------
- * The five patterns. Each says the problem, the idea, where it lives in THIS
+ * The patterns. Each says the problem, the idea, where it lives in THIS
  * codebase (real paths — open them and read), and what is honestly still missing.
  * ------------------------------------------------------------------------- */
 
@@ -103,6 +110,25 @@ const PATTERNS: Array<{
     gap: "Lane timings are only in the tick's response (Vercel's cron log): a job that times out becomes an incident here, but nothing stores how close each lane runs to its budget, so you cannot see one creeping toward the limit before it fails. A small tick-run table would fix that. And remember what a timeout is: it stops the tick WAITING for a job, not the job — heavy work should also carry its own way to stop (an abort signal), as the AI and Paystack calls now do.",
     live: "bulkhead",
   },
+  {
+    id: "auto-heal",
+    number: "06",
+    name: "Self-healing (the one automatic repair)",
+    problem:
+      "Access drift — a screen showing a lock the database no longer justifies — mostly fixes itself: a locked student's own browser re-checks every 30 seconds until it agrees (useStudentAccess.ts). What is left after that window is a screen that stopped checking in at all, because the tab closed. A human watching a dashboard for that is watching paint dry.",
+    idea:
+      "Detect still goes through the same pipeline as every other incident. Diagnose and propose still happen first — nothing acts on a row younger than the self-heal window. Only the APPROVE step is automatic here, and only because there is nothing left to approve that could go wrong: this pattern can never write to a student's access state, only nudge them to reopen the app. Every decision — nudged, skipped, expired, rate-limited — is logged, so the numbers below are real counts, not a guess.",
+    status: "new",
+    where: [
+      { file: "src/lib/auto-heal.ts", note: "The engine: re-derives the drift fresh each run, never touches AccessSnapshot, rate-caps and cools down per student, logs every decision." },
+      { file: "src/app/api/cron/tick-fast/route.ts", note: "Runs every ~15 min, piggybacking the mail-queue cron's wake-up rather than adding a second one (same Neon cost lesson as Bulkhead's cron lanes)." },
+      { file: "src/app/api/admin/developer/auto-heal/route.ts", note: "The kill switch below — GET for stats, PATCH to flip enabled/dryRun. Behind `security`, same as every other developer-console route." },
+      { file: "prisma/schema.prisma → AutoHealPattern, AutoHealLog", note: "The switch and the memory. A DB-backed toggle survives a redeploy; a code-only flag would not." },
+    ],
+    gap:
+      "Only one pattern is whitelisted (portal-witness-resync) — on purpose. diagnose-server.ts's two repairs stay human-approved because they touch money or identity; a wrong guess there is expensive in a way a push notification never is. Extending auto-heal to a new kind of incident means writing a new, equally narrow, equally reasoned case — never a generic \"try something\" fallback.",
+    live: "auto-heal",
+  },
 ];
 
 const REQUEST_PATH: Array<{ step: string; file: string; detail: string }> = [
@@ -145,7 +171,68 @@ function Live({ items }: { items: Snapshot[] }) {
   );
 }
 
-export default function PatternsPanel({ resilience }: { resilience: Snapshot[] }) {
+const ACTION_LABEL: Record<string, string> = {
+  nudged: "nudged",
+  dry_run_nudge: "would nudge (dry-run)",
+  skipped_fresh: "self-healing (skipped)",
+  cooldown: "already nudged today",
+  rate_limited: "rate-limited",
+  expired: "abandoned (expired)",
+};
+
+function ago(iso: string | null): string {
+  if (!iso) return "never run yet";
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
+}
+
+function AutoHealLive({ stats, onToggle }: { stats: AutoHealStats; onToggle: (patch: { enabled?: boolean; dryRun?: boolean }) => void }) {
+  if (!stats) return <p className="text-xs text-[var(--muted)]">No reading yet — the pattern has not run, or the migration has not been applied.</p>;
+  const { pattern, last24h, last7d } = stats;
+  const row = (counts: Partial<Record<string, number>>) =>
+    Object.entries(ACTION_LABEL)
+      .filter(([key]) => counts[key])
+      .map(([key, label]) => `${counts[key]} ${label}`)
+      .join(" · ") || "nothing yet";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onToggle({ enabled: !pattern.enabled })}
+          className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${pattern.enabled ? "bg-emerald-500/15 text-emerald-600" : "bg-slate-400/15 text-slate-500"}`}
+        >
+          {pattern.enabled ? "On — click to turn off" : "Off — click to turn on"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggle({ dryRun: !pattern.dryRun })}
+          className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${pattern.dryRun ? "bg-amber-500/15 text-amber-600" : "bg-blue-500/15 text-blue-500"}`}
+        >
+          {pattern.dryRun ? "Dry-run — click to send real pushes" : "Live — sending real pushes"}
+        </button>
+        <span className="text-[11px] text-[var(--muted)]">max {pattern.maxPerHour}/hour · last run {ago(stats.lastRunAt)}</span>
+      </div>
+      <div className="text-xs">
+        <p><span className="font-bold">Last 24h:</span> <span className="text-[var(--muted)]">{row(last24h)}</span></p>
+        <p className="mt-1"><span className="font-bold">Last 7d:</span> <span className="text-[var(--muted)]">{row(last7d)}</span></p>
+      </div>
+    </div>
+  );
+}
+
+export default function PatternsPanel({
+  resilience,
+  autoHeal = null,
+  onToggleAutoHeal,
+}: {
+  resilience: Snapshot[];
+  autoHeal?: AutoHealStats;
+  onToggleAutoHeal?: (patch: { enabled?: boolean; dryRun?: boolean }) => void;
+}) {
   const [open, setOpen] = useState<string | null>("breaker");
 
   return (
@@ -153,7 +240,7 @@ export default function PatternsPanel({ resilience }: { resilience: Snapshot[] }
       <section className={card}>
         <h2 className="text-lg font-bold">Build systems that survive reality</h2>
         <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-          Scalability is not only handling more traffic — it is handling failure gracefully. Below are five patterns for that, the
+          Scalability is not only handling more traffic — it is handling failure gracefully. Below are patterns for that, the
           way they show up in <em>this</em> system: which are already here, which this console added, and the honest gaps. Open the
           files named next to each; reading real code beats reading about it.
         </p>
@@ -214,12 +301,17 @@ export default function PatternsPanel({ resilience }: { resilience: Snapshot[] }
                       ))}
                     </ul>
                   </div>
-                  {p.live && (
+                  {p.live === "auto-heal" ? (
+                    <div className="rounded-2xl border border-[var(--border)] p-3">
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Live · across the whole platform</p>
+                      <AutoHealLive stats={autoHeal} onToggle={(patch) => onToggleAutoHeal?.(patch)} />
+                    </div>
+                  ) : p.live ? (
                     <div className="rounded-2xl border border-[var(--border)] p-3">
                       <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Live · this server instance only</p>
                       <Live items={items} />
                     </div>
-                  )}
+                  ) : null}
                   <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3">
                     <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600">The honest gap</p>
                     <p className="mt-1 text-xs">{p.gap}</p>

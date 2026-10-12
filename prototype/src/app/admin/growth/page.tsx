@@ -13,6 +13,7 @@ import {
   CheckIcon,
   PlusIcon,
   UsersIcon,
+  UploadIcon,
 } from "@/components/icons";
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,8 @@ type Task = {
   lead: { id: string; name: string; email: string; phone: string | null; status: string } | null;
 };
 
+type AiSignal = { urgency: string; objection: string | null; buyingSignal: string; summary: string };
+
 type Lead = {
   id: string;
   name: string;
@@ -39,6 +42,7 @@ type Lead = {
   status: string;
   assignedTo: { id: string; name: string | null; email: string } | null;
   createdAt: string;
+  aiSignal: AiSignal | null;
 };
 
 type CommissionEntry = {
@@ -183,6 +187,11 @@ export default function GrowthDeskPage() {
   const [sourceLearning, setSourceLearning] = useState<SourceLearning[]>([]);
   const [repLearning, setRepLearning] = useState<RepLearning[]>([]);
   const [leadScope, setLeadScope] = useState<"mine" | "team">("mine");
+  // Null means "not the super admin, or not loaded yet" — the toggle card
+  // simply does not render. Fetched separately from the main Promise.all
+  // because a 403 here is the EXPECTED, ordinary case for almost every
+  // viewer, not a load failure the page should show an error for.
+  const [aiSettings, setAiSettings] = useState<{ enabled: boolean; keyConfigured: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -237,6 +246,21 @@ export default function GrowthDeskPage() {
       active = false;
     };
   }, [leadScope, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/growth/ai-settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (active && body && !body.error) setAiSettings({ enabled: body.enabled, keyConfigured: body.keyConfigured });
+      })
+      .catch(() => {
+        /* Not the super admin — the card just stays hidden. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
 
   const refresh = (message?: string) => {
     setError("");
@@ -353,9 +377,36 @@ export default function GrowthDeskPage() {
               if (!res.ok) return setError(body.error || "Could not save that note.");
               setNotice("Note saved to the lead's history.");
             }}
+            onImport={async (csv) => {
+              const res = await fetch("/api/admin/growth/leads", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ csv }),
+              });
+              const body = await res.json();
+              if (!res.ok) throw new Error(body.error || "Import failed");
+              refresh(`Imported ${body.created} new lead${body.created === 1 ? "" : "s"}, updated ${body.updated}${body.skipped?.length ? `, skipped ${body.skipped.length}` : ""} — scored and assigned automatically.`);
+              return body;
+            }}
           />
         ) : tab === "team" ? (
-          <TeamTab reps={teamStats} sourceLearning={sourceLearning} repLearning={repLearning} />
+          <TeamTab
+            reps={teamStats}
+            sourceLearning={sourceLearning}
+            repLearning={repLearning}
+            aiSettings={aiSettings}
+            onToggleAi={async (enabled) => {
+              const res = await fetch("/api/admin/growth/ai-settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not change that setting.");
+              setAiSettings({ enabled: body.enabled, keyConfigured: body.keyConfigured });
+              setNotice(enabled ? "Growth Desk AI turned on." : "Growth Desk AI turned off.");
+            }}
+          />
         ) : tab === "partners" ? (
           <PartnersTab
             partners={partners}
@@ -562,36 +613,101 @@ function PipelineTab({
   onScopeChange,
   onStage,
   onNote,
+  onImport,
 }: {
   leads: Lead[];
   scope: "mine" | "team";
   onScopeChange: (scope: "mine" | "team") => void;
   onStage: (leadId: string, status: string) => void;
   onNote: (leadId: string, note: string) => void;
+  onImport: (csv: string) => Promise<{ created: number; updated: number; skipped: Array<{ row: number; reason: string }> }>;
 }) {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [showImport, setShowImport] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    file.text().then(setCsv);
+  }
+
+  async function runImport() {
+    if (!csv.trim() || importing) return;
+    setImporting(true);
+    setImportError("");
+    try {
+      await onImport(csv);
+      setCsv("");
+      setShowImport(false);
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-bold">Pipeline</h2>
-        <div className="flex rounded-xl border border-[var(--border)] p-1 text-sm font-semibold">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => onScopeChange("mine")}
-            className={`rounded-lg px-3 py-1.5 ${scope === "mine" ? "bg-[var(--accent)] text-white" : ""}`}
+            onClick={() => setShowImport((s) => !s)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border)] px-3 py-1.5 text-sm font-semibold hover:bg-[var(--surface-alt)]"
           >
-            Mine
+            <UploadIcon className="h-4 w-4" />
+            Import sheet
           </button>
-          <button
-            type="button"
-            onClick={() => onScopeChange("team")}
-            className={`rounded-lg px-3 py-1.5 ${scope === "team" ? "bg-[var(--accent)] text-white" : ""}`}
-          >
-            Team
-          </button>
+          <div className="flex rounded-xl border border-[var(--border)] p-1 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => onScopeChange("mine")}
+              className={`rounded-lg px-3 py-1.5 ${scope === "mine" ? "bg-[var(--accent)] text-white" : ""}`}
+            >
+              Mine
+            </button>
+            <button
+              type="button"
+              onClick={() => onScopeChange("team")}
+              className={`rounded-lg px-3 py-1.5 ${scope === "team" ? "bg-[var(--accent)] text-white" : ""}`}
+            >
+              Team
+            </button>
+          </div>
         </div>
       </div>
+
+      {showImport && (
+        <div className="space-y-2.5 rounded-xl bg-[var(--surface-alt)] p-4">
+          <p className="text-sm text-[var(--muted)]">
+            Bring in your Google Sheet directly — paste it below or upload the CSV. A <strong>name</strong> and{" "}
+            <strong>email</strong> column are required; phone, level, session and notes are picked up too if
+            they're there. Every row is scored and assigned the same way a lead coming in one at a time is —
+            nothing to sort by hand afterward.
+          </p>
+          {importError && <p className="rounded-lg bg-red-50 p-2 text-xs font-semibold text-red-700">{importError}</p>}
+          <input type="file" accept=".csv,text/csv" onChange={handleFile} className="text-sm" />
+          <textarea
+            value={csv}
+            onChange={(e) => setCsv(e.target.value)}
+            rows={5}
+            placeholder="name,email,phone,level,session,notes"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => void runImport()}
+            disabled={!csv.trim() || importing}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {importing ? "Importing…" : "Import"}
+          </button>
+        </div>
+      )}
 
       {leads.length === 0 ? (
         <Empty>No leads in this view yet.</Empty>
@@ -606,6 +722,14 @@ function PipelineTab({
                     {lead.email} · {lead.branchName ?? "no branch"}
                     {scope === "team" ? ` · ${lead.assignedTo?.name || lead.assignedTo?.email || "unassigned"}` : ""}
                   </p>
+                  {lead.aiSignal && (
+                    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                      <Pill tone={lead.aiSignal.urgency === "high" ? "warn" : lead.aiSignal.buyingSignal === "strong" ? "good" : "default"}>
+                        AI: {lead.aiSignal.urgency} urgency · {lead.aiSignal.buyingSignal} signal
+                      </Pill>
+                      <span className="text-[var(--muted)]">{lead.aiSignal.summary}</span>
+                    </p>
+                  )}
                 </div>
                 <select
                   value={lead.status}
@@ -651,17 +775,71 @@ function PipelineTab({
 // Team
 // ---------------------------------------------------------------------------
 
+/** One learned rate, with a small fill bar — the one chart this page gets, deliberately plain. */
+function LearningRow({ label, rate, confident, sampleSize }: { label: string; rate: number; confident: boolean; sampleSize: number }) {
+  const pct = Math.round(rate * 100);
+  return (
+    <li>
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm capitalize">{label}</span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="text-base font-bold tabular-nums text-[var(--foreground)]">{pct}%</span>
+          {!confident && <Pill tone="warn">learning · {sampleSize}</Pill>}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--surface-alt)]">
+        <div
+          className={`h-full rounded-full ${confident ? "bg-[var(--accent)]" : "bg-[var(--accent)]/40"}`}
+          style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
+        />
+      </div>
+    </li>
+  );
+}
+
 function TeamTab({
   reps,
   sourceLearning,
   repLearning,
+  aiSettings,
+  onToggleAi,
 }: {
   reps: RepStat[];
   sourceLearning: SourceLearning[];
   repLearning: RepLearning[];
+  aiSettings: { enabled: boolean; keyConfigured: boolean } | null;
+  onToggleAi: (enabled: boolean) => void;
 }) {
   return (
     <div className="space-y-5">
+      {aiSettings && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold">Growth Desk AI</h2>
+              <p className="text-sm text-[var(--muted)]">
+                When on, Claude reads a lead's notes after a rep saves one and adds an urgency/objection read to the
+                queue — see the Pipeline tab. The built-in scoring above never depends on this; it's an addition, not
+                a replacement.
+              </p>
+              {!aiSettings.keyConfigured && (
+                <p className="mt-1 text-xs text-amber-700">No API key is configured yet — this stays off either way until one is added.</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => onToggleAi(!aiSettings.enabled)}
+              disabled={!aiSettings.keyConfigured}
+              className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+                aiSettings.enabled ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
+              }`}
+            >
+              {aiSettings.enabled ? "On — turn off" : "Off — turn on"}
+            </button>
+          </div>
+        </Card>
+      )}
+
       <Card>
         <div>
           <h2 className="text-lg font-bold">Team</h2>
@@ -708,37 +886,21 @@ function TeamTab({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">By lead source</p>
-            <ul className="mt-2 space-y-1.5">
+            <ul className="mt-2.5 space-y-2.5">
               {sourceLearning.length === 0 ? (
                 <li className="text-sm text-[var(--muted)]">No leads yet.</li>
               ) : (
-                sourceLearning.map((s) => (
-                  <li key={s.source} className="flex items-center justify-between text-sm">
-                    <span className="capitalize">{s.source.replace("_", " ")}</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-semibold tabular-nums">{Math.round(s.rate * 100)}%</span>
-                      {!s.confident && <Pill tone="warn">still learning · {s.sampleSize}</Pill>}
-                    </span>
-                  </li>
-                ))
+                sourceLearning.map((s) => <LearningRow key={s.source} label={s.source.replace("_", " ")} rate={s.rate} confident={s.confident} sampleSize={s.sampleSize} />)
               )}
             </ul>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">By rep</p>
-            <ul className="mt-2 space-y-1.5">
+            <ul className="mt-2.5 space-y-2.5">
               {repLearning.length === 0 ? (
                 <li className="text-sm text-[var(--muted)]">Nobody assigned yet.</li>
               ) : (
-                repLearning.map((r) => (
-                  <li key={r.id} className="flex items-center justify-between text-sm">
-                    <span>{r.name || r.email}</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-semibold tabular-nums">{Math.round(r.rate * 100)}%</span>
-                      {!r.confident && <Pill tone="warn">still learning · {r.sampleSize}</Pill>}
-                    </span>
-                  </li>
-                ))
+                repLearning.map((r) => <LearningRow key={r.id} label={r.name || r.email} rate={r.rate} confident={r.confident} sampleSize={r.sampleSize} />)
               )}
             </ul>
           </div>

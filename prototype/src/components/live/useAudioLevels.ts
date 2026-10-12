@@ -152,6 +152,15 @@ export function useAudioLevels(room: Room | null, revision: number): AudioLevelS
     if (!room) return;
 
     const timer = window.setInterval(() => {
+      // A backgrounded tab has no meters on screen to read, so there is
+      // nothing here worth 12.5 ticks a second of work for — this is the one
+      // thing in the classroom that ran at a fixed rate the whole lesson
+      // regardless of whether anyone was looking, which on a phone with the
+      // class minimized for the second half of a two-hour lesson is real,
+      // avoidable battery drain for no visible benefit. Levels simply hold
+      // their last value while hidden and pick back up the instant the tab
+      // is shown again.
+      if (document.hidden) return;
       const everyone: Participant[] = [room.localParticipant, ...Array.from(room.remoteParticipants.values())];
       const present = new Set<string>();
 
