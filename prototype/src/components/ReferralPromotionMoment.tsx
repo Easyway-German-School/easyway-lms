@@ -15,18 +15,25 @@ type ReferralPromotionData = {
 
 const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
 
-function rewardLine(data: ReferralPromotionData): string | null {
+/**
+ * The actual sell — concrete cash, not "your school will confirm what you
+ * earn." Every student referral code now ships with a real commissionFlat
+ * from the moment it's created (see DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT
+ * in lib/promo-pricing.ts), so this almost always has a real figure; the
+ * generic fallback only shows for an account from before that shipped.
+ */
+function rewardLine(data: ReferralPromotionData): string {
   const parts: string[] = [];
-  if (data.commissionPercent) parts.push(`${data.commissionPercent}%`);
+  if (data.commissionPercent) parts.push(`${data.commissionPercent}% of their tuition`);
   if (data.commissionFlat) parts.push(naira(data.commissionFlat));
-  if (!parts.length) return null;
-  return `Earn ${parts.join(" + ")} credit toward your own tuition for every friend who joins.`;
+  if (!parts.length) return "Cash back on your own tuition for every friend who joins and pays.";
+  return `You get ${parts.join(" + ")} cash back on your own tuition — paid out the moment they pay theirs.`;
 }
 
 export default function ReferralPromotionMoment() {
   const [data, setData] = useState<ReferralPromotionData | null>(null);
   const [visible, setVisible] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -58,21 +65,45 @@ export default function ReferralPromotionMoment() {
     setVisible(false);
   }
 
-  async function copyReferralLink() {
+  function referralLink(code: string): string {
+    return `${window.location.origin}/auth/signup?promo=${encodeURIComponent(code)}`;
+  }
+
+  /**
+   * A link, not a code — nobody reads a 30-character string aloud or types
+   * it into WhatsApp by hand. The native share sheet is the whole point on
+   * a phone: one tap straight into WhatsApp/Instagram/SMS, which is how
+   * this actually gets shared. Clipboard copy is the fallback for a
+   * browser with no share sheet, not the primary path.
+   */
+  async function shareReferralLink() {
     if (!data?.referralCode) return;
-    const link = `${window.location.origin}/auth/signup?promo=${encodeURIComponent(data.referralCode)}`;
+    const link = referralLink(data.referralCode);
+    const shareData = { title: "Join me at EasyWay German Language School", text: "Learn German with me — sign up with my link:", url: link };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        setShared(true);
+        return;
+      } catch {
+        // User cancelled the share sheet — not an error, just no-op.
+        return;
+      }
+    }
+
     try {
       await navigator.clipboard.writeText(link);
-      setCopied(true);
+      setShared(true);
     } catch {
-      setCopied(false);
+      setShared(false);
     }
   }
 
   if (!visible || !data?.referralCode) return null;
-  const reward = rewardLine(data);
   const creditedTotal = data.creditedTotal ?? 0;
   const pendingCredit = data.pendingCredit ?? 0;
+  const canNativeShare = typeof navigator !== "undefined" && Boolean(navigator.share);
 
   return (
     <aside className="fixed bottom-20 left-3 right-3 z-[100] sm:bottom-5 sm:left-auto sm:right-5 sm:w-[min(26rem,calc(100vw-2.5rem))]">
@@ -91,11 +122,9 @@ export default function ReferralPromotionMoment() {
 
         <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-amber-700">Refer a friend</p>
         <h2 id="referral-promotion-title" className="mt-2 pr-8 text-2xl font-black leading-tight text-slate-950">
-          Share your code. Earn credit.
+          Bring a friend, get paid.
         </h2>
-        <p className="mt-2 text-sm font-medium text-slate-600">
-          {reward ?? "Share your code with a friend — your school will confirm what you earn when they join."}
-        </p>
+        <p className="mt-2 text-sm font-medium text-slate-600">{rewardLine(data)}</p>
 
         {creditedTotal > 0 || pendingCredit > 0 ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -110,23 +139,23 @@ export default function ReferralPromotionMoment() {
           </div>
         ) : null}
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-100 p-3">
-          <p className="text-xs text-slate-700">Your code: <strong className="font-mono text-slate-950">{data.referralCode}</strong></p>
-          <button
-            type="button"
-            onClick={() => void copyReferralLink()}
-            className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700"
-          >
-            {copied ? "Link copied" : "Copy link"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => void shareReferralLink()}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-500 px-4 py-3.5 text-base font-black text-slate-950 shadow-lg shadow-amber-500/30 hover:bg-amber-400"
+        >
+          {shared ? (canNativeShare ? "Shared!" : "Link copied — paste it anywhere") : canNativeShare ? "Share my referral link" : "Copy my referral link"}
+        </button>
+        <p className="mt-2 text-center text-xs text-slate-500">
+          WhatsApp status, your group chat, a DM — wherever your people are.
+        </p>
 
         <button
           type="button"
           onClick={dismiss}
           className="mt-3 w-full rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"
         >
-          Skip for now
+          Maybe later
         </button>
       </section>
     </aside>
