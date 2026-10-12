@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import AdminShell from "@/components/AdminShell";
 import { DownloadIcon, RefreshIcon } from "@/components/icons";
@@ -8,7 +8,7 @@ import { DownloadIcon, RefreshIcon } from "@/components/icons";
 type Code = {
   id: string;
   code: string;
-  type: "student_referral" | "influencer";
+  type: "student_referral";
   status: "active" | "paused" | "revoked";
   label: string | null;
   discountPercent: number | null;
@@ -18,21 +18,19 @@ type Code = {
   commissionFlat: number | null;
   createdAt: string;
   ownerStudent: { studentCode: string | null; user: { name: string | null; email: string }; branch: { name: string } | null } | null;
-  ownerUser: { name: string | null; email: string } | null;
   _count: { redemptions: number };
 };
 
 type Payout = {
   id: string;
   amount: number;
-  kind: "commission" | "referral_credit";
+  kind: "referral_credit";
   status: "pending" | "approved";
   createdAt: string;
   promoCode: {
     code: string;
     type: string;
     ownerStudent: { user: { name: string | null; email: string } } | null;
-    ownerUser: { name: string | null; email: string } | null;
   };
   promoRedemption: { redeemedByStudent: { user: { name: string | null; email: string } } };
 };
@@ -81,33 +79,19 @@ function rewardLabel(code: Pick<Code, "discountPercent" | "discountFlat" | "comm
 }
 
 const AMOUNT_FIELDS = ["discountPercent", "discountFlat", "discountCapAmount", "commissionPercent", "commissionFlat"] as const;
-type AmountField = (typeof AMOUNT_FIELDS)[number];
 
 export default function AdminReferralsPage() {
   const [data, setData] = useState<ReferralData | null>(null);
-  const [typeFilter, setTypeFilter] = useState<"all" | "student_referral" | "influencer">("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [creditingId, setCreditingId] = useState<string | null>(null);
   const [creditNote, setCreditNote] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  const [newCode, setNewCode] = useState("");
-  const [newLabel, setNewLabel] = useState("");
-  const [newOwnerEmail, setNewOwnerEmail] = useState("");
-  const [newValues, setNewValues] = useState<Record<AmountField, string>>({
-    discountPercent: "",
-    discountFlat: "",
-    discountCapAmount: "",
-    commissionPercent: "",
-    commissionFlat: "",
-  });
 
   function refresh() {
     setLoading(true);
@@ -141,14 +125,12 @@ export default function AdminReferralsPage() {
 
   const filteredCodes = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return (data?.codes ?? [])
-      .filter((code) => typeFilter === "all" || code.type === typeFilter)
-      .filter((code) => {
-        if (!query) return true;
-        const owner = code.ownerStudent?.user ?? code.ownerUser;
-        return [code.code, code.label, owner?.name, owner?.email].some((value) => value?.toLowerCase().includes(query));
-      });
-  }, [data?.codes, search, typeFilter]);
+    if (!query) return data?.codes ?? [];
+    return (data?.codes ?? []).filter((code) => {
+      const owner = code.ownerStudent?.user;
+      return [code.code, code.label, owner?.name, owner?.email].some((value) => value?.toLowerCase().includes(query));
+    });
+  }, [data?.codes, search]);
 
   const pendingPayoutTotal = useMemo(
     () => (data?.pendingPayouts ?? []).filter((p) => p.status === "pending").reduce((sum, p) => sum + p.amount, 0),
@@ -169,12 +151,11 @@ export default function AdminReferralsPage() {
 
   function downloadCsv() {
     const rows = [
-      ["Type", "Code", "Owner", "Email", "Discount", "Commission", "Sign-ups", "Status", "Created"],
+      ["Code", "Owner", "Email", "Discount", "Commission", "Sign-ups", "Status", "Created"],
       ...filteredCodes.map((code) => {
-        const owner = code.ownerStudent?.user ?? code.ownerUser;
+        const owner = code.ownerStudent?.user;
         const reward = rewardLabel(code);
         return [
-          code.type,
           code.code,
           owner?.name,
           owner?.email,
@@ -190,7 +171,7 @@ export default function AdminReferralsPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `easyway-promo-codes-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `easyway-referral-codes-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -248,37 +229,6 @@ export default function AdminReferralsPage() {
     }
   }
 
-  async function createInfluencerCode(event: FormEvent) {
-    event.preventDefault();
-    setBusyId("new");
-    setError("");
-    try {
-      const res = await fetch("/api/admin/promo-codes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: newCode,
-          label: newLabel,
-          ownerEmail: newOwnerEmail,
-          ...Object.fromEntries(AMOUNT_FIELDS.map((field) => [field, newValues[field] === "" ? null : Number(newValues[field])])),
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Unable to create the code.");
-      setNewCode("");
-      setNewLabel("");
-      setNewOwnerEmail("");
-      setNewValues({ discountPercent: "", discountFlat: "", discountCapAmount: "", commissionPercent: "", commissionFlat: "" });
-      setShowCreateForm(false);
-      setNotice("Influencer code created.");
-      refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to create the code.");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   async function approvePayout(id: string) {
     setBusyId(id);
     setError("");
@@ -326,9 +276,14 @@ export default function AdminReferralsPage() {
       <main className="space-y-6">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-[var(--foreground)]">Referrals & influencers</h1>
+            <h1 className="text-2xl font-bold text-[var(--foreground)]">Student referrals</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Student referral codes and influencer promo codes, the sign-ups they bring in, and what's owed.
+              Every student's referral code — minted automatically at signup — the sign-ups it's brought in, and the
+              credit owed. Influencers and other partners live in their own{" "}
+              <a href="/admin/influencer-program" className="font-semibold text-[var(--accent-ink)] hover:underline">
+                Influencer Program
+              </a>
+              .
             </p>
           </div>
           <div className="flex gap-2">
@@ -372,131 +327,17 @@ export default function AdminReferralsPage() {
           ))}
         </section>
 
-        <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold">New influencer code</h2>
-              <p className="text-sm text-[var(--muted)]">
-                The influencer needs an admin account with the Influencer role first (invite them at /admin/staff).
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowCreateForm((v) => !v)}
-              className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold"
-            >
-              {showCreateForm ? "Cancel" : "Add code"}
-            </button>
-          </div>
-
-          {showCreateForm ? (
-            <form onSubmit={createInfluencerCode} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <label className="text-sm font-semibold">
-                Code
-                <input
-                  required
-                  value={newCode}
-                  onChange={(e) => setNewCode(e.target.value.toUpperCase())}
-                  placeholder="EASYWAY-JOHN"
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-mono"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Influencer's admin email
-                <input
-                  required
-                  type="email"
-                  value={newOwnerEmail}
-                  onChange={(e) => setNewOwnerEmail(e.target.value)}
-                  placeholder="john@example.com"
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Display label (optional)
-                <input
-                  value={newLabel}
-                  onChange={(e) => setNewLabel(e.target.value)}
-                  placeholder="John's audience"
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Student discount — %
-                <input
-                  type="number"
-                  min={0}
-                  value={newValues.discountPercent}
-                  onChange={(e) => setNewValues((v) => ({ ...v, discountPercent: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Student discount — flat ₦
-                <input
-                  type="number"
-                  min={0}
-                  value={newValues.discountFlat}
-                  onChange={(e) => setNewValues((v) => ({ ...v, discountFlat: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Discount cap ₦ (optional)
-                <input
-                  type="number"
-                  min={0}
-                  value={newValues.discountCapAmount}
-                  onChange={(e) => setNewValues((v) => ({ ...v, discountCapAmount: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Your commission — %
-                <input
-                  type="number"
-                  min={0}
-                  value={newValues.commissionPercent}
-                  onChange={(e) => setNewValues((v) => ({ ...v, commissionPercent: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-sm font-semibold">
-                Your commission — flat ₦
-                <input
-                  type="number"
-                  min={0}
-                  value={newValues.commissionFlat}
-                  onChange={(e) => setNewValues((v) => ({ ...v, commissionFlat: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-                />
-              </label>
-              <div className="flex items-end">
-                <button
-                  type="submit"
-                  disabled={busyId === "new"}
-                  className="w-full rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-                >
-                  {busyId === "new" ? "Creating…" : "Create code"}
-                </button>
-              </div>
-            </form>
-          ) : null}
-        </section>
-
         {data?.pendingPayouts.length ? (
           <section className="space-y-3 rounded-2xl border border-amber-300 bg-[var(--surface)] p-4">
             <h2 className="text-lg font-bold">Payouts waiting on you</h2>
             <ul className="divide-y divide-[var(--border)]">
               {data.pendingPayouts.map((payout) => {
-                const owner = payout.promoCode.ownerStudent?.user ?? payout.promoCode.ownerUser;
+                const owner = payout.promoCode.ownerStudent?.user;
                 return (
                   <li key={payout.id} className="space-y-2 py-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <p className="font-semibold">
-                          {naira(payout.amount)} — {payout.kind === "commission" ? "influencer commission" : "referral credit"}
-                        </p>
+                        <p className="font-semibold">{naira(payout.amount)} — referral credit</p>
                         <p className="text-xs text-[var(--muted)]">
                           Code {payout.promoCode.code} ({owner?.name || owner?.email || "—"}) · referred{" "}
                           {payout.promoRedemption.redeemedByStudent.user.name || "a student"} · {date(payout.createdAt)}
@@ -535,11 +376,7 @@ export default function AdminReferralsPage() {
                         <input
                           value={creditNote}
                           onChange={(e) => setCreditNote(e.target.value)}
-                          placeholder={
-                            payout.kind === "commission"
-                              ? "How was this paid out, e.g. bank transfer 12 Oct"
-                              : "Optional — leave blank to auto-apply as a waiver on their open balance"
-                          }
+                          placeholder="Optional — leave blank to auto-apply as a waiver on their open balance"
                           className="min-w-[14rem] flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
                         />
                         <button
@@ -569,21 +406,9 @@ export default function AdminReferralsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold">Codes</h2>
-              <p className="text-sm text-[var(--muted)]">Every student referral and influencer code.</p>
+              <p className="text-sm text-[var(--muted)]">Every student's referral code.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {(["all", "student_referral", "influencer"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTypeFilter(t)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                    typeFilter === t ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
-                  }`}
-                >
-                  {t === "all" ? "All" : t === "student_referral" ? "Student referrals" : "Influencers"}
-                </button>
-              ))}
               <input
                 aria-label="Search codes"
                 value={search}
@@ -604,7 +429,6 @@ export default function AdminReferralsPage() {
                 <thead className="border-b border-[var(--border)] text-xs uppercase tracking-wide text-[var(--muted)]">
                   <tr>
                     <th className="px-3 py-3">Owner</th>
-                    <th className="px-3 py-3">Type</th>
                     <th className="px-3 py-3">Code</th>
                     <th className="px-3 py-3">Discount</th>
                     <th className="px-3 py-3">Commission</th>
@@ -615,7 +439,7 @@ export default function AdminReferralsPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {filteredCodes.map((code) => {
-                    const owner = code.ownerStudent?.user ?? code.ownerUser;
+                    const owner = code.ownerStudent?.user;
                     const reward = rewardLabel(code);
                     const isEditing = editingId === code.id;
                     return (
@@ -624,7 +448,6 @@ export default function AdminReferralsPage() {
                           <p className="font-semibold">{owner?.name || "—"}</p>
                           <p className="text-xs text-[var(--muted)]">{owner?.email}</p>
                         </td>
-                        <td className="px-3 py-3 capitalize">{code.type.replace("_", " ")}</td>
                         <td className="px-3 py-3 font-mono font-bold">{code.code}</td>
                         {isEditing ? (
                           <>

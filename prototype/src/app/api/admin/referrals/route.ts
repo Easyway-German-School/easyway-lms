@@ -6,11 +6,12 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 /**
- * Super-admin oversight for the unified promo-code system: every code (both
- * student-referral and influencer), their attributed sign-ups, and the
- * payout queue waiting on an admin action. See /api/admin/promo-codes for
- * creating/editing a code and /api/admin/promo-payouts/[id] for approving
- * and crediting a payout.
+ * Super-admin oversight for the STUDENT REFERRAL program only. Every
+ * student's code is minted automatically at signup, so there is nothing to
+ * create here — just the sign-ups it's attributed and the referral-credit
+ * payout queue. See /admin/influencer-program for travel agents,
+ * influencers and other partners — a separate program with its own
+ * oversight page and its own per-partner dashboard, not mixed in here.
  */
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -18,19 +19,11 @@ export async function GET() {
 
   try {
     const branchIds = scopedBranchIds(gate.admin);
-    // Branch scoping only applies to student-referral codes, whose owner is
-    // a Student with a branch. An influencer code has no branch — it is
-    // always visible to anyone who can reach this page.
-    const studentBranchFilter = branchIds ? { ownerStudent: { branchId: { in: branchIds } } } : {};
+    const studentBranchFilter = branchIds ? { branchId: { in: branchIds } } : {};
 
     const [codes, pendingPayouts, recentRedemptions, totalRedemptions, openHolds] = await Promise.all([
       prisma.promoCode.findMany({
-        where: {
-          OR: [
-            { type: "influencer" },
-            { type: "student_referral", ...studentBranchFilter },
-          ],
-        },
+        where: { type: "student_referral", ownerStudent: studentBranchFilter },
         orderBy: { createdAt: "desc" },
         take: 2000,
         select: {
@@ -52,12 +45,11 @@ export async function GET() {
               branch: { select: { name: true } },
             },
           },
-          ownerUser: { select: { name: true, email: true } },
           _count: { select: { redemptions: true } },
         },
       }),
       prisma.promoPayout.findMany({
-        where: { status: { in: ["pending", "approved"] } },
+        where: { status: { in: ["pending", "approved"] }, kind: "referral_credit" },
         orderBy: { createdAt: "desc" },
         take: 500,
         select: {
@@ -71,7 +63,6 @@ export async function GET() {
               code: true,
               type: true,
               ownerStudent: { select: { user: { select: { name: true, email: true } } } },
-              ownerUser: { select: { name: true, email: true } },
             },
           },
           promoRedemption: {
@@ -80,6 +71,7 @@ export async function GET() {
         },
       }),
       prisma.promoRedemption.findMany({
+        where: { type: "student_referral" },
         orderBy: { createdAt: "desc" },
         take: 300,
         select: {
@@ -94,7 +86,7 @@ export async function GET() {
           },
         },
       }),
-      prisma.promoRedemption.count(),
+      prisma.promoRedemption.count({ where: { type: "student_referral" } }),
       prisma.promoRedemptionHold.count({ where: { releasedAt: null } }),
     ]);
 

@@ -68,6 +68,8 @@ export const KIND = {
   attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",
+  /** A partner (influencer/travel agent/other) asked for help from their own dashboard. See /api/admin/influencer's POST. */
+  influencerHelpRequest: "influencer.help_request",
   /** A new high/critical incident appeared in Mission Control. */
   missionControlIncident: "mission_control.incident",
   /** A student asked the office for help, or wrote back on a thread. */

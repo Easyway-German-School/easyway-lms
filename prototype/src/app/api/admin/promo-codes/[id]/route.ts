@@ -49,6 +49,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.notes = typeof notes === "string" && notes.trim() ? notes.trim() : null;
   }
 
+  if ("partnerType" in body) {
+    const partnerType = (body as Record<string, unknown>).partnerType;
+    if (partnerType !== "influencer" && partnerType !== "travel_agent" && partnerType !== "other") {
+      return NextResponse.json({ error: "partnerType must be influencer, travel_agent or other" }, { status: 400 });
+    }
+    data.partnerType = partnerType;
+  }
+
+  for (const field of ["payoutBankName", "payoutAccountNumber", "payoutAccountName"] as const) {
+    if (!(field in body)) continue;
+    const raw = (body as Record<string, unknown>)[field];
+    data[field] = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  }
+
   if ("status" in body) {
     const status = (body as Record<string, unknown>).status;
     if (status !== "active" && status !== "paused" && status !== "revoked") {

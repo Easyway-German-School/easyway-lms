@@ -2379,6 +2379,20 @@ model PromoCode {
   /// Display name, e.g. the influencer's public handle.
   label String?
 
+  /// influencer | travel_agent | other — only meaningful when type is
+  /// "influencer"; null reads as "influencer" in application code (every
+  /// partner before this field existed). The Influencer Program is the
+  /// umbrella for all three; student_referral codes never set this.
+  partnerType String?
+
+  /// Where to send this partner's commission. Free text, entered by the
+  /// partner themselves from their own dashboard, or by an admin on their
+  /// behalf — this is not a payment rail integration, just what the office
+  /// reads off when they pay out by bank transfer.
+  payoutBankName      String?
+  payoutAccountNumber String?
+  payoutAccountName   String?
+
   /// Discount given to the NEW student who signs up with this code. Both may
   /// be set (flat applied after percent); null/0 means no discount — true
   /// today for every student_referral code, since that program rewards the

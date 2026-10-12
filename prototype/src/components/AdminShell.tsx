@@ -22,6 +22,7 @@ import {
   BranchIcon,
   BriefcaseIcon,
   BroadcastIcon,
+  StarIcon,
   CalendarIcon,
   CertificateIcon,
   ChevronLeftIcon,
@@ -157,6 +158,12 @@ const navItems: NavItem[] = [
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
   { label: 'Referrals', href: '/admin/referrals', icon: <UserPlusIcon />, group: 'Billing' },
+  // The admin door into the Influencer Program — the list of every partner
+  // and a remote view into each one's own dashboard (same component the
+  // partner sees at 'Influencer Program' above, under Academics). Gated on
+  // `payments`, so only the desk that already owns the whole promo-code
+  // system sees this; a partner's own `influencer`-only account never does.
+  { label: 'Partner dashboard', href: '/admin/influencer-program', icon: <StarIcon />, group: 'Billing' },
   { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
   // Money going OUT to tutors — its own capability, separate from `payments`
   // (money coming in from students). See the note in admin-roles.ts.
