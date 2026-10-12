@@ -20,7 +20,10 @@ import type { Brief, BriefMetric } from "@/components/admin/AdminBriefView";
 
 const TABS = [
   { key: "daily", label: "Today" },
-  { key: "weekly", label: "Week" },
+  // Not "Week" — the window is a rolling trailing 7 days ending now, not the
+  // calendar week since Monday. The caption under the headline spells out
+  // the exact dates; this short pill label says the same thing up front.
+  { key: "weekly", label: "7 days" },
   { key: "monthly", label: "Month" },
 ] as const;
 
@@ -115,7 +118,15 @@ export default function AdminActivityStrip() {
         </Link>
       </div>
 
-      {brief && <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">{brief.headline}</p>}
+      {brief && (
+        <div className="mt-3">
+          <p className="text-sm font-semibold text-[var(--foreground)]">{brief.headline}</p>
+          {/* Makes the window literal — "Week" is a rolling trailing 7 days
+              ending now, not the calendar week since Monday, and that is
+              exactly what read as "stuck on last week" on a Monday morning. */}
+          <p className="mt-0.5 text-xs text-[var(--muted)]">{brief.windowLabel}</p>
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {loading && !brief
