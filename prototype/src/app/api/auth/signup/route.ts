@@ -32,6 +32,7 @@ import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 import { resolveSignupPromoAttribution } from "@/lib/promo-attribution";
 import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
+import { DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT } from "@/lib/promo-pricing";
 
 /**
  * Whether there is a Branch table to select from.
@@ -723,6 +724,9 @@ export async function POST(request: NextRequest) {
                   type: "student_referral",
                   status: "active",
                   ownerStudentId: created.id,
+                  // A real number from the start, not null — see the
+                  // PLACEHOLDER comment on this constant in promo-pricing.ts.
+                  commissionFlat: DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT,
                   tenantId: currentTenantId(),
                 },
                 update: {},
