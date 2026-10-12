@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { PlusIcon, SendIcon, UsersIcon, BriefcaseIcon, CommunityIcon } from "@/components/icons";
+import { PlusIcon, SendIcon, UsersIcon, BriefcaseIcon, CommunityIcon, ChevronLeftIcon } from "@/components/icons";
 
 type Channel = {
   id: string;
@@ -50,6 +50,13 @@ export default function StaffChannelsView() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [canCreate, setCanCreate] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Below `lg` the list and the open chat are two screens, not two panes —
+  // this is what "equipped for mobile" actually means here: a channel
+  // picked on a phone should take over the screen like any chat app, with a
+  // way back, not just sit stacked under the list the way a desktop grid
+  // naturally collapses to. Arriving from a push notification's ?open= link
+  // means the chat, not the list, is what they came for.
+  const [mobileView, setMobileView] = useState<"list" | "chat">(openParam ? "chat" : "list");
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -143,7 +150,11 @@ export default function StaffChannelsView() {
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-        <aside className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
+        <aside
+          className={`space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 ${
+            mobileView === "chat" ? "hidden lg:block" : "block"
+          }`}
+        >
           {canCreate && (
             <button
               type="button"
@@ -198,7 +209,10 @@ export default function StaffChannelsView() {
                   <li key={c.id}>
                     <button
                       type="button"
-                      onClick={() => setActiveId(c.id)}
+                      onClick={() => {
+                        setActiveId(c.id);
+                        setMobileView("chat");
+                      }}
                       className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
                         isActive ? "bg-[var(--accent)] text-white shadow-sm" : "hover:bg-[var(--surface-alt)]"
                       }`}
@@ -224,12 +238,34 @@ export default function StaffChannelsView() {
           )}
         </aside>
 
-        <section className="flex min-h-[420px] flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <section
+          className={`min-h-[420px] flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 ${
+            mobileView === "list" ? "hidden lg:flex" : "flex"
+          }`}
+        >
           {!active ? (
-            <p className="m-auto text-sm text-[var(--muted)]">Pick a channel to read it.</p>
+            <>
+              <button
+                type="button"
+                onClick={() => setMobileView("list")}
+                className="mb-2 inline-flex items-center gap-1 self-start text-sm font-semibold text-[var(--muted)] lg:hidden"
+              >
+                <ChevronLeftIcon className="h-4 w-4" />
+                Channels
+              </button>
+              <p className="m-auto text-sm text-[var(--muted)]">Pick a channel to read it.</p>
+            </>
           ) : (
             <>
               <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileView("list")}
+                  aria-label="Back to channels"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--surface-alt)] lg:hidden"
+                >
+                  <ChevronLeftIcon className="h-5 w-5" />
+                </button>
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
                   {(() => {
                     const Icon = AUDIENCE_ICON[active.audience] ?? SendIcon;
