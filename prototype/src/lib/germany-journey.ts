@@ -448,6 +448,15 @@ export function estimateArrival(input: {
   targetLevel: string;
   /** Where the current level is up to. */
   countdown?: LevelCountdown | null;
+  /**
+   * True when the office has already signed `currentLevel` off and the
+   * student is only waiting to be promoted into the next one — see
+   * `completedLevelsFor` in germany-journey-server.ts. There is deliberately
+   * no `countdown` object for a level that has already finished, but that
+   * must not be read as "has not started yet": this level needs zero more
+   * months of teaching, not a fresh SESSION_MONTHS.
+   */
+  currentLevelCompleted?: boolean;
   /** Months to allow for exam, documents and the visa appointment. */
   paperworkMonths?: number;
   now?: Date;
@@ -480,11 +489,28 @@ export function estimateArrival(input: {
   // countdown rather than the flat constant keeps this estimate from
   // under-counting a weekend student's remaining teaching time.
   const currentLevelSessionMonths = input.countdown?.monthsTotal ?? SESSION_MONTHS;
-  const currentLevelMonthsLeft = input.countdown
-    ? Math.max(0, currentLevelSessionMonths * (1 - input.countdown.percent / 100))
-    : SESSION_MONTHS;
+  // A level the office has already signed off needs no more teaching. Before
+  // this check, a student stuck between "signed off" and "promoted" — which
+  // is exactly the gap between a batch finishing and an admin bumping
+  // Student.level — had no `countdown` (buildJourney only builds one for a
+  // level that is NOT YET completed) and so fell into the "has not started"
+  // branch below, charging a full fresh SESSION_MONTHS for a level that was
+  // actually already finished. That double-counted level is what pushed a
+  // student's Germany date a whole level's length too far out — enough, near
+  // a year boundary, to land them in the wrong year.
+  const currentLevelMonthsLeft = input.currentLevelCompleted
+    ? 0
+    : input.countdown
+      ? Math.max(0, currentLevelSessionMonths * (1 - input.countdown.percent / 100))
+      : SESSION_MONTHS;
 
-  const monthsOfTeaching = currentLevelMonthsLeft + levelsAfterCurrent * SESSION_MONTHS;
+  // Every level this student sits runs as long as their own sitting does —
+  // weekend sittings run three months, not two (see sessionDurationMonths).
+  // `currentLevelSessionMonths` already carries that when a countdown exists;
+  // reusing it here (instead of the flat SESSION_MONTHS constant) keeps a
+  // weekend student's REMAINING levels from being under-counted by a month
+  // each.
+  const monthsOfTeaching = currentLevelMonthsLeft + levelsAfterCurrent * currentLevelSessionMonths;
   const levelMonths = Math.ceil(monthsOfTeaching);
   const totalMonths = Math.ceil(monthsOfTeaching + paperworkMonths);
 
@@ -502,7 +528,10 @@ export function estimateArrival(input: {
     label: date.toLocaleString("en-US", { month: "long", year: "numeric" }),
     levelDate: levelDate.toISOString(),
     levelLabel: levelDate.toLocaleString("en-US", { month: "long", year: "numeric" }),
-    levelsRemaining: levelsAfterCurrent + 1,
+    // "+1" counts the current level as still outstanding — wrong once it is
+    // already signed off, where it would claim one more level than the
+    // months figure beside it (6 months of teaching but "4 levels to go").
+    levelsRemaining: levelsAfterCurrent + (input.currentLevelCompleted ? 0 : 1),
     monthsOfTeaching: Math.round(monthsOfTeaching),
     paperworkMonths,
     caveat: `If your levels run back to back and paperwork takes the usual ${paperworkMonths} months. An estimate, not a promise.`,
@@ -735,6 +764,11 @@ export function buildJourney(input: JourneyInput): Journey {
       currentLevel,
       targetLevel,
       countdown,
+      // `completed` already includes currentLevel when the office has signed
+      // it off but the student has not yet been promoted off it (see the
+      // comment on `countdown` above) — tell the arrival estimate so it does
+      // not charge a second, fresh SESSION_MONTHS for a level that is done.
+      currentLevelCompleted: completed.has(currentLevel),
       paperworkMonths: goal.paperworkMonths,
       now,
     }),

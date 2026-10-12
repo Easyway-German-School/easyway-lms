@@ -54,4 +54,28 @@ describe("Arrival estimate keeps the level date honest", () => {
     expect(augustStart.weeksTotal).toBe(8);
     expect(februaryStart.weeksTotal).toBe(8);
   });
+
+  it("does not charge a fresh SESSION_MONTHS for a level the office already signed off", () => {
+    // Exactly the state a student sits in between a batch finishing and an
+    // admin promoting Student.level: the office has signed A1 off, so there
+    // is no countdown for it any more (buildJourney never builds one for a
+    // completed level), but the student's record still says "A1" until
+    // somebody bumps it. Without `currentLevelCompleted`, this used to fall
+    // into the "has not started" branch and charge a second, fresh
+    // SESSION_MONTHS for A1 — pushing the date a whole level too far out.
+    const estimate = estimateArrival({
+      currentLevel: "A1",
+      targetLevel: "B2",
+      countdown: null,
+      currentLevelCompleted: true,
+      paperworkMonths: 5,
+      now: new Date("2026-10-12"),
+    });
+
+    // Only A2, B1, B2 remain — A1 is done. 3 levels * 2 months = 6, not 8.
+    expect(estimate.monthsOfTeaching).toBe(6);
+    expect(estimate.levelsRemaining).toBe(3);
+    expect(estimate.levelLabel).toBe("April 2027");
+    expect(estimate.label).toBe("September 2027");
+  });
 });
