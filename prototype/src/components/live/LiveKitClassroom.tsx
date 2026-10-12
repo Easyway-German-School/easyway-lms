@@ -144,6 +144,37 @@ const TILE_SIZE: Record<QualityMode, string> = {
   audio: "h-20 w-28",
 };
 
+/**
+ * The cinema palette — "Netflix-level, gradient-forward, warm" per the
+ * school owner's redesign brief.
+ *
+ * Deliberately NOT built from the site's `--accent`/`--background` theme
+ * variables, even though this component could read them: the classroom
+ * renders the same dark, high-contrast surface no matter which of the
+ * portal's light/dark/custom themes the viewer has picked elsewhere, the
+ * same way Zoom or Meet never go light-mode mid-call. What IS reused is the
+ * app's own `.theme-dark` palette in globals.css — its near-black,
+ * teal-tinted ground and its exact orange/teal brand hex values. A cinema
+ * skin built from the brand's own existing dark tokens reads as "this app,
+ * at night"; a second, unrelated palette lifted wholesale from a mockup
+ * would have read as a different product bolted on.
+ */
+const CINEMA = {
+  /** Flat near-black, for small translucent surfaces that take an opacity modifier. */
+  ground: "#0a1213",
+  /** Tile/panel surface — a quiet diagonal gradient instead of a flat fill. */
+  tileBg: "bg-[linear-gradient(160deg,_#17242b_0%,_#0f1a1b_55%,_#070d0e_100%)]",
+  /** Primary-action gradient — the brand orange, stretched into a button. */
+  ctaBg: "bg-[linear-gradient(135deg,_#FFB273_0%,_#FF7A1A_55%,_#C85F2E_100%)]",
+  /** Calm "connected / good" teal — `--accent-strong` from `.theme-dark`. */
+  teal: "#3FC3C6",
+  /** Brand orange + its two tints, `--accent` / `--accent-ink` from `.theme-dark`. */
+  orange: "#FF7A1A",
+  orangeSoft: "#FFB273",
+  /** "Something is being handled" amber — calm, never alarming. */
+  amber: "#D9A64E",
+};
+
 function isTutor(participant: Participant): boolean {
   try {
     return JSON.parse(participant.metadata || "{}")?.role === "tutor";
@@ -359,16 +390,19 @@ function ParticipantTile({
    * should not still see them ringed as "waiting".
    */
   const ring = light?.tone === "floor"
-    ? "ring-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.18)]"
+    ? "ring-[#3FC3C6] shadow-[0_0_0_4px_rgba(63,195,198,0.22)]"
     : handPosition !== null
-      ? "ring-amber-400"
+      ? "ring-[#D9A64E] shadow-[0_0_0_3px_rgba(217,166,78,0.16)]"
       : isSpeaking
-        ? "ring-[var(--accent)]"
-        : "ring-white/10";
+        ? // The gradient-glow treatment: a solid orange ring plus a soft, blurred
+          // halo in the same hue reads as a glow rather than a flat line, without
+          // needing an extra wrapper element around this (persistent) tile.
+          "ring-[#FF7A1A] shadow-[0_0_18px_5px_rgba(255,122,26,0.35)]"
+        : "ring-white/[0.08]";
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-slate-900 ring-2 transition ${ring} ${
+      className={`relative overflow-hidden rounded-2xl ${CINEMA.tileBg} ring-2 transition ${ring} ${
         large ? "aspect-video w-full" : TILE_SIZE[mode]
       }`}
     >
@@ -403,11 +437,11 @@ function ParticipantTile({
       ) : null}
 
       {!hasVideo ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 to-slate-900">
-          <div className={`grid place-items-center rounded-full bg-[var(--accent)]/20 font-semibold text-white ${large ? "h-20 w-20 text-3xl" : "h-10 w-10 text-sm"}`}>
+        <div className={`flex h-full w-full flex-col items-center justify-center gap-2 ${CINEMA.tileBg}`}>
+          <div className={`grid place-items-center rounded-full bg-[#FF7A1A]/20 font-semibold text-white ${large ? "h-20 w-20 text-3xl" : "h-10 w-10 text-sm"}`}>
             {initials}
           </div>
-          {!showVideo && large ? <p className="text-xs text-slate-400">Audio-only mode</p> : null}
+          {!showVideo && large ? <p className="text-xs text-[#9A9690]">Audio-only mode</p> : null}
         </div>
       ) : null}
 
@@ -431,7 +465,7 @@ function ParticipantTile({
           <span className="shrink-0 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Tutor</span>
         ) : null}
         {office ? (
-          <span className="shrink-0 rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Office</span>
+          <span className="shrink-0 rounded-full bg-[#D9A64E] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Office</span>
         ) : null}
 
         {canModerate ? (
@@ -445,14 +479,14 @@ function ParticipantTile({
               <DotsVerticalIcon className="h-4 w-4" />
             </button>
             {menuOpen ? (
-              <div className="absolute bottom-full right-0 z-20 mb-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-slate-900 py-1 text-left shadow-2xl">
+              <div className={`absolute bottom-full right-0 z-20 mb-1.5 w-44 overflow-hidden rounded-xl border border-white/10 ${CINEMA.tileBg} py-1 text-left shadow-2xl`}>
                 <button
                   onClick={() => {
                     onMute(participant.identity);
                     setMenuOpen(false);
                   }}
                   disabled={micMuted || busy}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:text-[#716D68] disabled:hover:bg-transparent"
                 >
                   <SpeakerOffIcon className="h-3.5 w-3.5" />
                   {micMuted ? "Already muted" : "Mute microphone"}
@@ -485,11 +519,25 @@ function ParticipantTile({
 }
 
 const QUALITY_PILL: Record<ConnectionQuality, { label: string; className: string }> = {
-  [ConnectionQuality.Excellent]: { label: "Strong", className: "bg-emerald-500/15 text-emerald-300" },
-  [ConnectionQuality.Good]: { label: "Good", className: "bg-emerald-500/15 text-emerald-300" },
-  [ConnectionQuality.Poor]: { label: "Weak — try Data saver", className: "bg-amber-500/15 text-amber-300" },
-  [ConnectionQuality.Lost]: { label: "Connection lost", className: "bg-rose-500/15 text-rose-300" },
-  [ConnectionQuality.Unknown]: { label: "Checking…", className: "bg-white/10 text-slate-300" },
+  [ConnectionQuality.Excellent]: { label: "Strong", className: "bg-[#3FC3C6]/15 text-[#3FC3C6]" },
+  [ConnectionQuality.Good]: { label: "Good", className: "bg-[#3FC3C6]/15 text-[#3FC3C6]" },
+  /**
+   * "Weak — try Data saver" put the fix on the student, at the exact moment
+   * the picture they'd navigate a menu by is the thing struggling. The system
+   * is already handling it (see the auto-downgrade ladder above) — the copy
+   * should say so. Amber, not red: a slow rung for ten seconds is not a failure.
+   */
+  [ConnectionQuality.Poor]: { label: "Adjusting your picture…", className: "bg-[#D9A64E]/15 text-[#D9A64E]" },
+  /**
+   * The one pill where some real urgency is honest — "Lost" usually means a
+   * reconnect is imminent or underway. But "Connection lost" in red overclaims
+   * a crisis for what is most often a few seconds of static, and red is the
+   * one color this redesign deliberately reserves for nothing short of an
+   * actual failed join (see the `status === "failed"` card below). Warm
+   * orange carries the real urgency without reading as a broken product.
+   */
+  [ConnectionQuality.Lost]: { label: "Struggling — hang tight", className: "bg-[#FF7A1A]/20 text-[#FFB273]" },
+  [ConnectionQuality.Unknown]: { label: "Checking…", className: "bg-white/10 text-[#C9C5BF]" },
 };
 
 /**
@@ -797,7 +845,10 @@ export default function LiveKitClassroom({
       setConnectHint(
         role === "tutor"
           ? "Still trying. Switch Wi‑Fi ↔ mobile data if this stays — the class is not cancelled."
-          : "Still trying. Switch Wi‑Fi ↔ mobile data if this stays.",
+          // Same reassurance the tutor line already had — it is exactly as true
+          // for a student mid-join, and leaving it off here was an inconsistency,
+          // not a deliberate choice.
+          : "Still trying. Switch Wi‑Fi ↔ mobile data if this stays — the class is not cancelled.",
       );
     }, 8_000);
 
@@ -1567,15 +1618,15 @@ export default function LiveKitClassroom({
    */
   if (minimized) {
     return (
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl bg-slate-900 ring-1 ring-white/15">
+      <div className={`flex h-full w-full flex-col overflow-hidden rounded-2xl ${CINEMA.tileBg} ring-1 ring-white/15`}>
         <div
           onPointerDown={onDragHandlePointerDown}
-          className="flex shrink-0 cursor-grab touch-none items-center justify-between gap-2 bg-slate-950/90 px-2.5 py-1.5 active:cursor-grabbing"
+          className="flex shrink-0 cursor-grab touch-none items-center justify-between gap-2 bg-[#0a1213]/90 px-2.5 py-1.5 active:cursor-grabbing"
         >
           <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-white">
             <span className="relative flex h-1.5 w-1.5 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#3FC3C6]" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#3FC3C6]" />
             </span>
             <span className="truncate">{displayName}</span>
           </span>
@@ -1622,11 +1673,11 @@ export default function LiveKitClassroom({
               onRemove={() => {}}
             />
           ) : (
-            <div className="grid h-full place-items-center text-xs text-slate-400">Connecting…</div>
+            <div className="grid h-full place-items-center text-xs text-[#9A9690]">Connecting…</div>
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-center gap-2 bg-slate-950/70 px-2 py-1.5">
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-[#0a1213]/70 px-2 py-1.5">
           <button
             onClick={toggleMic}
             aria-label={micOn ? "Mute microphone" : "Unmute microphone"}
@@ -1650,18 +1701,31 @@ export default function LiveKitClassroom({
           ? // Edge-to-edge: content becomes the whole viewport and every piece of
             // portal chrome disappears behind it. This is the change that makes
             // it read as a product rather than a page in a dashboard.
-            "fixed inset-0 z-50 flex flex-col gap-3 overflow-y-auto bg-slate-950 p-3 sm:p-4"
+            "fixed inset-0 z-50 flex flex-col gap-3 overflow-y-auto p-3 sm:p-4"
           : "space-y-4"
+      }
+      // Inline, not a Tailwind arbitrary class: this is the same multi-layer
+      // gradient recipe as `.theme-dark`'s `--background` in globals.css (see
+      // the CINEMA comment above), reused here rather than invented fresh —
+      // a deliberate dark gradient ground instead of a flat fill, the way the
+      // owner asked, without a second unrelated palette.
+      style={
+        immersive
+          ? {
+              background:
+                "radial-gradient(1100px 620px at 6% -10%, rgba(63,195,198,0.16), transparent 55%), radial-gradient(900px 560px at 98% -4%, rgba(255,122,26,0.12), transparent 55%), linear-gradient(180deg, #030607 0%, #050b0c 45%, #04090a 100%)",
+            }
+          : undefined
       }
     >
       {!focusMode ? (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900/90 px-5 py-3 text-white">
+      <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] ${CINEMA.tileBg} px-5 py-3 text-white`}>
         <div className="flex min-w-0 items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-mark.png" alt="EasyWay" className="h-9 w-9 shrink-0 rounded-lg object-contain" />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{displayName}</p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[#9A9690]">
               {participants.length} in the room · Room {roomName}
             </p>
           </div>
@@ -1669,8 +1733,29 @@ export default function LiveKitClassroom({
         <div className="flex items-center gap-2">
           <span className={`rounded-full px-3 py-1 text-xs font-medium ${pill.className}`}>{pill.label}</span>
           {status === "reconnecting" ? (
-            <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-300">
-              Reconnecting…
+            /**
+             * HONESTY CHECK — this claim is verified against this file's own
+             * state machine, not assumed true:
+             *
+             * `finish()` (the only function that reports a departure to
+             * `onLeave`, which is what actually ends this person's time in the
+             * class from the app's point of view) is called from exactly two
+             * places: the tutor's `ended` broadcast, and the `Disconnected`
+             * handler above. That `Disconnected` handler explicitly ignores a
+             * disconnect while this component is still negotiating its FIRST
+             * join (`statusRef.current !== "connected" && !== "reconnecting"`
+             * returns early) — but once connected, a `Reconnecting` event only
+             * flips `status` to "reconnecting"; it does not call `finish()` and
+             * does not unmount this component. So at the exact moment this
+             * badge is showing, nothing in this codebase has removed the
+             * student from the room — LiveKit is attempting to recover the
+             * same session. That is what "you're still in class" asserts, and
+             * no more: it does not promise the reconnect will succeed, because
+             * a later `Disconnected` CAN still end the session if it fails —
+             * see the "dropped" outcome on the end screen for that honest case.
+             */
+            <span className="rounded-full bg-[#FF7A1A]/15 px-3 py-1 text-xs font-medium text-[#FFB273]">
+              Reconnecting — you're still in class
             </span>
           ) : null}
           <button
@@ -1741,7 +1826,7 @@ export default function LiveKitClassroom({
       {audioBlocked ? (
         <button
           onClick={() => roomRef.current?.startAudio().then(() => setAudioBlocked(false)).catch(() => {})}
-          className="flex w-full items-center justify-center gap-3 rounded-2xl bg-[var(--accent)] px-5 py-4 text-sm font-semibold text-white shadow-lg transition hover:brightness-110"
+          className={`flex w-full items-center justify-center gap-3 rounded-2xl ${CINEMA.ctaBg} px-5 py-4 text-sm font-semibold text-white shadow-lg transition hover:brightness-110`}
         >
           <SpeakerOffIcon className="h-5 w-5" />
           Tap to turn on the sound
@@ -1749,7 +1834,7 @@ export default function LiveKitClassroom({
       ) : null}
 
       {!focusMode && deviceNotice ? (
-        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-200">
+        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-[#D9A64E]/30 bg-[#D9A64E]/10 px-5 py-3 text-sm text-[#E8C988]">
           <p className="min-w-0 flex-1 leading-6">{deviceNotice}</p>
           <button
             onClick={() => setDeviceNotice(null)}
@@ -1761,7 +1846,7 @@ export default function LiveKitClassroom({
       ) : null}
 
       {!focusMode && autoNotice ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-200">
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#D9A64E]/30 bg-[#D9A64E]/10 px-5 py-3 text-sm text-[#E8C988]">
           <p className="min-w-0 flex-1 leading-6">
             Your connection was struggling, so we moved you from{" "}
             <span className="font-semibold">{qualitySpec(autoNotice.from).label}</span> to{" "}
@@ -1810,11 +1895,19 @@ export default function LiveKitClassroom({
           </button>
         </div>
       ) : status === "connecting" ? (
-        <div className="grid aspect-video w-full place-items-center rounded-3xl bg-slate-900">
-          <div className="flex flex-col items-center px-4">
+        <div className={`relative grid aspect-video w-full place-items-center overflow-hidden rounded-3xl border border-white/[0.08] ${CINEMA.tileBg}`}>
+          {/* A soft warm glow behind the "Almost there" moment — the one spot
+              in this screen where a little extra visual care is worth it,
+              since it's the first thing every student and tutor sees. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[90px]"
+            style={{ background: "radial-gradient(circle, rgba(255,122,26,0.12), transparent 65%)" }}
+          />
+          <div className="relative flex flex-col items-center px-4">
             <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message={connectHint} />
             {slowJoin ? (
-              <p className="mt-4 max-w-sm text-center text-sm text-white/70">
+              <p className="mt-4 max-w-sm text-center text-sm text-[#C9C5BF]">
                 {role === "tutor"
                   ? "Not broken. Switch network, then wait or try again."
                   : "Not broken. Switch network, then try again."}
@@ -1939,7 +2032,7 @@ export default function LiveKitClassroom({
                 ))}
               </div>
             ) : (
-              <p className="rounded-2xl bg-slate-900/60 px-5 py-4 text-sm text-slate-400">
+              <p className="rounded-2xl bg-[#0a1213]/60 px-5 py-4 text-sm text-[#9A9690]">
                 You are the first one here. The room stays open — others will appear as they join.
               </p>
             )}
@@ -1947,7 +2040,7 @@ export default function LiveKitClassroom({
 
           {panel && !focusMode ? (
             <aside
-              className={`flex max-h-[26rem] min-h-0 w-full shrink-0 flex-col rounded-2xl bg-slate-900/90 p-3 lg:max-h-none ${
+              className={`flex max-h-[26rem] min-h-0 w-full shrink-0 flex-col rounded-2xl border border-white/[0.08] bg-[#0a1213]/90 p-3 lg:max-h-none ${
                 panel === "materials" ? "lg:w-96" : "lg:w-80"
               }`}
             >
@@ -1955,7 +2048,7 @@ export default function LiveKitClassroom({
                 <button
                   onClick={() => setPanel("hands")}
                   className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
-                    panel === "hands" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                    panel === "hands" ? "bg-white/15 text-white" : "text-[#9A9690] hover:text-white"
                   }`}
                 >
                   Hands {interactions.hands.length > 0 ? `(${interactions.hands.length})` : ""}
@@ -1963,7 +2056,7 @@ export default function LiveKitClassroom({
                 <button
                   onClick={() => setPanel("chat")}
                   className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
-                    panel === "chat" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                    panel === "chat" ? "bg-white/15 text-white" : "text-[#9A9690] hover:text-white"
                   }`}
                 >
                   Chat
@@ -1971,7 +2064,7 @@ export default function LiveKitClassroom({
                 <button
                   onClick={() => setPanel("materials")}
                   className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
-                    panel === "materials" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                    panel === "materials" ? "bg-white/15 text-white" : "text-[#9A9690] hover:text-white"
                   }`}
                 >
                   Materials
@@ -1979,7 +2072,7 @@ export default function LiveKitClassroom({
                 <button
                   onClick={() => setPanel("switch")}
                   className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
-                    panel === "switch" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                    panel === "switch" ? "bg-white/15 text-white" : "text-[#9A9690] hover:text-white"
                   }`}
                 >
                   Device
@@ -1987,7 +2080,7 @@ export default function LiveKitClassroom({
                 <button
                   onClick={() => setPanel(null)}
                   aria-label="Close panel"
-                  className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-400 transition hover:text-white"
+                  className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#9A9690] transition hover:text-white"
                 >
                   ✕
                 </button>
@@ -2034,7 +2127,7 @@ export default function LiveKitClassroom({
       */}
       {!focusMode ? (
       <div
-        className={`flex flex-wrap items-center gap-2 rounded-2xl bg-slate-900/90 p-3 ${
+        className={`flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.08] bg-[#0a1213]/90 p-3 ${
           immersive ? "sticky bottom-0 z-20 shadow-[0_-8px_24px_rgba(0,0,0,0.35)]" : ""
         }`}
       >
@@ -2049,7 +2142,7 @@ export default function LiveKitClassroom({
         <button
           onClick={toggleCamera}
           className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-            cameraOn ? "bg-white/10 text-white hover:bg-white/20" : "bg-white/5 text-slate-400 hover:bg-white/10"
+            cameraOn ? "bg-white/10 text-white hover:bg-white/20" : "bg-white/5 text-[#9A9690] hover:bg-white/10"
           }`}
         >
           <CameraIcon /> {cameraOn ? "Camera on" : "Camera off"}
@@ -2058,7 +2151,7 @@ export default function LiveKitClassroom({
           <button
             onClick={toggleScreenShare}
             className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-              screenSharing ? "bg-[var(--accent)] text-white" : "bg-white/10 text-white hover:bg-white/20"
+              screenSharing ? `${CINEMA.ctaBg} text-white` : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <ScreenShareIcon /> {screenSharing ? "Stop sharing" : "Share screen"}
@@ -2074,7 +2167,7 @@ export default function LiveKitClassroom({
           <HandIcon className="h-4 w-4" />
           Hands
           {interactions.hands.length > 0 ? (
-            <span className="grid h-5 min-w-5 place-items-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-slate-900">
+            <span className="grid h-5 min-w-5 place-items-center rounded-full bg-[#D9A64E] px-1 text-[10px] font-bold text-slate-900">
               {interactions.hands.length}
             </span>
           ) : null}
@@ -2160,7 +2253,7 @@ export default function LiveKitClassroom({
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto">
           {availableModes.length > 1 ? (
             <>
-              <label htmlFor="quality" className="text-xs font-medium text-slate-400">
+              <label htmlFor="quality" className="text-xs font-medium text-[#9A9690]">
                 Video quality
               </label>
               <select
@@ -2179,7 +2272,7 @@ export default function LiveKitClassroom({
           ) : (
             // One rung means there is nothing to choose. A dropdown holding a
             // single option is a worse answer than a label.
-            <span className="rounded-xl bg-white/5 px-3 py-2 text-xs font-medium text-slate-400">
+            <span className="rounded-xl bg-white/5 px-3 py-2 text-xs font-medium text-[#9A9690]">
               Teaching in {qualitySpec(mode).label}
             </span>
           )}
@@ -2200,22 +2293,22 @@ export default function LiveKitClassroom({
         off the end of a line. Hidden along with everything else in bold view.
       */}
       {!focusMode ? (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900/90 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-[#0a1213]/90 p-3">
         <ReactionBar
           onReact={interactions.react}
           onToggleHand={interactions.toggleHand}
           handRaised={interactions.myHandRaised}
           handPosition={myHandPosition}
         />
-        <span className="text-[11px] font-medium text-slate-400">
+        <span className="text-[11px] font-medium text-[#9A9690]">
           {ROOM_MODE_COPY[interactions.mode][role === "tutor" ? "tutor" : "student"]}
         </span>
       </div>
       ) : null}
 
       {!focusMode ? (
-      <p className={`rounded-2xl bg-slate-900/60 px-5 py-3 text-xs leading-5 text-slate-400 ${immersive ? "hidden sm:block" : ""}`}>
-        <span className="font-semibold text-slate-200">{qualitySpec(mode).label}:</span> {qualitySpec(mode).description} Roughly{" "}
+      <p className={`rounded-2xl bg-[#0a1213]/60 px-5 py-3 text-xs leading-5 text-[#9A9690] ${immersive ? "hidden sm:block" : ""}`}>
+        <span className="font-semibold text-[#F2EFEA]">{qualitySpec(mode).label}:</span> {qualitySpec(mode).description} Roughly{" "}
         {qualitySpec(mode).dataHint.replace("~", "")}.{" "}
         {role === "tutor"
           ? "You always teach in Sharp, because the server sends each student the best layer their own connection can carry — turning yours down would turn it down for the whole class. Students pick their own setting."
@@ -2274,7 +2367,7 @@ function SwitchDevicePanel() {
   }, []);
 
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm text-slate-300">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm text-[#C9C5BF]">
       <p>
         Open this same class on another device — your phone, say — and it picks up right where you are now. This
         device steps aside on its own the moment the new one connects.
@@ -2286,7 +2379,7 @@ function SwitchDevicePanel() {
           <img src={qr} alt="Scan to continue this class on another device" className="h-40 w-40" />
         </div>
       ) : (
-        <div className="grid h-40 place-items-center text-xs text-slate-500">Building your code…</div>
+        <div className="grid h-40 place-items-center text-xs text-[#716D68]">Building your code…</div>
       )}
 
       <button
