@@ -36,7 +36,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Room, RoomEvent, Track, type Participant, type RemoteParticipant } from "livekit-client";
+import {
+  LocalParticipant,
+  Room,
+  RoomEvent,
+  Track,
+  type Participant,
+  type RemoteParticipant,
+  type RemoteTrackPublication,
+} from "livekit-client";
 import { createPortal } from "react-dom";
 import BrandLoader from "@/components/BrandLoader";
 import { CINEMA } from "@/components/live/LiveKitClassroom";
@@ -491,6 +499,8 @@ function VideoTile({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
+  const [videoWaiting, setVideoWaiting] = useState(false);
+  const [retryingVideo, setRetryingVideo] = useState(false);
   /**
    * `revision` bumps on ANY topology event from ANY participant (see its
    * `.on(...)` list above this component) — a mute, a join, a screen-share
@@ -506,6 +516,44 @@ function VideoTile({
    * changed, not on every unrelated bump.
    */
   const attachedTrackRef = useRef<Track | null>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    let waitTimer: number | null = null;
+
+    function clearWaitTimer() {
+      if (waitTimer !== null) {
+        window.clearTimeout(waitTimer);
+        waitTimer = null;
+      }
+    }
+
+    function markPlaying() {
+      clearWaitTimer();
+      setVideoWaiting(false);
+    }
+
+    function markWaiting() {
+      clearWaitTimer();
+      waitTimer = window.setTimeout(() => setVideoWaiting(true), 1_500);
+    }
+
+    setVideoWaiting(false);
+    waitTimer = window.setTimeout(() => setVideoWaiting(true), 4_000);
+    el.addEventListener("loadeddata", markPlaying);
+    el.addEventListener("playing", markPlaying);
+    el.addEventListener("waiting", markWaiting);
+    el.addEventListener("stalled", markWaiting);
+    return () => {
+      clearWaitTimer();
+      el.removeEventListener("loadeddata", markPlaying);
+      el.removeEventListener("playing", markPlaying);
+      el.removeEventListener("waiting", markWaiting);
+      el.removeEventListener("stalled", markWaiting);
+    };
+  }, [participant, source, revision]);
+  
 
   useEffect(() => {
     const el = videoRef.current;
@@ -531,6 +579,30 @@ function VideoTile({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [participant, source, revision]);
 
+  const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
+  const cameraPub = participant.getTrackPublication(Track.Source.Camera);
+  const publication = participant instanceof LocalParticipant
+    ? undefined
+    : ((source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub) as
+        | RemoteTrackPublication
+        | undefined);
+
+  async function retryVideo() {
+    if (!publication || retryingVideo) return;
+    setRetryingVideo(true);
+    setVideoWaiting(false);
+    try {
+      await publication.setEnabled(false);
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+      await publication.setEnabled(true);
+    } catch (retryError) {
+      console.error("Admin observer video resubscribe failed", retryError);
+      setVideoWaiting(true);
+    } finally {
+      setRetryingVideo(false);
+    }
+  }
+
   const name = participant.name || participant.identity;
   const isScreen = source === Track.Source.ScreenShare;
 
@@ -555,6 +627,25 @@ function VideoTile({
             }`}
           >
             {name.slice(0, 1).toUpperCase()}
+          </div>
+        </div>
+      ) : null}
+      {hasVideo && videoWaiting ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 p-4 text-center">
+          <div>
+            <p className="text-sm font-medium text-white">Video isn&apos;t arriving yet</p>
+            <p className="mt-1 text-xs text-slate-300">
+              Audio may still work. This can happen if the sender&apos;s connection is weak.
+            </p>
+            {publication ? (
+              <button
+                onClick={retryVideo}
+                disabled={retryingVideo || publication.isMuted}
+                className="mt-3 rounded-lg bg-white/15 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retryingVideo ? "Reconnecting video…" : "Try video again"}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
