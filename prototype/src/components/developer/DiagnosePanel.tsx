@@ -6,6 +6,7 @@ import type { Finding, RepairOffer } from "@/lib/diagnose";
 
 type StudentHit = { id: string; studentCode: string | null; level: string; name: string | null; email: string };
 type DiagnosisResult = {
+  checkedAt: string;
   student: { id: string; name: string | null; email: string; studentCode: string | null; level: string };
   diagnosis: { findings: Finding[]; rulesRun: number; ruleErrors: Array<{ rule: string; error: string }> };
   paystack: { checked: boolean; emailChecked?: string; error?: string; transactionsSeen?: number };
@@ -39,6 +40,7 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
   const [reference, setReference] = useState("");
   const [confirming, setConfirming] = useState<string | null>(null); // offer key awaiting confirmation
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [snapshotStale, setSnapshotStale] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const diagnose = useCallback(async (studentId: string, opts: { deep?: boolean; references?: string[] } = {}) => {
@@ -51,7 +53,8 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
         body: JSON.stringify({ studentId, deep: opts.deep === true, references: opts.references ?? [] }),
       });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `HTTP ${response.status}`);
-      setResult(await response.json());
+      setResult((await response.json()) as DiagnosisResult);
+      setSnapshotStale(false);
       setHits([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -59,6 +62,21 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
       setBusy(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!result) return;
+    const markSnapshotStale = () => {
+      if (document.visibilityState !== "visible") return;
+      setSnapshotStale(true);
+      setConfirming(null);
+    };
+    window.addEventListener("focus", markSnapshotStale);
+    document.addEventListener("visibilitychange", markSnapshotStale);
+    return () => {
+      window.removeEventListener("focus", markSnapshotStale);
+      document.removeEventListener("visibilitychange", markSnapshotStale);
+    };
+  }, [result]);
 
   // A complaint or drift incident hands us somebody to look at.
   useEffect(() => {
@@ -86,7 +104,7 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
   }
 
   async function repair(offer: RepairOffer) {
-    if (!result) return;
+    if (!result || snapshotStale) return;
     setBusy(true);
     setError(null);
     setConfirming(null);
@@ -99,7 +117,10 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
       setOutcome(data);
-      if (data.after) setResult(data.after);
+      if (data.after) {
+        setResult(data.after);
+        setSnapshotStale(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "The repair could not run.");
     } finally {
@@ -159,7 +180,7 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={busy} onClick={() => { setOutcome(null); diagnose(result.student.id); }} className="rounded-xl border border-[var(--border)] px-3 py-1.5 text-xs font-semibold">
-                  Run again
+                  Refresh records
                 </button>
                 <button type="button" disabled={busy} onClick={() => { setOutcome(null); diagnose(result.student.id, { deep: true }); }} className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
                   {busy ? "Working…" : "Deep check — ask Paystack"}
@@ -173,6 +194,16 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
                   ? `Paystack could not be checked: ${result.paystack.error}`
                   : "Paystack has not been asked. The deep check is read-only — it looks at what they paid there and compares it with what we recorded."}
             </p>
+            {snapshotStale && (
+              <p role="status" className="mt-3 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-700">
+                This diagnosis is a snapshot and may no longer match live records. Refresh records before relying on findings or running a repair.
+              </p>
+            )}
+            {result.checkedAt && (
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Records checked {new Date(result.checkedAt).toLocaleString()}.
+              </p>
+            )}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <input
                 value={reference}
@@ -233,12 +264,12 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
                                     <>
                                       <p className="text-xs"><strong>This will:</strong> {offer.preview}</p>
                                       <div className="mt-2 flex gap-2">
-                                        <button type="button" disabled={busy} onClick={() => repair(offer)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Yes, do it</button>
+                                        <button type="button" disabled={busy || snapshotStale} onClick={() => repair(offer)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Yes, do it</button>
                                         <button type="button" onClick={() => setConfirming(null)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold">Cancel</button>
                                       </div>
                                     </>
                                   ) : (
-                                    <button type="button" disabled={busy} onClick={() => setConfirming(key)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
+                                    <button type="button" disabled={busy || snapshotStale} onClick={() => setConfirming(key)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
                                       {offer.label}
                                     </button>
                                   )}

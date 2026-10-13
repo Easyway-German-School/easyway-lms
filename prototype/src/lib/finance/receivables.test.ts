@@ -38,6 +38,62 @@ describe("computeStudentFinance", () => {
     expect(abuja.tuitionFee).toBe(180_000);
   });
 
+  it("uses the frozen current-level charge instead of a later price-book quote", () => {
+    const row = computeStudentFinance(
+      student({
+        id: "frozen-fee",
+        level: "A1",
+        payments: [{ amount: 180_000, level: "A1" }],
+        tuitionCharges: [
+          {
+            id: "frozen-a1",
+            level: "A1",
+            amount: 180_000,
+            createdAt: new Date(NOW.getTime() - DAY),
+          },
+        ],
+      }),
+      NOW,
+    );
+
+    expect(row.tuitionFee).toBe(180_000);
+    expect(row.requiredDeposit).toBe(108_000);
+    expect(row.fullPaid).toBe(true);
+    expect(row.owed).toBe(0);
+  });
+
+  it("keeps a paid current level distinct from debt on a prior level", () => {
+    const row = computeStudentFinance(
+      student({
+        id: "current-and-legacy",
+        level: "B1",
+        payments: [{ amount: 180_000, level: "B1" }],
+        tuitionCharges: [
+          {
+            id: "legacy-a1",
+            level: "A1",
+            amount: 150_000,
+            legacyArrears: true,
+            createdAt: new Date(NOW.getTime() - 200 * DAY),
+          },
+          {
+            id: "current-b1",
+            level: "B1",
+            amount: 180_000,
+            createdAt: new Date(NOW.getTime() - DAY),
+          },
+        ],
+      }),
+      NOW,
+    );
+
+    expect(row.tuitionFee).toBe(180_000);
+    expect(row.cohort).toBe("full_paid");
+    expect(row.goForwardOutstanding).toBe(0);
+    expect(row.owed).toBe(150_000);
+    expect(row.openCharges.find((charge) => charge.level === "A1")?.outstanding).toBe(150_000);
+  });
+
   it("counts completed and partial (deposit) payments as money in the bank", () => {
     const row = computeStudentFinance(
       student({

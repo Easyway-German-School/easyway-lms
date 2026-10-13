@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, Suspense, useEffect, useRef, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
@@ -134,7 +134,7 @@ function PaymentsLedger() {
   const [totalCount, setTotalCount] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  async function loadPaymentsList() {
+  const loadPaymentsList = useCallback(async () => {
     try {
       setLoading(true);
       const url = new URL("/api/admin/payments-list", window.location.origin);
@@ -146,7 +146,7 @@ function PaymentsLedger() {
       if (page) url.searchParams.set("page", String(page));
       if (pageSize) url.searchParams.set("pageSize", String(pageSize));
 
-      const res = await fetch(url.toString());
+      const res = await fetch(url.toString(), { cache: "no-store" });
       if (!res.ok) throw new Error("Unable to load payments");
       const data = await res.json();
       setPayments(data.payments ?? []);
@@ -156,11 +156,23 @@ function PaymentsLedger() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filterStatus, filterMethod, filterClassType, filterLevel, search, page, pageSize]);
 
   useEffect(() => {
-    loadPaymentsList();
-  }, [filterStatus, filterMethod, filterClassType, filterLevel, search, page, pageSize]);
+    void loadPaymentsList();
+  }, [loadPaymentsList]);
+
+  useEffect(() => {
+    const refreshVisiblePayments = () => {
+      if (document.visibilityState === "visible") void loadPaymentsList();
+    };
+    window.addEventListener("focus", refreshVisiblePayments);
+    document.addEventListener("visibilitychange", refreshVisiblePayments);
+    return () => {
+      window.removeEventListener("focus", refreshVisiblePayments);
+      document.removeEventListener("visibilitychange", refreshVisiblePayments);
+    };
+  }, [loadPaymentsList]);
 
   useEffect(() => {
     setPage(1);
@@ -713,7 +725,7 @@ function PaymentsLedger() {
                   <th className="px-4 py-3">Amount</th>
                   <th className="px-4 py-3">Method</th>
                   <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Description</th>
+                  <th className="px-4 py-3">Recorded description</th>
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
@@ -799,7 +811,12 @@ function PaymentsLedger() {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3">{payment.description ?? "—"}</td>
+                          <td
+                            className="px-4 py-3"
+                            title="This is the description saved with the payment; it remains historical if the student later moves batches."
+                          >
+                            {payment.description ?? "—"}
+                          </td>
                           <td className="px-4 py-3">{new Date(payment.createdAt).toLocaleDateString()}</td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-2">

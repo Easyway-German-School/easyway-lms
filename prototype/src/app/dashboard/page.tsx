@@ -112,6 +112,7 @@ type Student = {
   recentGrades?: Array<{ type: string; score: number; createdAt: string }>;
   paymentSummary?: {
     totalPaid: number;
+    currentLevelPaid?: number;
     registrationFee: number;
     requiredDeposit: number;
     tuitionFee: number;
@@ -683,7 +684,7 @@ function DashboardContent() {
   const tuitionFee = paymentSummary?.tuitionFee ?? paymentUnlock?.tuitionFee ?? 0;
   const requiredDeposit = paymentSummary?.requiredDeposit ?? paymentUnlock?.requiredDeposit ?? 0;
   const pendingAmount = pendingPayment?.amount ?? 0;
-  const paymentBaseTotal = paymentSummary?.totalPaid ?? paymentUnlock?.totalPaid ?? 0;
+  const paymentBaseTotal = paymentSummary?.currentLevelPaid ?? paymentSummary?.totalPaid ?? paymentUnlock?.totalPaid ?? 0;
   const effectiveTotalPaid = paymentBaseTotal + pendingAmount;
   const paymentProgressPercent = tuitionFee > 0
     ? Math.min(100, Math.round((effectiveTotalPaid / tuitionFee) * 100))
@@ -1024,7 +1025,7 @@ function DashboardContent() {
                   )}
                 </div>
                 <div className={`mt-6 rounded-[28px] border p-6 shadow-[inset_0_2px_10px_rgba(0,0,0,0.15)] ${innerPanelClass}`}>
-                  <p className={`text-sm ${mutedClass}`}>{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
+                  <p className={`text-sm ${mutedClass}`}>{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${effectiveTotalPaid.toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
                   <div className={`mt-5 h-3 overflow-hidden rounded-full ${trackClass}`}>
                     <div className={`h-full rounded-full ${isPrivateStudent ? "" : "bg-[var(--accent)]"}`} style={{ width: `${paymentProgressPercent}%`, ...(fillStyle ?? {}) }} />
                   </div>

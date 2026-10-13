@@ -154,6 +154,9 @@ export async function GET() {
       outcome: student.outcome,
       paymentSummary: {
         totalPaid,
+        currentLevelPaid: access?.currentLevelPaid ?? totalPaid,
+        lifetimeOutstanding: access?.lifetimeOutstanding ?? Math.max(0, tuitionFee - totalPaid),
+        feeProgressPercent: access?.feeProgressPercent ?? paymentProgressPercent,
         registrationFee,
         requiredDeposit,
         tuitionFee,
@@ -180,6 +183,9 @@ export async function GET() {
       branchName: null,
       paymentSummary: {
         totalPaid: 0,
+        currentLevelPaid: 0,
+        lifetimeOutstanding: 0,
+        feeProgressPercent: 0,
         registrationFee: REGISTRATION_FEE,
         // No branch on this path, so the standard-tier A1 price is the honest
         // placeholder rather than a number invented here.

@@ -245,6 +245,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
 }
 
 export type DiagnosisResult = {
+  checkedAt: string;
   student: { id: string; name: string | null; email: string; studentCode: string | null; level: string };
   diagnosis: Diagnosis;
   paystack: { checked: boolean; emailChecked?: string; error?: string; transactionsSeen?: number };
@@ -252,6 +253,7 @@ export type DiagnosisResult = {
 };
 
 const summarise = (facts: Facts, diagnosis: Diagnosis): DiagnosisResult => ({
+  checkedAt: new Date().toISOString(),
   student: { id: facts.student.id, name: facts.user.name, email: facts.user.email, studentCode: facts.student.studentCode, level: facts.student.level },
   diagnosis,
   paystack: !facts.paystack

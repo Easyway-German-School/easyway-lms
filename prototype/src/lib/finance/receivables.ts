@@ -274,8 +274,8 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     classType: student.classType,
     pathway: student.pathway,
   };
-  const tuitionFee = tuitionFeeFor(feeLookup);
-  const requiredDeposit = requiredDepositFor(feeLookup);
+  const quotedTuitionFee = tuitionFeeFor(feeLookup);
+  const quotedRequiredDeposit = requiredDepositFor(feeLookup);
 
   /**
    * Defensive filter. `FINANCE_STUDENT_SELECT` already narrows to received,
@@ -309,6 +309,14 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
   const currentLine = ledger.lines.find(
     (line) => line.level.toUpperCase() === String(student.level ?? "").trim().toUpperCase(),
   );
+  // The charge is frozen when raised. A later price-book edit must not make
+  // the roster quote a different fee from the student's actual current bill.
+  const tuitionFee = currentLine?.net ?? quotedTuitionFee;
+  const requiredDeposit = currentLine
+    ? isTravelPackagePathway(student.pathway)
+      ? Math.min(currentLine.net, quotedRequiredDeposit)
+      : Math.round(currentLine.net * DEPOSIT_RATE)
+    : quotedRequiredDeposit;
   const paidOtherLevelsOnly = ledgerPopulated && !currentLine;
   const currentDeposit = currentLine
     ? isTravelPackagePathway(student.pathway)

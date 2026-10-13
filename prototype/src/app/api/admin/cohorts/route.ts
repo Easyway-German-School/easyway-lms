@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { realignStudentCodeById } from "@/lib/student-code";
-import { batchFromAdmission, monthNameToIndex, MONTH_NAMES } from "@/lib/batch";
+import { batchFromAdmission, monthNameToIndex, MONTH_NAMES, resolveBatchWindow } from "@/lib/batch";
 import { classifyRoster } from "@/lib/cohort-classify-server";
 import { readCurrentIntake } from "@/lib/intake-server";
 
@@ -186,23 +186,36 @@ export async function POST(request: Request) {
     // (phone, city, photo) must survive a batch change.
     const targets = await prisma.student.findMany({
       where,
-      select: { id: true, admission: true },
+      select: { id: true, admission: true, createdAt: true },
     });
 
     let updated = 0;
+    const now = new Date();
     for (let i = 0; i < targets.length; i += 50) {
       const chunk = targets.slice(i, i + 50);
       await Promise.all(
-        chunk.map((student) => {
+        chunk.map(async (student) => {
           const admission =
             student.admission && typeof student.admission === "object"
               ? (student.admission as Record<string, unknown>)
               : {};
-          if (admission.batch === month) return Promise.resolve();
-          updated += 1;
-          return prisma.student.update({
-            where: { id: student.id },
-            data: { admission: { ...admission, batch: month } },
+          const admissionChanged = admission.batch !== month;
+          if (admissionChanged) updated += 1;
+          const batchYear = resolveBatchWindow(month, {
+            registeredAt: student.createdAt,
+            now,
+          })?.year ?? null;
+          await prisma.$transaction(async (tx) => {
+            if (admissionChanged) {
+              await tx.student.update({
+                where: { id: student.id },
+                data: { admission: { ...admission, batch: month } },
+              });
+            }
+            await tx.studentEnrolment.updateMany({
+              where: { studentId: student.id, outcome: "ongoing", deletedAt: null },
+              data: { batchMonth: month, batchYear },
+            });
           });
         }),
       );
