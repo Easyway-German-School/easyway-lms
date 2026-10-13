@@ -24,7 +24,7 @@ import {
   FRESH_ENROLMENT_STUDENT_RESET,
   lookupEmailAccount,
 } from "@/lib/deleted-account";
-import { batchFromAdmission } from "@/lib/batch";
+import { batchFromAdmission, resolveBatchWindow } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
@@ -800,7 +800,18 @@ export async function PATCH(request: Request) {
     }
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
-    await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+    await prisma.$transaction(async (tx) => {
+      await tx.student.update({ where: { id: studentId }, data: updateStudent });
+      if (batch !== undefined) {
+        const batchYear = batch
+          ? resolveBatchWindow(batch, { registeredAt: student.createdAt })?.year ?? null
+          : null;
+        await tx.studentEnrolment.updateMany({
+          where: { studentId, outcome: "ongoing", deletedAt: null },
+          data: { batchMonth: batch || null, batchYear },
+        });
+      }
+    });
 
     if (sessionSlotChanged || deliveryModeChanged || hybridOnlineSlotChanged) {
       await writeAudit(unguardedPrisma, {

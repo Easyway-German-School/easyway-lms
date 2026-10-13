@@ -260,6 +260,7 @@ describe("deriveStudentAccess — August money must not open October", () => {
     expect(access.depositCleared).toBe(true);
     expect(access.totalPaid).toBe(180_000);
     expect(access.outstandingBalance).toBe(0);
+    expect(access.lifetimeOutstanding).toBe(180_000);
   });
 
   it("reports B1 deposit met when older go-forward debt still locks portal access", () => {

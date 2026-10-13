@@ -198,6 +198,8 @@ export type StudentAccess = {
   outstanding: number;
   /** Against the FULL fee — what a part-payer must clear to lift the balance lock. */
   outstandingBalance: number;
+  /** Total still owed across current and legacy charges, including earlier levels. */
+  lifetimeOutstanding: number;
   /** Progress towards the deposit (not the full fee) — that is the gate. */
   progressPercent: number;
   /** Progress towards the full fee — what the settle-your-balance screen shows. */
@@ -348,6 +350,7 @@ export function deriveStudentAccess({
     : ledger
       ? ledger.goForwardOutstanding
       : Math.max(0, fee - paid);
+  const lifetimeOutstanding = ledger?.lifetimeOutstanding ?? Math.max(0, fee - paid);
   const fullPaid = paidOtherLevelsOnly
     ? false
     : ledger
@@ -449,6 +452,7 @@ export function deriveStudentAccess({
     requiredDeposit: currentLevelDeposit,
     outstanding: outstandingDeposit,
     outstandingBalance,
+    lifetimeOutstanding,
     progressPercent,
     feeProgressPercent,
     lockReason,
