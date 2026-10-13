@@ -81,6 +81,34 @@ document.documentElement.classList.add('theme-'+t);
 }catch(e){document.documentElement.classList.add('theme-light')}})();`;
 
 /**
+ * Also applied before first paint, for the same reason THEME_BOOT is: by the
+ * time a `useEffect` could add this class, the expensive stuff has already
+ * painted once.
+ *
+ * `backdrop-filter` is the single biggest, least-visible battery and jank cost
+ * in this portal — there is no video, canvas or 3D anywhere outside a live
+ * class, but there are dozens of frosted-glass cards using it. Desktop Chrome
+ * and Safari composite it cheaply; most Android GPU drivers do not, and fall
+ * back to a software blur that is repainted on every scroll frame. `.reduce-fx`
+ * (see globals.css) strips it — every surface keeps its own background colour,
+ * it just loses the frosted softness — for: any Android device (the complaint
+ * this exists for), any device reporting 4GB RAM or 4 cores or fewer, and
+ * anyone with the browser's own Data Saver on. All three are read-only
+ * capability signals, never a hard allowlist of "this exact phone is fine" —
+ * a weak device with the string "Android" missing from its UA still gets
+ * caught by the RAM/core checks.
+ */
+const DEVICE_BOOT = `(function(){try{
+var ua=navigator.userAgent||'';
+var isAndroid=/Android/i.test(ua);
+var mem=navigator.deviceMemory;
+var cores=navigator.hardwareConcurrency;
+var saveData=navigator.connection&&navigator.connection.saveData;
+var weak=isAndroid||(typeof mem==='number'&&mem<=4)||(typeof cores==='number'&&cores<=4)||!!saveData;
+if(weak){document.documentElement.classList.add('reduce-fx')}
+}catch(e){}})();`;
+
+/**
  * Must match `STYLE_ID` in `BrandingProvider.tsx`. The provider looks this id
  * up by `document.getElementById` and updates its `textContent` on SPA
  * navigation rather than appending a second tag — if the ids ever disagree,
@@ -127,6 +155,7 @@ export default async function RootLayout({
         */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+        <script dangerouslySetInnerHTML={{ __html: DEVICE_BOOT }} />
         {/* Empty when the tenant has no colour set (EasyWay's own case) — the
             HTML stays byte-identical to before this existed. */}
         {brandingStyle && (

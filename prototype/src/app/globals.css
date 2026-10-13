@@ -943,6 +943,42 @@ html.theme-custom ::selection {
   .voice-wave span, .voice-core, .voice-orbit { animation: none; }
 }
 
+/* ---------------------------------------------------------------------------
+   REDUCED EFFECTS — `.reduce-fx` is added to <html> by DEVICE_BOOT in
+   layout.tsx, before first paint, for Android and other weak/low-power
+   hardware (see that script's comment for the exact signals).
+
+   `backdrop-filter` is cheap to composite on desktop Chrome/Safari and
+   expensive on most Android GPU drivers, which fall back to repainting a
+   software blur underneath the element on every scroll frame — continuous
+   CPU work for a purely decorative effect, with nothing on screen that
+   actually needs it. The attribute selector catches every Tailwind
+   `backdrop-blur-*` utility at once, across every component, without hunting
+   each one down. Nothing goes transparent: every card that uses it also sets
+   its own background colour/opacity, so removing just the blur leaves a
+   plain tinted panel instead of a frosted one.
+
+   Resets the Tailwind v4 custom properties the utility composes
+   `backdrop-filter` FROM (`.backdrop-blur { --tw-backdrop-blur: blur(8px) }`,
+   then `backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) …`
+   on the class itself) rather than setting `backdrop-filter` directly —
+   Tailwind's own build pipeline (Lightning CSS) silently emptied a direct
+   `backdrop-filter: none !important` override at this same selector, because
+   it treats that property as owned by its composite-variable system; the
+   underlying custom properties are ordinary and are not touched that way.
+   --------------------------------------------------------------------------- */
+html.reduce-fx [class*="backdrop-blur"] {
+  --tw-backdrop-blur: initial;
+  --tw-backdrop-brightness: initial;
+  --tw-backdrop-contrast: initial;
+  --tw-backdrop-grayscale: initial;
+  --tw-backdrop-hue-rotate: initial;
+  --tw-backdrop-invert: initial;
+  --tw-backdrop-opacity: initial;
+  --tw-backdrop-saturate: initial;
+  --tw-backdrop-sepia: initial;
+}
+
 /*
  * iPhone auto-zoom on text fields.
  *

@@ -139,6 +139,40 @@ function IncidentList({
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const [actionNotice, setActionNotice] = useState("");
+  const [logOpen, setLogOpen] = useState(false);
+  const [logRoute, setLogRoute] = useState("");
+  const [logMessage, setLogMessage] = useState("");
+  const [logSeverity, setLogSeverity] = useState("low");
+  const [logging, setLogging] = useState(false);
+  const [logError, setLogError] = useState("");
+
+  async function logByHand() {
+    if (!logMessage.trim()) {
+      setLogError("Describe the problem.");
+      return;
+    }
+    setLogging(true);
+    setLogError("");
+    try {
+      const response = await fetch("/api/admin/developer/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: logMessage.trim(), route: logRoute.trim() || undefined, severity: logSeverity }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Could not log it.");
+      setLogMessage("");
+      setLogRoute("");
+      setLogSeverity("low");
+      setLogOpen(false);
+      setActionNotice("Logged. It will show up below, grouped with any others about the same page.");
+      await load();
+    } catch (error) {
+      setLogError(error instanceof Error ? error.message : "Could not log it.");
+    } finally {
+      setLogging(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ take: String(limit ?? 60) });
@@ -241,6 +275,51 @@ function IncidentList({
   return (
     <div className="space-y-3">
       {actionNotice && <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{actionNotice}</p>}
+      {!compact && (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
+          <button type="button" onClick={() => setLogOpen((v) => !v)} className="text-xs font-semibold text-[var(--accent)] underline">
+            {logOpen ? "Cancel" : "Log a problem by hand (heard outside the app — email, WhatsApp, a call)"}
+          </button>
+          {logOpen && (
+            <div className="mt-3 space-y-2">
+              <textarea
+                value={logMessage}
+                onChange={(e) => setLogMessage(e.target.value)}
+                placeholder="What the student or tutor said, in their own words or yours…"
+                rows={3}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] p-2 text-sm"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={logRoute}
+                  onChange={(e) => setLogRoute(e.target.value)}
+                  placeholder="Page, optional (e.g. /live)"
+                  className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm"
+                />
+                <select
+                  value={logSeverity}
+                  onChange={(e) => setLogSeverity(e.target.value)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+                <button
+                  type="button"
+                  disabled={logging}
+                  onClick={logByHand}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {logging ? "Logging…" : "Log it"}
+                </button>
+              </div>
+              {logError && <p role="alert" className="text-xs text-red-500">{logError}</p>}
+            </div>
+          )}
+        </div>
+      )}
       {!compact && (
         <div className="flex flex-wrap items-center gap-2">
           {(["active", "resolved", "ignored", "all"] as const).map((value) => (

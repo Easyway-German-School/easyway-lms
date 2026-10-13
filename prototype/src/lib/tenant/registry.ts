@@ -57,9 +57,17 @@ export const TENANT_OWNED_MODELS = [
   "Certificate",
   "Invoice",
   "Payment",
-  "ReferralRedemption",
-  "ReferralHold",
   "TuitionCharge",
+  // Self-serve admin API keys and the promo/referral system: both carry their
+  // own `tenantId` (see each model's own doc comment in schema.prisma, which
+  // already points back here) and are created in-session by one school's own
+  // admin or student, never by a sessionless path — the same test that puts
+  // Incident/BackupRun in GLOBAL_MODELS instead.
+  "AdminApiKey",
+  "PromoCode",
+  "PromoRedemption",
+  "PromoRedemptionHold",
+  "PromoPayout",
   "PaymentPlan",
   "Lead",
   // Growth Desk: the sales pipeline sitting on top of Lead. Same reasoning —
@@ -380,6 +388,23 @@ export const GLOBAL_MODELS = {
    * User/Student the token is spent on — see the model doc in schema.prisma.
    */
   SignupToken: "looked up by unguessable token/ref, pre-authentication; tenant is stamped on the account it creates",
+
+  /**
+   * The kill switch for the one fully-automatic repair (lib/auto-heal.ts):
+   * one row per pattern key, `enabled`/`dryRun` read platform-wide. There is
+   * no tenant column at all — a pattern is either live or it isn't, for
+   * every school at once — so there is nothing to scope.
+   */
+  AutoHealPattern: "a platform-wide kill switch, keyed by pattern name; no tenant column exists to scope by",
+
+  /**
+   * What AutoHealPattern's engine actually did, each time — written by the
+   * same sessionless paths as Incident (a cron tick, a background nudge),
+   * for the same reason: there is no tenant in context when a derived record
+   * like this is created. `tenantId` on the row is an audit column, same as
+   * Incident's.
+   */
+  AutoHealLog: "platform-wide auto-heal decision log; written by sessionless paths, tenantId is an audit column",
 
   /**
    * The problem register (src/lib/incidents.ts): one row per distinct error,
