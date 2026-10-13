@@ -24,6 +24,7 @@ const base = (over: Partial<Facts> = {}): Facts => ({
   hasPhoto: true,
   verdict: portalVerdict({ hasAccess: true, lockReason: null }, true),
   payments: [],
+  priorLevelArrears: [],
   snapshot: null,
   paystack: null,
   ...over,
@@ -139,6 +140,40 @@ describe("the rules", () => {
   it("missing-level-charge: says nothing when they simply have not paid enough yet (no drift, just unpaid)", () => {
     const d = diagnose(base({ access: { ...base().access, totalPaid: 50_000, currentLevelPaid: 50_000, tuitionFee: 400_000 } }));
     expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("stale-prior-level-lock: current level settled, an earlier level's charge is what is actually locking them", () => {
+    // Exactly the returning-student shape: B1 fully paid, A2 still carries an
+    // open, un-flagged charge — the admin file would say "nothing outstanding"
+    // on B1 while the ledger-driven lock stays shut. A different shape from
+    // missing-level-charge above: there the charge does not exist at all; here
+    // it exists, is older, and was simply never flagged legacy.
+    const verdict = portalVerdict({ hasAccess: false, lockReason: "unsettled_balance" }, true);
+    const f = diagnose(
+      base({
+        verdict,
+        access: { ...base().access, hasAccess: false, lockReason: "unsettled_balance" },
+        priorLevelArrears: [{ chargeId: "c-a2", level: "A2", outstanding: 35_000 }],
+      }),
+    ).findings.find((x) => x.rule === "stale-prior-level-lock")!;
+    expect(f.severity).toBe("problem");
+    expect(f.title).toContain("A2");
+    expect(f.title).toContain("₦35,000");
+    expect(f.offers).toMatchObject([{ id: "resolve_prior_level_arrears", needs: "payments" }]);
+  });
+
+  it("stale-prior-level-lock stays silent when nothing is dragging on an earlier level, or the lock is a plain deposit gate", () => {
+    expect(diagnose(base({ priorLevelArrears: [] })).findings.some((f) => f.rule === "stale-prior-level-lock")).toBe(false);
+    const depositLock = portalVerdict({ hasAccess: false, lockReason: "unpaid_deposit" }, true);
+    expect(
+      diagnose(
+        base({
+          verdict: depositLock,
+          access: { ...base().access, hasAccess: false, lockReason: "unpaid_deposit" },
+          priorLevelArrears: [{ chargeId: "c-a2", level: "A2", outstanding: 35_000 }],
+        }),
+      ).findings.some((f) => f.rule === "stale-prior-level-lock"),
+    ).toBe(false);
   });
 
   it("missing-student-code: warns and offers the repair, needing the students capability", () => {

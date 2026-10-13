@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { isReturningLevelStudent, sumPaidTowardLevel } from "@/lib/payment-level";
+import { buildLedger } from "@/lib/finance/ledger";
 import { BEHIND_TUITION_MIN_DAYS } from "@/lib/finance/receivables";
 import { accessFromStudent } from "@/lib/student-access";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
@@ -336,6 +337,24 @@ export async function GET(
   const owed = returningStudent ? Math.max(0, fee - paidTowardLevel) : access.outstandingBalance;
 
   /**
+   * THIS LEVEL being clear is not the same question as THE PORTAL being open.
+   * `owed` above only ever looks at the current level, so a returning student
+   * whose current level is fully paid shows "nothing outstanding" here even
+   * when an older, un-flagged charge is still what `access.hasAccess` is
+   * reading to keep the balance lock shut — the exact split this file's own
+   * module comment promises never to allow. Surfacing it is what lets the
+   * page say why, instead of showing "Nothing outstanding" next to a locked
+   * padlock with no explanation. See lib/diagnose.ts's "stale-prior-level-lock"
+   * rule (Diagnose & fix tab) for the one-click repair.
+   */
+  const priorLevelLedger = buildLedger(student.tuitionCharges, access.totalPaid, now, receivedTuitionPayments);
+  const priorLevelArrears = priorLevelLedger.lines.filter(
+    (line) => line.outstanding > 0 && !line.legacyArrears && line.level.toUpperCase() !== currentLevel,
+  );
+  const owesPriorLevel = priorLevelArrears.length > 0;
+  const priorLevelOutstanding = priorLevelArrears.reduce((sum, line) => sum + line.outstanding, 0);
+
+  /**
    * Which side of the padlock they are on. Named the same four ways the
    * overview names them so the two screens cannot drift apart, and computed
    * for EVERY admin — a secretary is not shown the amounts but absolutely
@@ -523,6 +542,8 @@ export async function GET(
             deposit,
             paid,
             owed,
+            owesPriorLevel,
+            priorLevelOutstanding,
             feeProgressPercent: access.feeProgressPercent,
             reminderStages: (student.feeRemindersScheduled ?? {}) as Record<string, boolean>,
             payments: (returningStudent

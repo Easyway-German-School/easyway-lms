@@ -97,6 +97,18 @@ export type Facts = {
   hasPhoto: boolean;
   verdict: PortalVerdict;
   payments: PaymentFact[];
+  /**
+   * Open TuitionCharge rows for a level OTHER than the one the student is in
+   * now, not already flagged `legacyArrears`. These are what a "paid in full"
+   * student page and a locked portal can disagree about: the office looks at
+   * the CURRENT level (settled) and sees nothing owing, while the lock reads
+   * the whole ledger and is still held shut by an older, unflagged charge.
+   * See src/lib/finance/ledger.ts and the dossier route's `returningStudent`
+   * handling — this is the one gap `ruleMissingLevelCharge` below does not
+   * cover (that one is a MISSING charge; this one is an old charge that still
+   * exists and is still open).
+   */
+  priorLevelArrears: Array<{ chargeId: string; level: string; outstanding: number }>;
   /** What the student's own browser last reported (Phase 2's witness), if it ever has. */
   snapshot: { verdictKey: string; changedAt: string; lastWitnessAt: string | null; lastWitnessRendered: string | null } | null;
   /** Present only when the deep check (which asks Paystack) was run. */
@@ -109,7 +121,7 @@ export type Facts = {
 
 export type Severity = "problem" | "warning" | "info";
 
-export type RepairId = "record_paystack_payment" | "assign_student_code" | "sync_tuition_charge";
+export type RepairId = "record_paystack_payment" | "assign_student_code" | "sync_tuition_charge" | "resolve_prior_level_arrears";
 
 export type RepairOffer = {
   id: RepairId;
@@ -322,6 +334,40 @@ const ruleMissingLevelCharge: Rule = {
   },
 };
 
+const ruleStalePriorLevelLock: Rule = {
+  id: "stale-prior-level-lock",
+  run(facts) {
+    if (facts.access.lockReason !== "unsettled_balance") return null;
+    if (facts.priorLevelArrears.length === 0) return null;
+    const total = facts.priorLevelArrears.reduce((sum, c) => sum + c.outstanding, 0);
+    const levels = [...new Set(facts.priorLevelArrears.map((c) => c.level))].join(", ");
+    return {
+      rule: "stale-prior-level-lock",
+      severity: "problem",
+      title: `Locked by ${naira(total)} still open on an earlier level (${levels}) — not the one they are in now`,
+      detail:
+        "This student's CURRENT level is fully paid, but the balance lock reads the whole ledger, and an older charge from a " +
+        "level they have already passed is still open and was never marked as legacy arrears. That is why their own file can " +
+        "show \"nothing outstanding\" while their portal stays locked: the office view narrows to this level, the lock does not. " +
+        "If that old charge is genuinely uncollectable, or was raised at a price later corrected, marking it legacy arrears stops " +
+        "it from walling off their portal — the debt stays on file to chase, it just stops gating access.",
+      evidence: facts.priorLevelArrears.map((c) => ({ label: c.level, value: naira(c.outstanding) })),
+      offers: [
+        {
+          id: "resolve_prior_level_arrears",
+          label: "Unlock — mark the earlier balance as legacy arrears",
+          preview:
+            `Mark the open charge${facts.priorLevelArrears.length === 1 ? "" : "s"} on ${levels} (${naira(total)}) as legacy ` +
+            "arrears. Nothing is written off and nothing is deleted — the balance stays on file to chase — it just stops " +
+            "blocking this student's portal.",
+          needs: "payments",
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
 const ruleMissingCode: Rule = {
   id: "missing-student-code",
   run(facts) {
@@ -403,6 +449,7 @@ const ruleStaleScreen: Rule = {
 /** The order is the order findings are computed in; severity decides display order. */
 export const RULES: Rule[] = [
   ruleUnrecordedPayment,
+  ruleStalePriorLevelLock,
   ruleTenantMismatch,
   ruleStaleScreen,
   ruleMissingLevelCharge,
