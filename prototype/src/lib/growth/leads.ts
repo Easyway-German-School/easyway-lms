@@ -1,7 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { logLeadActivity } from "@/lib/growth/activity";
-import { createFollowUpTask } from "@/lib/growth/tasks";
+import { createFollowUpTask, autoCompleteTasksForLeadActivity } from "@/lib/growth/tasks";
 import { pickRepForLead } from "@/lib/growth/intelligence";
+import { readGrowthAutoAssignSettings } from "@/lib/growth/auto-assign-settings";
+import { currentTenantId } from "@/lib/tenant/context";
+import { notify, KIND } from "@/lib/notify";
 
 /**
  * The Growth Desk pipeline layer over Lead.
@@ -14,15 +17,21 @@ import { pickRepForLead } from "@/lib/growth/intelligence";
  * sequence of rows nobody can quietly rewrite.
  */
 
-/** Hand a lead to a specific rep, logging who did it and when. */
+/**
+ * Hand a lead to a specific rep, logging who did it and when, and buzzing
+ * their phone — the whole point of a rep seeing this from their pocket
+ * rather than opening the desk cold. Best-effort: a push that fails to send
+ * must never undo the assignment itself.
+ */
 export async function assignLead(opts: {
   leadId: string;
   assignedToId: string;
   actorId?: string | null;
 }): Promise<void> {
-  await prisma.lead.update({
+  const lead = await prisma.lead.update({
     where: { id: opts.leadId },
     data: { assignedToId: opts.assignedToId },
+    select: { name: true },
   });
 
   await logLeadActivity({
@@ -31,6 +40,23 @@ export async function assignLead(opts: {
     payload: { assignedToId: opts.assignedToId, auto: opts.actorId == null },
     actorId: opts.actorId ?? null,
   });
+
+  try {
+    await notify({
+      to: { userIds: [opts.assignedToId] },
+      kind: KIND.leadAssigned,
+      title: "New lead assigned",
+      message:
+        opts.actorId == null
+          ? `${lead.name} was auto-assigned to you.`
+          : `${lead.name} was handed to you by your Teamlead.`,
+      link: "/admin/growth",
+      senderId: opts.actorId ?? undefined,
+      email: false,
+    });
+  } catch (error) {
+    console.error("Growth Desk assignment notification failed:", error);
+  }
 }
 
 /**
@@ -62,6 +88,9 @@ export async function updateLeadStage(opts: {
     payload: { from: current.status, to: opts.status, note: opts.note ?? null },
     actorId: opts.actorId ?? null,
   });
+
+  // Moving the stage IS the proof of work — see autoCompleteTasksForLeadActivity.
+  await autoCompleteTasksForLeadActivity({ leadId: opts.leadId, actorId: opts.actorId ?? null });
 }
 
 /**
@@ -69,10 +98,15 @@ export async function updateLeadStage(opts: {
  * Who it goes to is now learned, not just least-loaded — see
  * src/lib/growth/intelligence.ts's pickRepForLead for the weighted-random
  * policy and why it is deliberately not "send it to whoever converts
- * best". Silent no-op when there is no rep to hand it to yet — the lead
- * just sits in the unassigned pool until a Teamlead claims it by hand.
+ * best". Silent no-op when there is no rep to hand it to yet, or when the
+ * Teamlead has switched auto-assign off (src/lib/growth/auto-assign-settings.ts)
+ * — either way the lead just sits in the unassigned pool until a Teamlead
+ * claims it by hand.
  */
 export async function autoAssignNewLead(leadId: string, leadName: string): Promise<void> {
+  const autoAssign = await readGrowthAutoAssignSettings(currentTenantId());
+  if (!autoAssign.enabled) return;
+
   const repId = await pickRepForLead();
   if (!repId) return;
 

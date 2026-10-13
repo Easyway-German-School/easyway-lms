@@ -108,7 +108,34 @@ export function resolveBatchAbsolute(
     // July, not the July that had already gone when they walked in.
     const year =
       monthIndex >= registeredAt.getMonth() ? registeredAt.getFullYear() : registeredAt.getFullYear() + 1;
-    return year * 12 + monthIndex;
+    let absolute = year * 12 + monthIndex;
+
+    /**
+     * STALE-REGISTRATION GUARD.
+     *
+     * The rule above only looks at the MONTH a student registered in, never
+     * at how long ago that was. Correct for a brand-new signup (registeredAt
+     * is basically `now`). Wrong for anyone whose account predates the batch
+     * label now on their record by a year or more — every A2+ student, since
+     * their account carries their ORIGINAL registration date (from A1, or
+     * earlier), not when they were placed in their current batch. Without
+     * this guard, a student who paid for "October" this year could resolve
+     * to October of whatever year she originally registered — a batch the
+     * system then believes ended long ago, producing exactly the "my
+     * dashboard says I've completed a level I haven't started" complaint.
+     *
+     * A batch label never means something more than about a year stale (the
+     * same ceiling `batch-reservation.ts`'s MAX_BARE_MONTH_LEAD_MONTHS applies
+     * looking the other way, into the future). Once the naive result falls
+     * more than 11 months behind `now`, roll it forward by whole years until
+     * it lands within one cycle of today — the occurrence the label plainly
+     * means right now, not the one nearest a long-past registration date.
+     */
+    const nowAbsolute = now.getFullYear() * 12 + now.getMonth();
+    if (nowAbsolute - absolute > 11) {
+      absolute += 12 * Math.ceil((nowAbsolute - absolute - 11) / 12);
+    }
+    return absolute;
   }
 
   // No registration date to anchor on. Fall back to the most recent occurrence

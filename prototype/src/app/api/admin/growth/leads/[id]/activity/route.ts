@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { logLeadActivity } from "@/lib/growth/activity";
 import { isGrowthAiActive } from "@/lib/growth/ai-settings";
-import { rescoreOpenTasksForLead } from "@/lib/growth/tasks";
+import { rescoreOpenTasksForLead, autoCompleteTasksForLeadActivity } from "@/lib/growth/tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +94,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     payload: { note: note.trim() },
     actorId: gate.admin.userId,
   });
+
+  // A logged note or call IS the proof of work — see autoCompleteTasksForLeadActivity.
+  // No self-click "done" needed or accepted for this lead's follow-up task.
+  await autoCompleteTasksForLeadActivity({ leadId: id, actorId: gate.admin.userId });
 
   // Best-effort, after the response — see enrichLeadInBackground. A rep
   // saving a note never waits on this, and it silently does nothing when

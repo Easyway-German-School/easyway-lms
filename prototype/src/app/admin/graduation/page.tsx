@@ -105,6 +105,9 @@ type Sweep = {
 
 const SWEEP_ORDER = ["on_desk", "moved_up", "no_label_strong", "no_label_weak", "unreadable_label", "other_batch", "still_running", "not_active", "top_level"];
 
+/** Reasons where re-pointing the learner's batch at a different month is safe — see lib/batch-sweep-server.ts. */
+const MOVABLE_REASONS = ["no_label_strong", "no_label_weak", "unreadable_label", "other_batch"];
+
 const SWEEP_LABEL: Record<string, string> = {
   on_desk: "On the lists above",
   moved_up: "Already moved up",
@@ -292,6 +295,9 @@ export default function GraduationPage() {
   const [sweep, setSweep] = useState<Sweep | null>(null);
   const [sweeping, setSweeping] = useState(false);
   const [sweepOpen, setSweepOpen] = useState<string | null>(null);
+  const [moveTarget, setMoveTarget] = useState<string>("September");
+  const [moving, setMoving] = useState(false);
+  const [moved, setMoved] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -413,6 +419,42 @@ export default function GraduationPage() {
       setError(e instanceof Error ? e.message : "That did not work");
     } finally {
       setBusy(false);
+      await load();
+      await runSweep(sweep.month);
+    }
+  }
+
+  async function moveToBatch() {
+    if (!sweep) return;
+    const rows = sweep.rows.filter((row) => MOVABLE_REASONS.includes(row.reason));
+    if (rows.length === 0) return;
+    if (
+      !window.confirm(
+        `Move ${plural(rows.length, "learner")} behind the ${sweep.month} batch onto the ${moveTarget} batch instead?\n\nThis only writes the batch name (and confirms their start date if it was never set, so a batch that has not opened yet cannot re-lock someone who has already paid and is already attending). Nobody is messaged. They then show up under the ${moveTarget} batch wherever it is read.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setMoving(true);
+    setError("");
+    setMoved("");
+    try {
+      let movedCount = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const json = await post({
+          action: "move",
+          fromMonth: sweep.month,
+          toMonth: moveTarget,
+          studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId),
+        });
+        movedCount += json.moved.length;
+      }
+      setMoved(`Moved ${plural(movedCount, "learner")} from the ${sweep.month} batch onto the ${moveTarget} batch.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work");
+    } finally {
+      setBusy(false);
+      setMoving(false);
       await load();
       await runSweep(sweep.month);
     }
@@ -541,11 +583,40 @@ export default function GraduationPage() {
             </div>
           </div>
 
+          {moved && <p className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-sm font-medium text-emerald-900">{moved}</p>}
+
           {sweep && (
             <div className="space-y-3">
               <p className="text-sm text-[var(--foreground)]">
                 Looked at <strong>{sweep.scanned}</strong> learners. <strong>{sweep.total}</strong> belong to the {sweep.month} {sweep.year} batch:
               </p>
+
+              {sweep.rows.some((row) => MOVABLE_REASONS.includes(row.reason)) && (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="text-sm text-[var(--foreground)]">
+                    <strong>{sweep.rows.filter((row) => MOVABLE_REASONS.includes(row.reason)).length}</strong> of these are really behind — put them on a different batch instead:
+                  </p>
+                  <select
+                    value={moveTarget}
+                    onChange={(e) => setMoveTarget(e.target.value)}
+                    className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--foreground)]"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m} value={m}>
+                        {m} batch
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={moving || busy}
+                    onClick={moveToBatch}
+                    className="rounded-full bg-[#FF6600] px-5 py-2 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    {moving ? "Moving…" : `Move to ${moveTarget}`}
+                  </button>
+                </div>
+              )}
+
               <ul className="space-y-2">
                 {SWEEP_ORDER.filter((reason) => (sweep.counts[reason] ?? 0) > 0).map((reason) => (
                   <li key={reason} className="rounded-2xl bg-[var(--background)] p-3">

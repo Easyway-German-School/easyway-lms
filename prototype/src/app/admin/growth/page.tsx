@@ -14,7 +14,25 @@ import {
   PlusIcon,
   UsersIcon,
   UploadIcon,
+  PhoneIcon,
+  ChatBubbleIcon,
 } from "@/components/icons";
+
+/**
+ * Nigerian-first phone normalisation for `tel:`/`wa.me` links, kept local
+ * and tiny rather than imported from src/lib/sms.ts — that module pulls in
+ * server-only SDKs, and this page is a client component. Importing it here
+ * would risk the exact "server code bundled into the client" failure mode
+ * already blocking the local dev server elsewhere in this app.
+ */
+function phoneDigits(raw: string | null): string | null {
+  const digits = (raw ?? "").replace(/[^\d]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("234") && digits.length === 13) return digits;
+  if (digits.startsWith("0") && digits.length === 11) return `234${digits.slice(1)}`;
+  if (digits.length === 10) return `234${digits}`;
+  return digits.length >= 10 ? digits : null;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -168,6 +186,46 @@ function Pill({ children, tone = "default" }: { children: ReactNode; tone?: "def
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${toneClass}`}>{children}</span>;
 }
 
+/**
+ * Today's real progress, as a ring instead of a number — the same trick as
+ * a fitness ring, for the same reason: "3 done" reads as a fact, a ring
+ * closing reads as momentum. With no quota set (quota === null) it still
+ * fills, slowly, toward an arbitrary visual ceiling — there's no target to
+ * hit, just today's count made visible.
+ */
+function MomentumRing({ done, quota }: { done: number; quota: number | null }) {
+  const target = quota ?? Math.max(done, 1);
+  const pct = Math.min(1, done / target);
+  const size = 72;
+  const stroke = 7;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--surface-alt)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - pct)}
+          style={{ transition: "stroke-dashoffset 0.4s ease" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-lg font-bold leading-none text-[var(--foreground)]">{done}</span>
+        {quota ? <span className="text-[10px] leading-none text-[var(--muted)]">of {quota}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -192,6 +250,9 @@ export default function GrowthDeskPage() {
   // because a 403 here is the EXPECTED, ordinary case for almost every
   // viewer, not a load failure the page should show an error for.
   const [aiSettings, setAiSettings] = useState<{ enabled: boolean; keyConfigured: boolean } | null>(null);
+  const [autoAssign, setAutoAssign] = useState<{ enabled: boolean; unassigned: number } | null>(null);
+  const [doneToday, setDoneToday] = useState(0);
+  const [quota, setQuota] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -210,16 +271,18 @@ export default function GrowthDeskPage() {
       fetch("/api/admin/growth/reports", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/team", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/admin/growth/intelligence", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/admin/growth/auto-assign", { cache: "no-store" }).then((r) => r.json()),
     ])
-      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody]) => {
+      .then(([meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody, autoAssignBody]) => {
         if (!active) return;
-        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody]) {
+        for (const body of [meBody, tasksBody, leadsBody, commissionBody, partnersBody, fundBody, reportsBody, teamBody, intelBody, autoAssignBody]) {
           if (body?.error) throw new Error(body.error);
         }
         setMe(meBody);
         setTeamStats(teamBody.reps ?? []);
         setSourceLearning(intelBody.sources ?? []);
         setRepLearning(intelBody.reps ?? []);
+        setAutoAssign({ enabled: autoAssignBody.enabled, unassigned: autoAssignBody.unassigned ?? 0 });
         // Only ever auto-picks the tab once, on the first load — after that
         // it's the person's own navigation, not something to override out
         // from under them on every refresh.
@@ -228,6 +291,8 @@ export default function GrowthDeskPage() {
           setTab(DEFAULT_TAB[meBody.title] ?? "today");
         }
         setTasks(tasksBody.tasks ?? []);
+        setDoneToday(tasksBody.doneToday ?? 0);
+        setQuota(typeof tasksBody.quota === "number" ? tasksBody.quota : null);
         setLeads(leadsBody.leads ?? []);
         setCommission(commissionBody.entries ?? []);
         setPartners(partnersBody.partners ?? []);
@@ -266,6 +331,21 @@ export default function GrowthDeskPage() {
     setError("");
     if (message) setNotice(message);
     setRefreshKey((k) => k + 1);
+  };
+
+  /**
+   * A note, a call, or a stage change can silently auto-complete a task on
+   * Today (see autoCompleteTasksForLeadActivity) — this pulls the queue back
+   * in sync so a cleared task doesn't keep sitting there until the next full
+   * refresh.
+   */
+  const refreshTasks = async () => {
+    const body = await fetch("/api/admin/growth/tasks", { cache: "no-store" }).then((r) => r.json());
+    if (!body?.error) {
+      setTasks(body.tasks ?? []);
+      setDoneToday(body.doneToday ?? 0);
+      setQuota(typeof body.quota === "number" ? body.quota : null);
+    }
   };
 
   const sortedTasks = useMemo(() => [...tasks].sort((a, b) => b.priorityScore - a.priorityScore), [tasks]);
@@ -329,6 +409,8 @@ export default function GrowthDeskPage() {
             tasks={sortedTasks}
             myReport={myReport}
             teamReports={teamReports}
+            doneToday={doneToday}
+            quota={quota}
             onTaskDone={async (taskId, outcome) => {
               const res = await fetch("/api/admin/growth/tasks", {
                 method: "PATCH",
@@ -356,6 +438,25 @@ export default function GrowthDeskPage() {
             leads={leads}
             scope={leadScope}
             onScopeChange={setLeadScope}
+            canReassign={me?.title === "sales_lead"}
+            reps={teamStats}
+            onReassign={async (leadId, assignedToId) => {
+              const res = await fetch("/api/admin/growth/leads", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ leadId, action: "reassign", assignedToId }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not reassign that lead.");
+              setLeads((prev) =>
+                prev.map((l) =>
+                  l.id === leadId
+                    ? { ...l, assignedTo: teamStats.find((r) => r.id === assignedToId) ?? l.assignedTo }
+                    : l,
+                ),
+              );
+              setNotice("Lead reassigned — they'll get a push.");
+            }}
             onStage={async (leadId, status) => {
               const res = await fetch("/api/admin/growth/leads", {
                 method: "PATCH",
@@ -366,6 +467,7 @@ export default function GrowthDeskPage() {
               if (!res.ok) return setError(body.error || "Could not update that lead.");
               setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status } : l)));
               setNotice("Stage updated.");
+              void refreshTasks();
             }}
             onNote={async (leadId, note) => {
               const res = await fetch(`/api/admin/growth/leads/${leadId}/activity`, {
@@ -376,6 +478,7 @@ export default function GrowthDeskPage() {
               const body = await res.json();
               if (!res.ok) return setError(body.error || "Could not save that note.");
               setNotice("Note saved to the lead's history.");
+              void refreshTasks();
             }}
             onImport={async (csv) => {
               const res = await fetch("/api/admin/growth/leads", {
@@ -405,6 +508,33 @@ export default function GrowthDeskPage() {
               if (!res.ok) return setError(body.error || "Could not change that setting.");
               setAiSettings({ enabled: body.enabled, keyConfigured: body.keyConfigured });
               setNotice(enabled ? "Growth Desk AI turned on." : "Growth Desk AI turned off.");
+            }}
+            autoAssign={autoAssign}
+            canManageAutoAssign={me?.title === "sales_lead"}
+            onToggleAutoAssign={async (enabled) => {
+              const res = await fetch("/api/admin/growth/auto-assign", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not change that setting.");
+              setAutoAssign({ enabled: body.enabled, unassigned: body.unassigned ?? 0 });
+              setNotice(enabled ? "Auto-assign turned on — new leads route themselves again." : "Auto-assign turned off — new leads will wait for you to hand them out.");
+            }}
+            quota={quota}
+            doneToday={doneToday}
+            canManageQuota={me?.title === "sales_lead"}
+            onSetQuota={async (count) => {
+              const res = await fetch("/api/admin/growth/quota", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ count }),
+              });
+              const body = await res.json();
+              if (!res.ok) return setError(body.error || "Could not change the quota.");
+              setQuota(typeof body.count === "number" ? body.count : null);
+              setNotice(count ? `Daily quota set to ${count}.` : "Daily quota cleared.");
             }}
           />
         ) : tab === "partners" ? (
@@ -481,12 +611,16 @@ function TodayTab({
   tasks,
   myReport,
   teamReports,
+  doneToday,
+  quota,
   onTaskDone,
   onSubmitReport,
 }: {
   tasks: Task[];
   myReport: TeamReport | null;
   teamReports: TeamReport[];
+  doneToday: number;
+  quota: number | null;
   onTaskDone: (taskId: string, outcome: "done" | "skipped") => void;
   onSubmitReport: (achievement: string, problemSolved: string) => void;
 }) {
@@ -497,11 +631,20 @@ function TodayTab({
   return (
     <div className="space-y-5">
       <Card>
-        <div>
-          <h2 className="text-lg font-bold">Up next</h2>
-          <p className="text-sm text-[var(--muted)]">
-            One thing at a time. Whatever you don't get to today is still here tomorrow — nothing to carry over by hand.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold">Up next</h2>
+            <p className="text-sm text-[var(--muted)]">
+              One thing at a time. Whatever you don't get to today is still here tomorrow — nothing to carry over by
+              hand.
+            </p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {quota
+                ? `${doneToday} of ${quota} today — earned by contact, never by a click.`
+                : `${doneToday} earned today — no quota set yet.`}
+            </p>
+          </div>
+          <MomentumRing done={doneToday} quota={quota} />
         </div>
 
         {!next ? (
@@ -514,15 +657,48 @@ function TodayTab({
               </p>
               <p className="mt-1 text-xl font-bold">{next.title}</p>
               {next.lead ? <p className="mt-1 text-sm text-[var(--muted)]">{next.lead.email}</p> : null}
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => onTaskDone(next.id, "done")}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-                >
-                  <CheckIcon className="h-4 w-4" />
-                  Done
-                </button>
+              {next.lead ? (
+                <p className="mt-3 text-xs text-[var(--muted)]">
+                  Call them, log a note, or move their stage in Pipeline — this clears itself the moment you do.
+                  Nothing to click here to claim it done.
+                </p>
+              ) : null}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {next.lead?.phone && phoneDigits(next.lead.phone)
+                  ? (() => {
+                      const digits = phoneDigits(next.lead!.phone)!;
+                      return (
+                        <>
+                          <a
+                            href={`tel:+${digits}`}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+                          >
+                            <PhoneIcon className="h-4 w-4" />
+                            Call now
+                          </a>
+                          <a
+                            href={`https://wa.me/${digits}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+                          >
+                            <ChatBubbleIcon className="h-4 w-4" />
+                            WhatsApp
+                          </a>
+                        </>
+                      );
+                    })()
+                  : null}
+                {!next.lead ? (
+                  <button
+                    type="button"
+                    onClick={() => onTaskDone(next.id, "done")}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    <CheckIcon className="h-4 w-4" />
+                    Done
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => onTaskDone(next.id, "skipped")}
@@ -538,13 +714,17 @@ function TodayTab({
                 {rest.map((task) => (
                   <li key={task.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                     <span>{task.title}</span>
-                    <button
-                      type="button"
-                      onClick={() => onTaskDone(task.id, "done")}
-                      className="text-xs font-semibold text-[var(--accent-ink)] hover:underline"
-                    >
-                      Mark done
-                    </button>
+                    {task.lead ? (
+                      <span className="text-xs text-[var(--muted)]">clears on contact</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onTaskDone(task.id, "done")}
+                        className="text-xs font-semibold text-[var(--accent-ink)] hover:underline"
+                      >
+                        Mark done
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -614,6 +794,9 @@ function PipelineTab({
   onStage,
   onNote,
   onImport,
+  canReassign,
+  reps,
+  onReassign,
 }: {
   leads: Lead[];
   scope: "mine" | "team";
@@ -621,12 +804,19 @@ function PipelineTab({
   onStage: (leadId: string, status: string) => void;
   onNote: (leadId: string, note: string) => void;
   onImport: (csv: string) => Promise<{ created: number; updated: number; skipped: Array<{ row: number; reason: string }> }>;
+  canReassign: boolean;
+  reps: RepStat[];
+  onReassign: (leadId: string, assignedToId: string) => void;
 }) {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [showImport, setShowImport] = useState(false);
   const [csv, setCsv] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+
+  const unassignedCount = scope === "team" ? leads.filter((l) => !l.assignedTo).length : 0;
+  const visibleLeads = scope === "team" && onlyUnassigned ? leads.filter((l) => !l.assignedTo) : leads;
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -678,6 +868,17 @@ function PipelineTab({
               Team
             </button>
           </div>
+          {scope === "team" && canReassign && unassignedCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setOnlyUnassigned((s) => !s)}
+              className={`rounded-xl px-3 py-1.5 text-sm font-semibold ${
+                onlyUnassigned ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-900"
+              }`}
+            >
+              {unassignedCount} unassigned{onlyUnassigned ? " · showing" : ""}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -709,11 +910,11 @@ function PipelineTab({
         </div>
       )}
 
-      {leads.length === 0 ? (
-        <Empty>No leads in this view yet.</Empty>
+      {visibleLeads.length === 0 ? (
+        <Empty>{onlyUnassigned ? "Nothing unassigned — everything's been handed out." : "No leads in this view yet."}</Empty>
       ) : (
         <ul className="divide-y divide-[var(--border)]">
-          {leads.map((lead) => (
+          {visibleLeads.map((lead) => (
             <li key={lead.id} className="space-y-2.5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -722,6 +923,30 @@ function PipelineTab({
                     {lead.email} · {lead.branchName ?? "no branch"}
                     {scope === "team" ? ` · ${lead.assignedTo?.name || lead.assignedTo?.email || "unassigned"}` : ""}
                   </p>
+                  {(() => {
+                    const digits = phoneDigits(lead.phone);
+                    if (!digits) return null;
+                    return (
+                      <p className="mt-1.5 flex items-center gap-3">
+                        <a
+                          href={`tel:+${digits}`}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-ink)]"
+                        >
+                          <PhoneIcon className="h-3.5 w-3.5" />
+                          Call
+                        </a>
+                        <a
+                          href={`https://wa.me/${digits}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-ink)]"
+                        >
+                          <ChatBubbleIcon className="h-3.5 w-3.5" />
+                          WhatsApp
+                        </a>
+                      </p>
+                    );
+                  })()}
                   {lead.aiSignal && (
                     <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                       <Pill tone={lead.aiSignal.urgency === "high" ? "warn" : lead.aiSignal.buyingSignal === "strong" ? "good" : "default"}>
@@ -743,6 +968,23 @@ function PipelineTab({
                   ))}
                 </select>
               </div>
+              {scope === "team" && canReassign ? (
+                <select
+                  value={lead.assignedTo?.id ?? ""}
+                  onChange={(e) => e.target.value && onReassign(lead.id, e.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
+                  aria-label={`Reassign ${lead.name}`}
+                >
+                  <option value="" disabled>
+                    {lead.assignedTo ? "Reassign to…" : "Assign to…"}
+                  </option>
+                  {reps.map((rep) => (
+                    <option key={rep.id} value={rep.id}>
+                      {rep.name || rep.email}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <div className="flex gap-2">
                 <input
                   value={noteDrafts[lead.id] ?? ""}
@@ -797,21 +1039,149 @@ function LearningRow({ label, rate, confident, sampleSize }: { label: string; ra
   );
 }
 
+/**
+ * The daily quota, set from the Team tab — phone or laptop, same as every
+ * other lever here. Local draft state so typing a number doesn't round-trip
+ * the whole page; only "Set" actually calls the API.
+ */
+function QuotaCard({
+  quota,
+  doneToday,
+  canManage,
+  onSetQuota,
+}: {
+  quota: number | null;
+  doneToday: number;
+  canManage: boolean;
+  onSetQuota: (count: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(quota != null ? String(quota) : "");
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">Daily quota</h2>
+          <p className="text-sm text-[var(--muted)]">
+            What each rep's momentum ring on Today fills toward. Counts only real contact — a note, a call, or a
+            stage change — never a self-click, so this number means what it says.
+          </p>
+          {quota ? (
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              You're at {doneToday} of {quota} yourself today.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-amber-700">No quota set — rings show today's count with no target.</p>
+          )}
+        </div>
+        {canManage ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="e.g. 5"
+              className="w-20 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const n = Number(draft);
+                if (Number.isFinite(n) && n > 0) onSetQuota(Math.round(n));
+              }}
+              disabled={!draft || !(Number(draft) > 0)}
+              className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Set
+            </button>
+            {quota ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft("");
+                  onSetQuota(null);
+                }}
+                className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <Pill tone={quota ? "good" : "default"}>{quota ? `${quota}/day` : "Not set"}</Pill>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function TeamTab({
   reps,
   sourceLearning,
   repLearning,
   aiSettings,
   onToggleAi,
+  autoAssign,
+  canManageAutoAssign,
+  onToggleAutoAssign,
+  quota,
+  doneToday,
+  canManageQuota,
+  onSetQuota,
 }: {
   reps: RepStat[];
   sourceLearning: SourceLearning[];
   repLearning: RepLearning[];
   aiSettings: { enabled: boolean; keyConfigured: boolean } | null;
   onToggleAi: (enabled: boolean) => void;
+  autoAssign: { enabled: boolean; unassigned: number } | null;
+  canManageAutoAssign: boolean;
+  onToggleAutoAssign: (enabled: boolean) => void;
+  quota: number | null;
+  doneToday: number;
+  canManageQuota: boolean;
+  onSetQuota: (count: number | null) => void;
 }) {
   return (
     <div className="space-y-5">
+      <QuotaCard quota={quota} doneToday={doneToday} canManage={canManageQuota} onSetQuota={onSetQuota} />
+
+      {autoAssign && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold">Auto-assign new leads</h2>
+              <p className="text-sm text-[var(--muted)]">
+                When on, a new lead is routed to a rep the moment it lands — same as always. Turn it off to hold
+                everything in an unassigned pool and hand leads out yourself, e.g. for a campaign you want to route by
+                hand.
+              </p>
+              {!autoAssign.enabled && autoAssign.unassigned > 0 ? (
+                <p className="mt-1 text-xs font-semibold text-amber-700">
+                  {autoAssign.unassigned} lead{autoAssign.unassigned === 1 ? "" : "s"} waiting, unassigned — reassign
+                  them from the Pipeline tab.
+                </p>
+              ) : null}
+            </div>
+            {canManageAutoAssign ? (
+              <button
+                type="button"
+                onClick={() => onToggleAutoAssign(!autoAssign.enabled)}
+                className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold ${
+                  autoAssign.enabled ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
+                }`}
+              >
+                {autoAssign.enabled ? "On — turn off" : "Off — turn on"}
+              </button>
+            ) : (
+              <Pill tone={autoAssign.enabled ? "good" : "warn"}>{autoAssign.enabled ? "On" : "Off"}</Pill>
+            )}
+          </div>
+        </Card>
+      )}
+
       {aiSettings && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -861,7 +1231,9 @@ function TeamTab({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Pill tone={rep.doneToday > 0 ? "good" : "default"}>{rep.doneToday} done today</Pill>
+                  <Pill tone={quota ? (rep.doneToday >= quota ? "good" : "default") : rep.doneToday > 0 ? "good" : "default"}>
+                    {quota ? `${rep.doneToday}/${quota} today` : `${rep.doneToday} done today`}
+                  </Pill>
                   <Pill tone={rep.pendingTasks > 5 ? "warn" : "default"}>{rep.pendingTasks} pending</Pill>
                   <Pill tone={rep.reportedToday ? "good" : "warn"}>
                     {rep.reportedToday ? "reported" : "no report yet"}

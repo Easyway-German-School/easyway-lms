@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { assignLead, updateLeadStage } from "@/lib/growth/leads";
 import { importLeadsFromCsv } from "@/lib/leads";
+import { normalizeGrowthTitle } from "@/lib/growth/titles";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +121,14 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "reassign") {
+    // Handing a lead to someone else is the Teamlead's call, not a rep's —
+    // a rep reassigning their own leads around would make the learned
+    // routing (pickRepForLead) impossible to trust.
+    const actor = await prisma.user.findUnique({ where: { id: gate.admin.userId }, select: { growthTitle: true } });
+    if (normalizeGrowthTitle(actor?.growthTitle) !== "sales_lead") {
+      return NextResponse.json({ error: "Only the Sales & Marketing Teamlead can reassign a lead" }, { status: 403 });
+    }
+
     const { assignedToId } = body as Record<string, unknown>;
     if (typeof assignedToId !== "string" || !assignedToId) {
       return NextResponse.json({ error: "assignedToId is required" }, { status: 400 });

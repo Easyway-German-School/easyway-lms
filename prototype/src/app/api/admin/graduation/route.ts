@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { graduateStudents, loadGraduationDesk, setBatchAutomatic } from "@/lib/graduation-server";
 import { undoWrongMoves } from "@/lib/graduation-repair-server";
-import { adoptIntoBatch, sweepBatch } from "@/lib/batch-sweep-server";
+import { adoptIntoBatch, moveIntoBatch, sweepBatch } from "@/lib/batch-sweep-server";
 
 /**
  * The graduation desk.
@@ -19,6 +19,7 @@ import { adoptIntoBatch, sweepBatch } from "@/lib/batch-sweep-server";
  *                                        Becca's next-level message, and tutors a note
  *   GET  ?sweep=August                   sweep every learner for that batch: who belongs, and why each is or is not listed
  *   POST {action:"adopt", month, studentIds} write the batch onto learners who have none but clearly were in it
+ *   POST {action:"move", fromMonth, toMonth, studentIds} re-point a swept learner's batch at a DIFFERENT month
  *   POST {action:"undoMoves", studentIds}  put back learners moved up without paying the deposit
  *   POST {action:"setAuto", enabled}     one switch for the whole thing, run each morning
  *
@@ -105,6 +106,22 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Add at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
       }
       const result = await adoptIntoBatch(ids, { where: fence(gate), tenantId, month, by: gate.session.user.email ?? undefined });
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (action === "move") {
+      const fromMonth = typeof body.fromMonth === "string" ? body.fromMonth : "";
+      const toMonth = typeof body.toMonth === "string" ? body.toMonth : "";
+      const ids: string[] = Array.isArray(body.studentIds)
+        ? (body.studentIds as unknown[]).filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        : [];
+      if (!fromMonth || !toMonth || ids.length === 0) {
+        return NextResponse.json({ error: "Choose a destination batch and at least one learner" }, { status: 400 });
+      }
+      if (ids.length > MAX_PER_CALL) {
+        return NextResponse.json({ error: `Move at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
+      }
+      const result = await moveIntoBatch(ids, { where: fence(gate), tenantId, fromMonth, toMonth, by: gate.session.user.email ?? undefined });
       return NextResponse.json({ ok: true, ...result });
     }
 

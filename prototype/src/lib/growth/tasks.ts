@@ -3,6 +3,7 @@ import { logLeadActivity } from "@/lib/growth/activity";
 import { isPartnerStale } from "@/lib/growth/partners";
 import { startOfToday } from "@/lib/growth/reports";
 import { sourceConversionRate } from "@/lib/growth/intelligence";
+import { notify, KIND } from "@/lib/notify";
 import type { GrowthTitle } from "@/lib/growth/titles";
 
 /**
@@ -112,6 +113,20 @@ export async function getDailyQueue(assignedToId: string) {
 }
 
 /**
+ * How many tasks this person has genuinely completed today — the Today
+ * tab's momentum ring, and the number the daily quota (see
+ * src/lib/growth/quota-settings.ts) is measured against. Counts every
+ * `done` SalesTask regardless of kind: a rep's are always lead-tied and
+ * can now only reach "done" via real contact, so for a rep this is
+ * already a fully verified figure with no extra filtering needed.
+ */
+export async function countDoneToday(assignedToId: string): Promise<number> {
+  return prisma.salesTask.count({
+    where: { assignedToId, status: "done", completedAt: { gte: startOfToday() } },
+  });
+}
+
+/**
  * The Growth Desk ops engine — what today's queue holds beyond raw lead
  * follow-ups, built around what each job actually does rather than one
  * generic list for everyone:
@@ -184,6 +199,8 @@ export async function completeTask(opts: {
   taskId: string;
   actorId: string;
   outcome: "done" | "skipped";
+  /** True when the system itself determined this, not a self-click — see autoCompleteTasksForLeadActivity. */
+  verified?: boolean;
 }): Promise<void> {
   const task = await prisma.salesTask.update({
     where: { id: opts.taskId },
@@ -194,8 +211,93 @@ export async function completeTask(opts: {
     await logLeadActivity({
       leadId: task.leadId,
       type: "task_completed",
-      payload: { taskId: task.id, outcome: opts.outcome, title: task.title },
+      payload: { taskId: task.id, outcome: opts.outcome, title: task.title, verified: opts.verified ?? false },
       actorId: opts.actorId,
     });
+  }
+}
+
+/**
+ * The system's own proof a rep actually worked a lead, replacing a
+ * self-click "Done" button for anything tied to a lead. Called right after
+ * a note, a call, or a stage change lands on one — from the person who
+ * logged it, never from whoever happens to be looking at the lead.
+ *
+ * Deliberately narrow: only completes THAT actor's own pending tasks on
+ * THAT lead. A Teamlead moving a stage on someone else's lead must never
+ * credit the assigned rep's queue for work the Teamlead did — that would
+ * just move the unverifiable claim up a level instead of removing it. See
+ * the handbook note at the top of this file on why "done" can no longer be
+ * asserted — only observed.
+ */
+export async function autoCompleteTasksForLeadActivity(opts: { leadId: string; actorId: string | null }): Promise<void> {
+  if (!opts.actorId) return;
+
+  const tasks = await prisma.salesTask.findMany({
+    where: { leadId: opts.leadId, assignedToId: opts.actorId, status: "pending" },
+    select: { id: true },
+  });
+
+  for (const task of tasks) {
+    await completeTask({ taskId: task.id, actorId: opts.actorId, outcome: "done", verified: true });
+  }
+}
+
+/**
+ * One push per person per day — the first time they open the desk, not a
+ * cron, same idempotent-on-first-load shape as ensureDailyOpsTasks right
+ * above it. notify()'s own dedupeKey does the "already sent today" check,
+ * so a page refreshed fifty times still only ever buzzes once.
+ *
+ * Silent when there's nothing worth a buzz: an empty queue, an unassigned
+ * pool of zero, or a fully-reported team says nothing, on purpose — a
+ * notification that fires every day whether or not anything needs doing is
+ * one a rep learns to swipe away without reading.
+ */
+export async function sendDailyDigestIfNeeded(opts: {
+  userId: string;
+  title: GrowthTitle;
+  pendingTaskCount: number;
+}): Promise<void> {
+  let message: string | null = null;
+
+  if (opts.title === "rep") {
+    if (opts.pendingTaskCount > 0) {
+      message = `${opts.pendingTaskCount} follow-up${opts.pendingTaskCount === 1 ? "" : "s"} waiting in your queue today.`;
+    }
+  } else if (opts.title === "sales_lead") {
+    const [unassigned, reportsToday, repCount] = await Promise.all([
+      prisma.lead.count({ where: { assignedToId: null, status: { notIn: ["converted", "lost", "dropped"] } } }),
+      prisma.dailyReport.count({ where: { reportDate: startOfToday() } }),
+      prisma.user.count({ where: { role: "ADMIN", adminRole: "growth", deletedAt: null } }),
+    ]);
+    const parts: string[] = [];
+    if (unassigned > 0) parts.push(`${unassigned} lead${unassigned === 1 ? "" : "s"} unassigned`);
+    const missingReports = repCount - reportsToday;
+    if (missingReports > 0) parts.push(`${missingReports} report${missingReports === 1 ? "" : "s"} outstanding`);
+    if (parts.length > 0) message = `${parts.join(", ")}.`;
+  } else if (opts.title === "bdm") {
+    const partners = await prisma.partner.findMany({
+      where: { ownerId: opts.userId },
+      select: { lastContactedAt: true, createdAt: true },
+    });
+    const staleCount = partners.filter(isPartnerStale).length;
+    if (staleCount > 0) message = `${staleCount} partner${staleCount === 1 ? "" : "s"} overdue a check-in.`;
+  }
+
+  if (!message) return;
+
+  try {
+    await notify({
+      to: { userIds: [opts.userId] },
+      kind: KIND.growthDailyDigest,
+      title: "Your Growth Desk today",
+      message,
+      link: "/admin/growth",
+      dedupeKey: `growth-digest-${opts.userId}-${startOfToday().toISOString().slice(0, 10)}`,
+      email: false,
+    });
+  } catch (error) {
+    console.error("Growth Desk daily digest failed:", error);
   }
 }
