@@ -72,6 +72,8 @@ export const KIND = {
   leadAssigned: "lead.assigned",
   /** Once a day, the first time a Growth Desk account opens the desk: queue size, unassigned count, or stale partners, depending on the job. See src/lib/growth/tasks.ts's sendDailyDigestIfNeeded. */
   growthDailyDigest: "growth.daily_digest",
+  /** A partner (influencer/travel agent/other) asked for help from their own dashboard. See /api/admin/influencer's POST. */
+  influencerHelpRequest: "influencer.help_request",
   /** A new high/critical incident appeared in Mission Control. */
   missionControlIncident: "mission_control.incident",
   /** Mission Control's auto-heal: this student's screen stopped checking in while stale; a nudge to reopen the app. See src/lib/auto-heal.ts. */

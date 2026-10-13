@@ -100,8 +100,8 @@ function calendarHref(startsOn: string, month: string) {
     `DTSTAMP:${day}T000000Z`,
     `DTSTART;VALUE=DATE:${day}`,
     `DTEND;VALUE=DATE:${dayAfter}`,
-    `SUMMARY:EasyWay ${month} classes begin`,
-    "DESCRIPTION:Your classroom opens today. Sign in to the EasyWay portal.",
+    `SUMMARY:Easyway ${month} classes begin`,
+    "DESCRIPTION:Your classroom opens today. Sign in to the Easyway portal.",
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");

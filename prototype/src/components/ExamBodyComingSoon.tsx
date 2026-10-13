@@ -88,7 +88,7 @@ export default function ExamBodyComingSoon({
             Official exam-body booking isn't open here yet.
           </h2>
           <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-            EasyWay is preparing to sit candidates for ÖSD and telc directly. Two things have to be real before a
+            Easyway is preparing to sit candidates for ÖSD and telc directly. Two things have to be real before a
             single seat is sold — not soon in a marketing sense, just not invented.
           </p>
 
@@ -115,14 +115,14 @@ export default function ExamBodyComingSoon({
               onClick={onExploreInternal}
               className="mt-6 inline-flex items-center gap-2 rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
             >
-              <ExamCentreIcon className="h-4 w-4" /> See EasyWay's own exams
+              <ExamCentreIcon className="h-4 w-4" /> See Easyway's own exams
             </button>
           ) : exploreHref ? (
             <a
               href={exploreHref}
               className="mt-6 inline-flex items-center gap-2 rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
             >
-              <ExamCentreIcon className="h-4 w-4" /> See EasyWay's own exams
+              <ExamCentreIcon className="h-4 w-4" /> See Easyway's own exams
             </a>
           ) : null}
         </div>

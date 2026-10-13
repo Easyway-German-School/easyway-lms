@@ -6,9 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
 import AdminObserver from "@/components/live/AdminObserver";
+import { CINEMA } from "@/components/live/LiveKitClassroom";
 import ClassNotesHealth from "@/components/admin/ClassNotesHealth";
 import LiveClassHistory from "@/components/admin/LiveClassHistory";
-import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon, ClockIcon } from "@/components/icons";
+import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon, ClockIcon, BellIcon } from "@/components/icons";
 
 /**
  * WHO IS LIVE RIGHT NOW — the school's own version of the dashboard LiveKit
@@ -60,11 +61,13 @@ function elapsed(startedAt: string): string {
 }
 
 function StatePill({ state }: { state: "on" | "off" | "none" }) {
-  if (state === "none") return <span className="text-[var(--muted)]">—</span>;
+  if (state === "none") return <span className="text-[#9A9690]">—</span>;
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-        state === "on" ? "bg-emerald-500/15 text-emerald-600" : "bg-rose-500/15 text-rose-600"
+        // Camera/mic "off" is a normal state, not a problem — red is reserved
+        // for an actual failed/terminal state elsewhere on this page.
+        state === "on" ? "bg-[#3FC3C6]/15 text-[#3FC3C6]" : "bg-white/10 text-[#9A9690]"
       }`}
     >
       {state === "on" ? "On" : "Off"}
@@ -82,6 +85,8 @@ export default function AdminLivePage() {
   const [participantsError, setParticipantsError] = useState("");
   const [participantsBusy, setParticipantsBusy] = useState(false);
   const [tab, setTab] = useState<"live" | "history">("live");
+  const [renotifying, setRenotifying] = useState<string | null>(null);
+  const [renotifyResult, setRenotifyResult] = useState<{ sessionId: string; message: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -130,6 +135,34 @@ export default function AdminLivePage() {
     }
   }
 
+  async function resendNotifications(sessionId: string) {
+    setRenotifying(sessionId);
+    setRenotifyResult(null);
+    try {
+      const res = await fetch("/api/admin/live/renotify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRenotifyResult({ sessionId, message: data.error || "Could not resend notifications." });
+        return;
+      }
+      setRenotifyResult({
+        sessionId,
+        message:
+          typeof data.namedStudentsConsidered === "number"
+            ? `Resent. Anyone already notified was skipped — ${data.namedStudentsConsidered} named/hybrid/online student${data.namedStudentsConsidered === 1 ? "" : "s"} were checked.`
+            : "Resent to this class's roster.",
+      });
+    } catch {
+      setRenotifyResult({ sessionId, message: "Could not resend notifications." });
+    } finally {
+      setRenotifying(null);
+    }
+  }
+
   if (loading) {
     return (
       <AdminShell>
@@ -140,24 +173,34 @@ export default function AdminLivePage() {
 
   return (
     <AdminShell>
-      <div className="h-screen overflow-y-auto">
-        <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
+      <div
+        className="h-screen overflow-y-auto text-white"
+        // Same dark cinema ground as the classroom's own immersive mode (see
+        // CINEMA in LiveKitClassroom.tsx) — this page is where staff watch a
+        // live class, so it reads as "this app, at night" rather than a
+        // regular light admin screen with a video feature bolted on.
+        style={{
+          background:
+            "radial-gradient(1100px 620px at 6% -10%, rgba(63,195,198,0.16), transparent 55%), radial-gradient(900px 560px at 98% -4%, rgba(255,122,26,0.12), transparent 55%), linear-gradient(180deg, #030607 0%, #050b0c 45%, #04090a 100%)",
+        }}
+      >
+        <div className="border-b border-white/[0.08] bg-[linear-gradient(135deg,_rgba(255,122,26,0.14)_0%,_transparent_60%)] p-6">
           <div className="mx-auto max-w-5xl">
-            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]">
-              <PulseIcon className="h-7 w-7 text-[var(--accent)]" />
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-white">
+              <PulseIcon className="h-7 w-7 text-[#FF7A1A]" />
               Live classes
             </h1>
-            <p className="mt-2 text-[var(--muted)]">
+            <p className="mt-2 text-[#9A9690]">
               Every class in session right now, across every branch — who's teaching it, how long it's been running,
               and who's actually connected. Open one to watch it silently: the tutor and students are not told, and
               you are not in their participant list.
             </p>
 
-            <div className="mt-4 inline-flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
+            <div className={`mt-4 inline-flex rounded-full border border-white/[0.08] ${CINEMA.tileBg} p-1`}>
               <button
                 onClick={() => setTab("live")}
                 className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
-                  tab === "live" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                  tab === "live" ? `${CINEMA.ctaBg} text-white` : "text-[#9A9690] hover:text-white"
                 }`}
               >
                 <PulseIcon className="h-4 w-4" /> Live now
@@ -165,7 +208,7 @@ export default function AdminLivePage() {
               <button
                 onClick={() => setTab("history")}
                 className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
-                  tab === "history" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                  tab === "history" ? `${CINEMA.ctaBg} text-white` : "text-[#9A9690] hover:text-white"
                 }`}
               >
                 <ClockIcon className="h-4 w-4" /> History
@@ -176,7 +219,7 @@ export default function AdminLivePage() {
 
         {tab === "history" ? (
           <div className="mx-auto max-w-5xl p-6">
-            <p className="mb-4 text-sm text-[var(--muted)]">
+            <p className="mb-4 text-sm text-[#9A9690]">
               Every past live class — when it actually started against when its session was due, and when it ended.
               Use this to check whether a tutor is consistently late, not just whether one is live now.
             </p>
@@ -185,39 +228,39 @@ export default function AdminLivePage() {
         ) : (
         <div className="mx-auto max-w-5xl space-y-4 p-6">
           {error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
+            <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>
           ) : null}
 
           <ClassNotesHealth />
 
           {sessions.length === 0 ? (
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
-              <VideoIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
-              <p className="mt-3 font-semibold text-[var(--foreground)]">No classes live right now</p>
-              <p className="mt-1 text-sm text-[var(--muted)]">
+            <div className={`rounded-2xl border border-white/[0.08] ${CINEMA.tileBg} p-10 text-center`}>
+              <VideoIcon className="mx-auto h-8 w-8 text-[#9A9690]" />
+              <p className="mt-3 font-semibold text-white">No classes live right now</p>
+              <p className="mt-1 text-sm text-[#9A9690]">
                 This page updates itself every ten seconds — nothing to refresh.
               </p>
             </div>
           ) : (
             sessions.map((session) => (
-              <div key={session.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+              <div key={session.id} className={`rounded-2xl border border-white/[0.08] ${CINEMA.tileBg}`}>
                 <button
                   onClick={() => toggle(session.roomName)}
                   className="flex w-full items-center gap-4 p-5 text-left"
                 >
                   <span className="relative flex h-2.5 w-2.5 shrink-0">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#3FC3C6] opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#3FC3C6]" />
                   </span>
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-[var(--foreground)]">{session.title}</p>
-                      <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-[11px] font-medium text-[var(--muted)]">
+                      <p className="font-semibold text-white">{session.title}</p>
+                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-[#9A9690]">
                         {[session.branchName, session.level, session.sessionSlot].filter(Boolean).join(" · ") || session.kind}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
+                    <p className="mt-1 text-sm text-[#9A9690]">
                       {session.lecturerName ?? "No tutor on record"} · live {elapsed(session.startedAt)}
                       {session.declined > 0 ? ` · ${session.declined} declined` : ""}
                       {session.observers > 0
@@ -227,6 +270,28 @@ export default function AdminLivePage() {
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title="Re-send the 'your class is live' ping to this tutor's roster — use this when some students report they never got the notification or a join code."
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void resendNotifications(session.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          void resendNotifications(session.id);
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] px-3 py-1 text-xs font-semibold text-white transition hover:border-[#FF7A1A] hover:text-[#FFB273] ${
+                        renotifying === session.id ? "opacity-60" : ""
+                      }`}
+                    >
+                      <BellIcon className="h-3.5 w-3.5" />
+                      {renotifying === session.id ? "Resending…" : "Resend notifications"}
+                    </span>
                     <span
                       role="button"
                       tabIndex={0}
@@ -241,35 +306,41 @@ export default function AdminLivePage() {
                           setObserving({ roomName: session.roomName, title: session.title });
                         }
                       }}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] px-3 py-1 text-xs font-semibold text-white transition hover:border-[#FF7A1A] hover:text-[#FFB273]"
                     >
                       <EyeIcon className="h-3.5 w-3.5" />
                       Watch silently
                     </span>
-                    <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
+                    <span className="rounded-full bg-[#FF7A1A]/15 px-3 py-1 text-xs font-semibold text-[#FFB273]">
                       {session.participantCount === null
                         ? "Unknown"
                         : `${session.participantCount} connected`}
                     </span>
                     <ChevronRightIcon
-                      className={`h-4 w-4 text-[var(--muted)] transition-transform ${expanded === session.roomName ? "rotate-90" : ""}`}
+                      className={`h-4 w-4 text-[#9A9690] transition-transform ${expanded === session.roomName ? "rotate-90" : ""}`}
                     />
                   </div>
                 </button>
 
+                {renotifyResult && renotifyResult.sessionId === session.id ? (
+                  <p className="border-t border-white/[0.08] px-5 py-2.5 text-xs text-[#9A9690]">
+                    {renotifyResult.message}
+                  </p>
+                ) : null}
+
                 {expanded === session.roomName ? (
-                  <div className="border-t border-[var(--border)] p-5">
+                  <div className="border-t border-white/[0.08] p-5">
                     {participantsBusy ? (
-                      <p className="text-sm text-[var(--muted)]">Asking LiveKit who's actually in the room…</p>
+                      <p className="text-sm text-[#9A9690]">Asking LiveKit who's actually in the room…</p>
                     ) : participantsError ? (
-                      <p className="text-sm text-rose-600">{participantsError}</p>
+                      <p className="text-sm text-rose-300">{participantsError}</p>
                     ) : participants.length === 0 ? (
-                      <p className="text-sm text-[var(--muted)]">Nobody is connected to this room right now.</p>
+                      <p className="text-sm text-[#9A9690]">Nobody is connected to this room right now.</p>
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                            <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-[#9A9690]">
                               <th className="pb-2 pr-4">Name</th>
                               <th className="pb-2 pr-4">Role</th>
                               <th className="pb-2 pr-4">In room</th>
@@ -279,10 +350,10 @@ export default function AdminLivePage() {
                           </thead>
                           <tbody>
                             {participants.map((participant) => (
-                              <tr key={participant.identity} className="border-t border-[var(--border)]">
-                                <td className="py-2 pr-4 font-medium text-[var(--foreground)]">{participant.name}</td>
-                                <td className="py-2 pr-4 capitalize text-[var(--muted)]">{participant.role}</td>
-                                <td className="py-2 pr-4 text-[var(--muted)]">{elapsed(participant.joinedAt)}</td>
+                              <tr key={participant.identity} className="border-t border-white/[0.08]">
+                                <td className="py-2 pr-4 font-medium text-white">{participant.name}</td>
+                                <td className="py-2 pr-4 capitalize text-[#9A9690]">{participant.role}</td>
+                                <td className="py-2 pr-4 text-[#9A9690]">{elapsed(participant.joinedAt)}</td>
                                 <td className="py-2 pr-4">
                                   <StatePill state={participant.camera} />
                                 </td>

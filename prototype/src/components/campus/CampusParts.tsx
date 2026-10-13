@@ -365,7 +365,7 @@ export function CampusAlertsCard() {
         <p className="text-sm font-extrabold leading-tight">Get a buzz when someone challenges you</p>
         <p className="text-xs text-[var(--muted)]">
           {push.needsInstall
-            ? "On iPhone, add EasyWay to your Home Screen first, then come back here."
+            ? "On iPhone, add Easyway to your Home Screen first, then come back here."
             : "A few a day at most, never at night. You can turn it off any time."}
         </p>
       </div>

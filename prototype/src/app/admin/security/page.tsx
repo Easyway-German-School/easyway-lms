@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import TwoFactorCard from "@/components/TwoFactorCard";
+import ApiKeysCard from "@/components/ApiKeysCard";
 import { AlertIcon, CheckCircleIcon, RefreshIcon, ShieldIcon } from "@/components/icons";
 
 type AuditEntry = {
@@ -129,6 +130,11 @@ export default function AdminSecurityPage() {
         {/* First, above backups, because it is the only thing on this page
             that an admin acts on for themselves rather than reads about. */}
         <TwoFactorCard />
+
+        {/* ------------------------------------------------------------ */}
+        {/* API keys                                                      */}
+        {/* ------------------------------------------------------------ */}
+        <ApiKeysCard />
 
         {/* ------------------------------------------------------------ */}
         {/* Backup health                                                 */}

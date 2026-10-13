@@ -216,7 +216,7 @@ export default function InstallPrompt() {
           <img src="/icon-192.png" alt="" className="h-11 w-11 flex-none rounded-2xl" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-[var(--foreground)]">
-              {iosSteps ? "Add EasyWay to your Home Screen" : "Never miss a class, assignment or exam alert"}
+              {iosSteps ? "Add Easyway to your Home Screen" : "Never miss a class, assignment or exam alert"}
             </p>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
               {iosSteps

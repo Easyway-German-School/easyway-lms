@@ -35,7 +35,7 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
       },
       {
         icon: <BellIcon className={ICON} />,
-        title: "Open EasyWay from your Home Screen",
+        title: "Open Easyway from your Home Screen",
         detail:
           "Sign in once inside the app (it doesn't share your Safari login), then tap “Yes, remind me” when it asks about alerts.",
       },
@@ -43,7 +43,7 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
 
     if (env.browser === "inapp") {
       return {
-        heading: "Open EasyWay in Safari first",
+        heading: "Open Easyway in Safari first",
         intro:
           "You're inside another app's browser (WhatsApp, Instagram, Facebook…), and those can't add apps to your Home Screen.",
         copyLink: true,
@@ -66,7 +66,7 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
 
     if (env.browser === "safari") {
       return {
-        heading: "Add EasyWay to your iPhone",
+        heading: "Add Easyway to your iPhone",
         intro: "It takes 20 seconds, and it's the only way iPhone can send you class and exam alerts.",
         copyLink: false,
         steps: [
@@ -83,7 +83,7 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
     // Chrome / Edge / Firefox on iPhone: capable since iOS 16.4, but each hides
     // the Share button somewhere different.
     return {
-      heading: "Add EasyWay to your iPhone",
+      heading: "Add Easyway to your iPhone",
       intro: "It takes 20 seconds, and it's the only way iPhone can send you class and exam alerts.",
       copyLink: true,
       steps: [
@@ -101,7 +101,7 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
   if (env.android) {
     if (env.browser === "inapp") {
       return {
-        heading: "Open EasyWay in Chrome first",
+        heading: "Open Easyway in Chrome first",
         intro: "You're inside another app's browser, which can't install apps.",
         copyLink: true,
         steps: [
@@ -113,24 +113,24 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
           {
             icon: <AddSquareIcon className={ICON} />,
             title: "Tap ⋮, then “Install app”",
-            detail: "It may say “Add to Home screen”. Confirm, and EasyWay appears with your other apps.",
+            detail: "It may say “Add to Home screen”. Confirm, and Easyway appears with your other apps.",
           },
         ],
       };
     }
     return {
-      heading: "Install EasyWay",
+      heading: "Install Easyway",
       intro: "Get alerts the second they drop, and read your notes offline.",
       copyLink: false,
       steps: [
         {
           icon: <AddSquareIcon className={ICON} />,
           title: "Tap ⋮, then “Install app”",
-          detail: "It may say “Add to Home screen”. Confirm, and EasyWay appears with your other apps.",
+          detail: "It may say “Add to Home screen”. Confirm, and Easyway appears with your other apps.",
         },
         {
           icon: <BellIcon className={ICON} />,
-          title: "Open EasyWay and allow alerts",
+          title: "Open Easyway and allow alerts",
           detail: "Tap “Yes, remind me” when it asks, so class and exam alerts reach your lock screen.",
         },
       ],
@@ -138,7 +138,7 @@ function stepsFor(env: InstallEnv): { heading: string; intro: string; steps: Ste
   }
 
   return {
-    heading: "Install EasyWay",
+    heading: "Install Easyway",
     intro: "Get alerts the second they drop, and read your notes offline.",
     copyLink: false,
     steps: [
@@ -205,7 +205,7 @@ export default function InstallGuide({ env, onClose }: { env: InstallEnv; onClos
         {env.iosTooOldForPush ? (
           <p className="mt-4 rounded-2xl border border-amber-300/60 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
             Your iPhone is on an older iOS, which can&apos;t receive web alerts. Update in Settings › General › Software
-            Update (iOS 16.4 or newer), then come back here. You can still add EasyWay to your Home Screen now.
+            Update (iOS 16.4 or newer), then come back here. You can still add Easyway to your Home Screen now.
           </p>
         ) : null}
 

@@ -125,6 +125,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   const [termsAccepted, setTermsAccepted] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const [heardFrom] = useState("");
+  /** A student referral or influencer code — optional, skippable. */
+  const [promoCode, setPromoCode] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
   /**
@@ -428,6 +430,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
     prefill("level", applyLevel);
     prefill("branchId", setBranchId);
     prefill("sessionSlot", applySlot);
+    // Deliberately NOT "ref" — that query param is already the Paystack
+    // payment-reference proof read above (paystackRefRef). A promo/referral
+    // code gets its own param so the two can never collide.
+    prefill("promo", (v) => setPromoCode(v.trim().toUpperCase()));
 
     // Server-validated prefill (from the token row or the Paystack charge) wins
     // over whatever the link's query string carried.
@@ -586,7 +592,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         photoFileName,
         termsAccepted,
         heardFrom,
-        referralCode: new URLSearchParams(window.location.search).get("ref")?.trim().toUpperCase() || undefined,
+        promoCode: promoCode.trim().toUpperCase() || undefined,
         emergencyContactName,
         emergencyContactInfo,
         // Access proof — re-validated server-side by /api/auth/signup.
@@ -634,8 +640,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       if (isOnline) {
         setSuccessMessage(
           parentEnabled
-            ? "Welcome to EasyWay Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
-            : "Welcome to EasyWay Online. Taking you to your dashboard…",
+            ? "Welcome to Easyway Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
+            : "Welcome to Easyway Online. Taking you to your dashboard…",
         );
         setShowSuccess(true);
 
@@ -692,7 +698,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         */}
         <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-6 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · EasyWay German</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · Easyway German</p>
             <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Start your German journey"}</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85">
               A few short steps and you are enrolled — your level, your class times, your tutor. Registering for your
@@ -1310,6 +1316,18 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                     </p>
                   </div>
                 ) : null}
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[var(--muted)]">
+                  Referral or promo code <span className="font-normal text-[var(--muted)]">(optional)</span>
+                </label>
+                <input
+                  value={promoCode}
+                  onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+                  placeholder="e.g. EW3F9A2B or an influencer's code"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm uppercase tracking-wide"
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">Have a friend's referral code or an influencer's code? Enter it here — otherwise just leave this blank.</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--muted)]">Your profile photo</label>

@@ -25,6 +25,15 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // `growth`, not `students`, so a rep's account doesn't also pick up the
   // rest of the student record.
   { prefix: "/admin/growth", capability: "growth" },
+  // An influencer's own dashboard — their code, their sign-ups, their payout
+  // ledger. Gated on its own capability so it carries nothing else `growth`
+  // or `payments` would otherwise pull in.
+  { prefix: "/admin/influencer", capability: "influencer" },
+  // The Influencer Program hub — admin's list of every partner (influencer,
+  // travel agent, other), and the remote-view door into each one's own
+  // dashboard (the SAME component /admin/influencer renders). Same desk as
+  // the rest of the promo-code system, so `payments`, not `influencer`.
+  { prefix: "/admin/influencer-program", capability: "payments" },
   // A guardian's account is paperwork about a named student, same desk as
   // the rest of the student record.
   { prefix: "/admin/parents", capability: "students" },

@@ -118,6 +118,29 @@ describe("the rules", () => {
     expect(f.detail).toMatch(/nothing is wrong with their payment/i);
   });
 
+  it("missing-level-charge: fires when lifetime money covers the fee but the ledger credits none of it to this level", () => {
+    const f = diagnose(base({ access: { ...base().access, totalPaid: 400_000, currentLevelPaid: 0, tuitionFee: 400_000 } })).findings.find((x) => x.rule === "missing-level-charge")!;
+    expect(f.severity).toBe("problem");
+    expect(f.offers[0]).toMatchObject({ id: "sync_tuition_charge", needs: "payments" });
+    expect(f.evidence.find((e) => e.label === "Paid in total")?.value).toBe("₦400,000");
+  });
+
+  it("missing-level-charge: says nothing once the level is actually credited", () => {
+    const d = diagnose(base({ access: { ...base().access, totalPaid: 400_000, currentLevelPaid: 400_000, tuitionFee: 400_000 } }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("missing-level-charge: says nothing when currentLevelPaid was never supplied (older/fixture callers)", () => {
+    const { currentLevelPaid, ...accessWithoutField } = base().access;
+    const d = diagnose(base({ access: accessWithoutField }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("missing-level-charge: says nothing when they simply have not paid enough yet (no drift, just unpaid)", () => {
+    const d = diagnose(base({ access: { ...base().access, totalPaid: 50_000, currentLevelPaid: 50_000, tuitionFee: 400_000 } }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
   it("missing-student-code: warns and offers the repair, needing the students capability", () => {
     const f = diagnose(base({ student: { ...base().student, studentCode: null } })).findings[0];
     expect(f.rule).toBe("missing-student-code");

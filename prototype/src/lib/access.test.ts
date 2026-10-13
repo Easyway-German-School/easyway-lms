@@ -77,6 +77,37 @@ describe("deriveStudentAccess — omitting the tuition ledger (charges)", () => 
   });
 });
 
+describe("deriveStudentAccess — currentLevelPaid (the tuition-offer 'paid in full' lie)", () => {
+  // Same promoted-A1-to-A2 student as above. `/api/student/tuition-offer`
+  // used to compare lifetime totalPaid (₦150,000) against the A2 fee
+  // (₦150,000) and declare "paid in full — certificate clean", while this
+  // same ledger correctly keeps the portal locked. `currentLevelPaid` is the
+  // one number both screens must read, so neither can say something the
+  // other disagrees with.
+  const charges = [
+    { id: "c1", level: "A1", amount: 150_000, waivedAmount: 0, legacyArrears: false, createdAt: daysAgo(60) },
+    { id: "c2", level: "A2", amount: 150_000, waivedAmount: 0, legacyArrears: false, createdAt: daysAgo(10) },
+  ];
+  const base = { totalPaid: 150_000, tuitionFee: 150_000, requiredDeposit: 90_000, level: "A2", now: NOW };
+
+  it("is 0 toward A2 once the ledger shows every naira already went to A1", () => {
+    const access = deriveStudentAccess({ ...base, charges });
+    expect(access.currentLevelPaid).toBe(0);
+    expect(access.totalPaid).toBe(150_000); // lifetime money is still there — just not credited to THIS level
+  });
+
+  it("falls back to the raw lifetime sum when there is no ledger (pre-rollout, exactly as before)", () => {
+    const access = deriveStudentAccess(base); // charges omitted
+    expect(access.currentLevelPaid).toBe(150_000);
+  });
+
+  it("equals the charge's own FIFO allocation once A2 itself is actually paid", () => {
+    const access = deriveStudentAccess({ ...base, totalPaid: 300_000, charges }); // clears A1, then funds A2 in full
+    expect(access.currentLevelPaid).toBe(150_000);
+    expect(access.hasAccess).toBe(true);
+  });
+});
+
 describe("deriveStudentAccess — omitting flatDeposit for Travel Package", () => {
   // Travel Package prices the whole pathway at once (₦980,000), but the
   // minimum first payment is a flat ₦200,000 floor, not 60% of the package.

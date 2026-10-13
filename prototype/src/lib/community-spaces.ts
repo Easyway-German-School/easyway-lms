@@ -254,7 +254,7 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
   const branchName =
     cohort.branchName ??
     (await prisma.branch.findUnique({ where: { id: cohort.branchId }, select: { name: true } }))?.name ??
-    "EasyWay";
+    "Easyway";
 
   // Fetch the branch to get tenantId
   const branch = await prisma.branch.findUnique({

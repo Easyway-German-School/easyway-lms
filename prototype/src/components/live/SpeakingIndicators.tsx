@@ -57,7 +57,7 @@ export function SpeakingWave({
         return (
           <span
             key={index}
-            className={`block rounded-full bg-emerald-400 ${big ? "w-[3px]" : "w-[2px]"}`}
+            className={`block rounded-full bg-[#3FC3C6] ${big ? "w-[3px]" : "w-[2px]"}`}
             style={{
               height: `${height * 100}%`,
               // Matches the store's tick, so the bars glide between readings
@@ -97,12 +97,12 @@ export function FloorLight({ label, tone }: { label: string; tone: "floor" | "sp
       layoutId="classroom-floor-light"
       transition={{ type: "spring", stiffness: 320, damping: 30 }}
       className={`pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 shadow-lg backdrop-blur-sm ${
-        granted ? "bg-emerald-500 text-white" : "bg-emerald-500/25 text-emerald-100"
+        granted ? "bg-[#3FC3C6] text-white" : "bg-[#3FC3C6]/25 text-[#D6F5F3]"
       }`}
     >
       <span className="relative flex h-2 w-2 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-300" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#9FE6E0] opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-[#9FE6E0]" />
       </span>
       <motion.span layout className="whitespace-nowrap text-[10px] font-bold uppercase tracking-wide">
         {label}
@@ -124,7 +124,7 @@ export function HandFlag({ position }: { position: number | null }) {
       initial={{ opacity: 0, scale: 0.6, y: -4 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.6 }}
-      className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full bg-amber-400 px-2 py-1 text-slate-900 shadow-lg"
+      className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full bg-[#D9A64E] px-2 py-1 text-slate-900 shadow-lg"
     >
       <HandIcon className="h-3 w-3" strokeWidth={2.4} />
       {position ? <span className="text-[10px] font-bold leading-none">{position}</span> : null}

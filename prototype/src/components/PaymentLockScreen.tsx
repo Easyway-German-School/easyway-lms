@@ -159,6 +159,17 @@ export default function PaymentLockScreen({
       access.tuitionFee > 0 &&
       access.totalPaid >= access.tuitionFee,
   );
+  // THIS level's own ledger-credited money — not always 0. A student moving
+  // up can still have a few naira of an unstamped payment flow past their
+  // old, now-cleared charge and land on the new one before the rest reads as
+  // outstanding (FIFO — see lib/finance/ledger.ts). Previously this screen
+  // assumed "moving up" meant "nothing paid toward the new level yet" and
+  // hardcoded 0, which overstated what was left to pay by whatever had
+  // already landed.
+  const returningLevelPaid = access?.currentLevelPaid ?? 0;
+  const returningLevelOutstanding = access ? Math.max(0, access.tuitionFee - returningLevelPaid) : 0;
+  const returningLevelProgress =
+    access && access.tuitionFee > 0 ? Math.min(100, Math.round((returningLevelPaid / access.tuitionFee) * 100)) : 0;
 
   return (
     <>
@@ -365,7 +376,7 @@ export default function PaymentLockScreen({
                           !
                         </span>
                         {returningUnpaidLevel && access
-                          ? `${naira(access.tuitionFee)} tuition outstanding for this level`
+                          ? `${naira(returningLevelOutstanding)} tuition outstanding for this level`
                           : registrationPaid && outstanding > 0
                             ? `${naira(outstanding)} left to unlock your class`
                             : "Tuition fee outstanding"}
@@ -398,19 +409,19 @@ export default function PaymentLockScreen({
                   <div className="mt-6">
                     <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-white/60">
                       <span>Towards your seat</span>
-                      <span>{returningUnpaidLevel ? "0%" : `${progress}%`}</span>
+                      <span>{returningUnpaidLevel ? `${returningLevelProgress}%` : `${progress}%`}</span>
                     </div>
                     <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/10">
                       <motion.div
                         className="h-full rounded-full bg-gradient-to-r from-[#FF6600] to-[#0D7C7E]"
                         initial={{ width: 0 }}
-                        animate={{ width: `${returningUnpaidLevel ? 3 : Math.max(progress, 3)}%` }}
+                        animate={{ width: `${returningUnpaidLevel ? Math.max(returningLevelProgress, 3) : Math.max(progress, 3)}%` }}
                         transition={{ duration: 1, delay: 0.8, ease: "easeOut" }}
                       />
                     </div>
                     <p className="mt-2 text-xs text-white/60">
                       {returningUnpaidLevel
-                        ? `${naira(0)} of ${naira(access.tuitionFee)} paid this level`
+                        ? `${naira(returningLevelPaid)} of ${naira(access.tuitionFee)} paid this level`
                         : `${naira(access.totalPaid)} of ${naira(access.requiredDeposit)} paid`}
                     </p>
                   </div>

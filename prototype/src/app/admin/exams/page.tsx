@@ -235,7 +235,7 @@ export default function AdminExamsPage() {
             <label className="sm:col-span-2">
               <span className="text-xs font-medium text-[var(--muted)]">Name</span>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="EasyWay B1 end-of-level test" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                placeholder="Easyway B1 end-of-level test" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label className="sm:col-span-2">
               <span className="text-xs font-medium text-[var(--muted)]">Description</span>

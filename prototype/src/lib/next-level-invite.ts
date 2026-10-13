@@ -102,8 +102,8 @@ export function buildInvite(journey: JourneyPayload, name: string | null | undef
 
   const html = emailShell({
     title: text.title,
-    senderName: "EasyWay German School",
-    footer: "You are receiving this because you study with EasyWay. Reply to this email and a real person will answer.",
+    senderName: "Easyway German School",
+    footer: "You are receiving this because you study with Easyway. Reply to this email and a real person will answer.",
     preheader: text.message.slice(0, 120),
     content: `
     <tr><td style="padding:26px 24px 6px;font-family:${FONT};">

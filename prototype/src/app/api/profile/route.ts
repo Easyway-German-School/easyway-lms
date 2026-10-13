@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
   // student could never set a photo after signup.
   if (photoUrl && !keyFromUrl(photoUrl)) {
     return NextResponse.json(
-      { error: "Profile photos must be uploaded through EasyWay, not linked." },
+      { error: "Profile photos must be uploaded through Easyway, not linked." },
       { status: 400 },
     );
   }

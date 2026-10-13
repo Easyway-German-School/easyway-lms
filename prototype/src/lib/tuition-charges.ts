@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { guardedPrisma, prisma, unguardedPrisma } from "@/lib/prisma";
-import { isTravelPackagePathway, receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway, receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
 import { buildLedger, type Ledger } from "@/lib/finance/ledger";
 
 /**
@@ -173,6 +173,103 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
     console.error("ensureChargeForLevel: create failed", { studentId: input.studentId, level, error });
     return null;
   }
+}
+
+export type RepriceResult = {
+  studentId: string;
+  level: string;
+  from: number;
+  to: number;
+  repriced: boolean;
+  reason: "no_charge_yet" | "already_correct" | "already_paid" | "repriced";
+};
+
+/**
+ * CHANGING A STUDENT'S PATHWAY MUST BE ABLE TO CHANGE THE PRICE.
+ *
+ * `tuitionFeeFor` prices a level differently depending on `pathway` (Exam
+ * Preparatory, Travel Package and the ordinary group ladder are three
+ * different numbers for the same level). `TuitionCharge.amount` is frozen at
+ * creation on purpose — a price change must never retroactively move the
+ * goalposts on a charge someone has already started paying down. But that
+ * same freeze means an admin fixing a genuine mistake (a student who picked
+ * "Exam Preparatory" by accident and should be on the ordinary ₦150,000
+ * ladder) had no way to correct the price at all: `ensureChargeForLevel` is
+ * a no-op once a charge exists, so the sticker price just sat there wrong —
+ * only the Travel Package pathway had its own repair for this
+ * (reconcileTravelPackageStudent), and even that only ran going ONTO the
+ * pathway, never coming back off it.
+ *
+ * This is the general case: re-price the student's CURRENT level charge to
+ * whatever their (now current) pathway actually charges for it — but ONLY
+ * when nothing has been paid toward that charge yet. A naira allocated
+ * against the old price is a fact that already happened; correcting a price
+ * nobody has paid against yet is just fixing a mistake before it costs
+ * anyone anything. `ensureChargeForLevel` already handles the case where the
+ * level itself has no charge at all — nothing to reprice here, since the
+ * charge that gets created next will already use the live price.
+ */
+export async function reconcileCurrentLevelChargeForPathway(studentId: string, now: Date = new Date()): Promise<RepriceResult | null> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: {
+      id: true,
+      level: true,
+      pathway: true,
+      classType: true,
+      branch: { select: { name: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true },
+      },
+      payments: {
+        where: { deletedAt: null },
+        select: { amount: true, level: true, description: true, status: true, createdAt: true },
+      },
+    },
+  });
+  if (!student) return null;
+
+  const level = String(student.level ?? "").trim().toUpperCase();
+  const currentCharge = student.tuitionCharges.find((c) => c.level.trim().toUpperCase() === level) ?? null;
+  if (!currentCharge) return { studentId, level, from: 0, to: 0, repriced: false, reason: "no_charge_yet" };
+
+  const liveFee = tuitionFeeFor({
+    level,
+    branch: student.branch?.name ?? null,
+    classType: student.classType,
+    pathway: student.pathway,
+  });
+  const currentNet = Math.max(0, currentCharge.amount - (currentCharge.waivedAmount ?? 0));
+  if (liveFee === currentNet) return { studentId, level, from: currentNet, to: liveFee, repriced: false, reason: "already_correct" };
+
+  // Has anything actually landed on THIS charge? Build the real ledger (same
+  // FIFO reconciliation as everywhere else) rather than guessing from the
+  // raw payment total, so a payment that FIFO'd onto an older, different
+  // level's charge does not block a correction this charge has not actually
+  // benefited from.
+  const tuitionPayments = student.payments.filter(
+    (p) => (p.status == null || isReceivedPayment(p.status)) && !isRegistrationFeePayment(p.description),
+  );
+  const paid = tuitionPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const ledger = buildLedger(student.tuitionCharges, paid, now, tuitionPayments);
+  const line = ledger.lines.find((l) => l.chargeId === currentCharge.id);
+  if (line && line.allocated > 0) {
+    return { studentId, level, from: currentNet, to: liveFee, repriced: false, reason: "already_paid" };
+  }
+
+  await prisma.tuitionCharge.update({
+    where: { id: currentCharge.id },
+    data: {
+      // Keep the gross/waiver relationship intact — set gross so that
+      // gross − existing waiver lands on the new live price, the same move
+      // reconcileTravelPackageStudent makes.
+      amount: liveFee + (currentCharge.waivedAmount ?? 0),
+      note: `Re-priced for pathway "${student.pathway}" on ${now.toISOString().slice(0, 10)} (was ₦${currentNet.toLocaleString("en-NG")})`,
+    },
+  });
+
+  return { studentId, level, from: currentNet, to: liveFee, repriced: true, reason: "repriced" };
 }
 
 /**

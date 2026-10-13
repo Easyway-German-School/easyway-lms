@@ -51,7 +51,7 @@ export async function GET() {
         description: row.description,
         url: embed?.embedUrl ?? toPlayableUrl(row.filePath),
         sourceUrl: embed?.sourceUrl ?? null,
-        provider: embed?.label ?? (recording ? (viaOurRecorder ? "Our recorder" : "LiveKit") : "EasyWay storage"),
+        provider: embed?.label ?? (recording ? (viaOurRecorder ? "Our recorder" : "LiveKit") : "Easyway storage"),
         category,
         categoryLabel: privateClass ? "Private class" : recording ? "Live recording" : embed ? "External embed" : "Course library",
         audience: recording ? "Online class recording" : privateClass ? "Private student" : "Course library (delivery not tagged)",

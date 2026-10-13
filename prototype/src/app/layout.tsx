@@ -29,7 +29,7 @@ export const metadata: Metadata = {
    */
   appleWebApp: {
     capable: true,
-    title: "EasyWay",
+    title: "Easyway",
     statusBarStyle: "default",
   },
   // The square emblem, not the horizontal lockup — the lockup is illegible at

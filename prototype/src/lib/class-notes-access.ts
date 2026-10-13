@@ -13,7 +13,17 @@ import { prisma } from "@/lib/prisma";
  * rather than "fetch then compare in code", so there is no path where the
  * fetch succeeds and a later check is forgotten.
  */
-export async function findOwnedRecordingMaterial(materialId: string, student: { id: string; level: string }) {
+export async function findOwnedRecordingMaterial(
+  materialId: string,
+  student: { id: string; level: string; tutorId?: string | null; coTutorIds?: string[] },
+) {
+  // Same by-name escape hatch as the shelf query in `/api/student/videos` —
+  // see its comment for why `recording.lecturerId` matters and why
+  // `privateClassId: null` on that branch is load-bearing (without it a
+  // private one-to-one tape would leak to every other student of that tutor).
+  const teacherIds = [student.tutorId, ...(student.coTutorIds ?? [])].filter(
+    (id): id is string => Boolean(id),
+  );
   return prisma.material.findFirst({
     where: {
       id: materialId,
@@ -21,6 +31,9 @@ export async function findOwnedRecordingMaterial(materialId: string, student: { 
         { level: student.level },
         { course: { level: student.level } },
         { privateClasses: { some: { studentId: student.id } } },
+        ...(teacherIds.length
+          ? [{ recording: { lecturerId: { in: teacherIds }, privateClassId: null } }]
+          : []),
       ],
     },
     select: {

@@ -16,6 +16,7 @@ import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { getStudentAccess } from "@/lib/student-access";
 import { recordCommissionForPayment } from "@/lib/growth/commission";
+import { recordPromoRewardForPayment } from "@/lib/growth/promo-rewards";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -181,6 +182,12 @@ export async function POST(request: Request) {
       await recordCommissionForPayment(payment.id);
     } catch (commissionError) {
       console.error("Commission recording failed after manual payment", { paymentId: payment.id, commissionError });
+    }
+
+    try {
+      await recordPromoRewardForPayment(payment.id);
+    } catch (promoRewardError) {
+      console.error("Promo reward recording failed after manual payment", { paymentId: payment.id, promoRewardError });
     }
 
     let warning: string | null = null;

@@ -24,11 +24,11 @@
  *
  * Schedule is every 15 minutes, not every 5 (the original 2026-09-28
  * version). A ping every 5 minutes never let Neon's compute fully
- * auto-suspend — the endpoint sat
- * "active" around the clock instead of only during real school traffic, and
- * tripled the monthly bill within two weeks. 15 minutes still beats the
- * 56-minute stall this was built to fix, while leaving enough idle time
- * between runs for the database to actually go back to sleep.
+ * auto-suspend — the endpoint sat active around the clock instead of only
+ * during real school traffic, and tripled the monthly bill within two
+ * weeks. 15 minutes still beats the 56-minute stall this was built to fix,
+ * while leaving enough idle time between runs for the database to actually
+ * go back to sleep.
  *
  * 2026-10-11: one more job rides along, for the same cost reason above —
  * Mission Control's auto-resync (lib/auto-heal.ts) needs to run every few
