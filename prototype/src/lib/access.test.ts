@@ -337,3 +337,61 @@ describe("deriveStudentAccess — August money must not open October", () => {
     expect(access.depositCleared).toBe(true);
   });
 });
+
+describe("deriveStudentAccess — tuitionFee reads the frozen charge, not a fresh price-book lookup", () => {
+  // A TuitionCharge freezes its fee the moment it is raised (see
+  // lib/finance/reprice.ts). If the price list is edited afterwards — A1
+  // dropped from ₦180,000 to ₦150,000 — a student charged and billed at the
+  // old price has paid exactly what they owed. The caller still passes the
+  // CURRENT price-book figure as `tuitionFee` (that is all `tuitionFeeFor`
+  // can return); this must not leak into the headline figure the dossier and
+  // the student's own dashboard show, or a fully-paid student reads as
+  // "₦180,000 paid of a ₦150,000 fee".
+  const chargedAtOldPrice = {
+    id: "c-a1",
+    level: "A1",
+    amount: 180_000,
+    waivedAmount: 0,
+    legacyArrears: false,
+    createdAt: new Date("2026-09-10T00:00:00Z"),
+  };
+
+  it("shows the charge's own frozen amount, not the live price-book figure the caller passed in", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 180_000,
+      tuitionFee: 150_000, // the price list today, AFTER this student was charged
+      requiredDeposit: 90_000,
+      level: "A1",
+      charges: [chargedAtOldPrice],
+    });
+
+    expect(access.tuitionFee).toBe(180_000);
+    expect(access.totalPaid).toBe(180_000);
+    expect(access.requiredDeposit).toBe(108_000);
+    expect(access.hasAccess).toBe(true);
+    expect(access.outstandingBalance).toBe(0);
+  });
+
+  it("falls back to the raw price-book figure when there is no charge yet for the level they are in", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 0,
+      tuitionFee: 150_000,
+      requiredDeposit: 90_000,
+      level: "A2",
+      charges: [chargedAtOldPrice], // A1 only — nothing raised yet for A2
+    });
+
+    expect(access.tuitionFee).toBe(150_000);
+  });
+
+  it("falls back to the raw price-book figure with no ledger at all", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 0,
+      tuitionFee: 150_000,
+      requiredDeposit: 90_000,
+      level: "A1",
+    });
+
+    expect(access.tuitionFee).toBe(150_000);
+  });
+});

@@ -408,6 +408,17 @@ export function deriveStudentAccess({
         ? "unsettled_balance"
         : "unpaid_deposit";
 
+  // THE STICKER PRICE SHOWN TO THE STUDENT/OFFICE — the frozen charge for the
+  // level they are in NOW, not a fresh price-book lookup. A TuitionCharge
+  // freezes its fee the moment it is raised (see the model comment in
+  // schema.prisma and lib/finance/reprice.ts); if the price list is edited
+  // afterwards, `tuitionFee` must still read what this student was actually
+  // billed, or the dossier and the student's own dashboard show something
+  // like "₦180,000 paid of a ₦150,000 fee" on somebody who paid exactly what
+  // they owed. `requiredDeposit` below already reads off `currentLine`; this
+  // mirrors it for the headline fee.
+  const displayFee = currentLine && !paidOtherLevelsOnly ? currentLine.net : fee;
+
   // Deposit-gate figures: against the CURRENT level's charge when the ledger is
   // driving, against the raw payment sum otherwise.
   const towardDeposit = currentLine ? currentLine.allocated : paidOtherLevelsOnly ? 0 : paid;
@@ -434,7 +445,7 @@ export function deriveStudentAccess({
     registrationPaid: paid > 0,
     totalPaid: paid,
     currentLevelPaid: towardDeposit,
-    tuitionFee: fee,
+    tuitionFee: displayFee,
     requiredDeposit: currentLevelDeposit,
     outstanding: outstandingDeposit,
     outstandingBalance,
