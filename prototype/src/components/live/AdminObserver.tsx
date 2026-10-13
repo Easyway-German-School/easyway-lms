@@ -437,7 +437,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           <div className="flex h-full flex-col gap-3 p-4">
             <div className="relative min-h-0 flex-1">
               {mainTile ? (
-                <VideoTile participant={mainTile.participant} source={mainTile.source} revision={topology} full />
+                <VideoTile participant={mainTile.participant} source={mainTile.source} full />
               ) : (
                 <div className={`grid h-full place-items-center rounded-2xl ${CINEMA.tileBg} text-sm text-[#9A9690]`}>
                   Nobody has their camera on yet — the audio is still live.
@@ -449,7 +449,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
               <div className="flex shrink-0 gap-3 overflow-x-auto pb-1">
                 {stripTiles.map((tile) => (
                   <div key={tile.participant.identity} className="h-28 w-44 shrink-0">
-                    <VideoTile participant={tile.participant} source={tile.source} revision={topology} />
+                    <VideoTile participant={tile.participant} source={tile.source} />
                   </div>
                 ))}
               </div>
@@ -463,7 +463,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
             */}
             {mode === "speak" && camOn && room ? (
               <div className="pointer-events-none absolute bottom-4 right-4 h-28 w-44 overflow-hidden rounded-2xl ring-2 ring-[#D9A64E]">
-                <VideoTile participant={room.localParticipant} source={Track.Source.Camera} revision={topology} />
+                <VideoTile participant={room.localParticipant} source={Track.Source.Camera} />
               </div>
             ) : null}
           </div>
@@ -473,7 +473,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
             supervisor is here for the audio first. */}
         {phase === "watching"
           ? remotes.map((participant) => (
-              <ParticipantAudio key={`audio-${participant.identity}`} participant={participant} revision={topology} />
+              <ParticipantAudio key={`audio-${participant.identity}`} participant={participant} />
             ))
           : null}
       </div>
@@ -489,34 +489,23 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
 function VideoTile({
   participant,
   source,
-  revision,
   full = false,
 }: {
   participant: Participant;
   source: Track.Source;
-  revision: number;
   full?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
   const [videoWaiting, setVideoWaiting] = useState(false);
   const [retryingVideo, setRetryingVideo] = useState(false);
-  /**
-   * `revision` bumps on ANY topology event from ANY participant (see its
-   * `.on(...)` list above this component) — a mute, a join, a screen-share
-   * start three tiles away. This effect has to re-run on every bump because
-   * THIS tile's own publication can change too, but most bumps have nothing
-   * to do with this tile's actual track. Re-running used to mean
-   * `track.detach(el)` then `track.attach(el)` on the SAME still-valid
-   * track — a real, if brief, blank frame each time, visible as a blink.
-   * With more participants' mics/cameras active there are simply more
-   * topology events per second, so the blinking scaled with room size —
-   * exactly the pattern reported. Guard on the actual track object: only
-   * detach/reattach when the track THIS tile should show has genuinely
-   * changed, not on every unrelated bump.
-   */
-  const attachedTrackRef = useRef<Track | null>(null);
-
+  const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
+  const cameraPub = participant.getTrackPublication(Track.Source.Camera);
+  const videoPub = source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub;
+  const videoTrack = videoPub?.track ?? null;
+  const publication = participant instanceof LocalParticipant
+    ? undefined
+    : (videoPub as RemoteTrackPublication | undefined);
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -552,40 +541,21 @@ function VideoTile({
       el.removeEventListener("waiting", markWaiting);
       el.removeEventListener("stalled", markWaiting);
     };
-  }, [participant, source, revision]);
+  }, [videoTrack]);
   
 
   useEffect(() => {
     const el = videoRef.current;
-    const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
-    const cameraPub = participant.getTrackPublication(Track.Source.Camera);
-    const pub = source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub;
-    const track = pub?.track ?? null;
-
-    if (el && track) {
+    if (el && videoTrack) {
+      videoTrack.attach(el);
       setHasVideo(true);
-      if (attachedTrackRef.current === track) return; // same track already attached — nothing to do
-      track.attach(el);
-      attachedTrackRef.current = track;
       return () => {
-        if (attachedTrackRef.current === track) {
-          track.detach(el);
-          attachedTrackRef.current = null;
-        }
+        videoTrack.detach(el);
       };
     }
-    attachedTrackRef.current = null;
     setHasVideo(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [participant, source, revision]);
+  }, [videoTrack]);
 
-  const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
-  const cameraPub = participant.getTrackPublication(Track.Source.Camera);
-  const publication = participant instanceof LocalParticipant
-    ? undefined
-    : ((source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub) as
-        | RemoteTrackPublication
-        | undefined);
 
   async function retryVideo() {
     if (!publication || retryingVideo) return;
@@ -666,31 +636,19 @@ function VideoTile({
 }
 
 /** Hidden playback for one participant's microphone. */
-function ParticipantAudio({ participant, revision }: { participant: RemoteParticipant; revision: number }) {
+function ParticipantAudio({ participant }: { participant: RemoteParticipant }) {
   const audioRef = useRef<HTMLAudioElement>(null);
-  // Same guard as VideoTile, same reason: `revision` bumps on every
-  // participant's mute/unmute, not just this one's — without this, a busy
-  // room re-attaches a perfectly fine audio track constantly.
-  const attachedTrackRef = useRef<Track | null>(null);
+  const audioTrack = participant.getTrackPublication(Track.Source.Microphone)?.track ?? null;
 
   useEffect(() => {
-    const pub = participant.getTrackPublication(Track.Source.Microphone);
     const el = audioRef.current;
-    const track = pub?.track ?? null;
-    if (el && track) {
-      if (attachedTrackRef.current === track) return;
-      track.attach(el);
-      attachedTrackRef.current = track;
+    if (el && audioTrack) {
+      audioTrack.attach(el);
       return () => {
-        if (attachedTrackRef.current === track) {
-          track.detach(el);
-          attachedTrackRef.current = null;
-        }
+        audioTrack.detach(el);
       };
     }
-    attachedTrackRef.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [participant, revision]);
+  }, [audioTrack]);
 
   return <audio ref={audioRef} autoPlay />;
 }

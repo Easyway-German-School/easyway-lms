@@ -204,7 +204,6 @@ function ParticipantTile({
   mode,
   large,
   isSpeaking,
-  revision: topologyRevision,
   levels,
   handPosition,
   light,
@@ -217,15 +216,6 @@ function ParticipantTile({
   mode: QualityMode;
   large?: boolean;
   isSpeaking?: boolean;
-  /**
-   * Bumped by track/participant topology events only (publish, subscribe,
-   * mute, connect, disconnect) — deliberately NOT by `ActiveSpeakersChanged`.
-   * It is a dependency of the attach effect, and that is the whole point —
-   * see the comment inside. If this ever gets wired back to something that
-   * fires on every speaking event, every tile's video/audio element will
-   * detach and reattach (a visible blink) each time anyone talks.
-   */
-  revision: number;
   levels: AudioLevelStore;
   /** 1-based place in the hand queue, or null for a hand that is down. */
   handPosition: number | null;
@@ -279,89 +269,33 @@ function ParticipantTile({
   }, [menuOpen]);
 
   const showVideo = qualitySpec(mode).maxHeight > 0;
+  const cameraPub = participant.getTrackPublication(Track.Source.Camera);
+  const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
+  const videoPub = screenPub?.track && !(participant instanceof LocalParticipant) ? screenPub : cameraPub;
+  const videoTrack = videoPub?.track ?? null;
+  const microphoneTrack =
+    participant instanceof LocalParticipant
+      ? null
+      : (participant.getTrackPublication(Track.Source.Microphone)?.track ?? null);
 
   useEffect(() => {
     const videoEl = videoRef.current;
     const audioEl = audioRef.current;
 
-    function attach() {
-      const cameraPub = participant.getTrackPublication(Track.Source.Camera);
-      const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
-      /**
-       * A shared screen is what the class is looking at, so it wins over the
-       * tutor's face whenever both are live — EXCEPT on the sharer's own
-       * tile. Looping a person's own screen-share capture back into a video
-       * element that sits on that same screen is a hall of mirrors: the
-       * captured frame now contains a smaller copy of itself, which gets
-       * captured again next frame, nesting for as many generations as the
-       * encoder can keep up with. That is the cascade of shrinking browser
-       * windows tutors have been screenshotting — nothing to do with the
-       * network, and it reproduces every time regardless of connection
-       * quality. The sharer doesn't need to watch their own screen anyway,
-       * so their own tile just shows the plain "You" placeholder instead.
-       */
-      const isLocal = participant instanceof LocalParticipant;
-      const videoPub = screenPub?.track && !isLocal ? screenPub : cameraPub;
-
-      if (videoEl && showVideo && videoPub?.track) {
-        videoPub.track.attach(videoEl);
-        setHasVideo(true);
-      } else {
-        setHasVideo(false);
-      }
-
-      // The local participant must never hear themselves.
-      if (audioEl && !(participant instanceof LocalParticipant)) {
-        const micPub = participant.getTrackPublication(Track.Source.Microphone);
-        if (micPub?.track) micPub.track.attach(audioEl);
-      }
+    if (videoEl && showVideo && videoTrack) {
+      videoTrack.attach(videoEl);
+      setHasVideo(true);
+    } else {
+      setHasVideo(false);
     }
 
-    attach();
-
-    /**
-     * WHY `revision` IS A DEPENDENCY — this is the blank-camera bug.
-     *
-     * `trackPublished` is a REMOTE participant event. A LocalParticipant emits
-     * `localTrackPublished` instead, so none of the listeners below ever fired
-     * for your own tile. And the ordering is merciless: the room reports
-     * Connected, this tile mounts and calls `attach()` while there is still no
-     * camera track to attach, and only then does `setCameraEnabled(true)`
-     * resolve and publish one. Room events did force a re-render — but a
-     * re-render does not re-run an effect whose dependencies have not changed,
-     * so `attach()` was never called again and the student stared at their own
-     * black rectangle for the whole lesson.
-     *
-     * Depending on `topologyRevision` re-runs this on every topology event,
-     * which is the cheap and reliable version of the fix. `track.attach(el)`
-     * on an element it is already attached to is a no-op, so re-running costs
-     * nothing — as long as it isn't re-running on every speaking tick too,
-     * which is what `topologyRevision` (as opposed to the room's general
-     * `revision`) exists to prevent.
-     */
-    participant.on("trackSubscribed", attach);
-    participant.on("trackUnsubscribed", attach);
-    participant.on("trackMuted", attach);
-    participant.on("trackUnmuted", attach);
-    participant.on("trackPublished", attach);
-    participant.on("localTrackPublished", attach);
-    participant.on("localTrackUnpublished", attach);
+    if (audioEl && microphoneTrack) microphoneTrack.attach(audioEl);
 
     return () => {
-      participant.off("trackSubscribed", attach);
-      participant.off("trackUnsubscribed", attach);
-      participant.off("trackMuted", attach);
-      participant.off("trackUnmuted", attach);
-      participant.off("trackPublished", attach);
-      participant.off("localTrackPublished", attach);
-      participant.off("localTrackUnpublished", attach);
-      if (videoEl) {
-        participant.getTrackPublication(Track.Source.Camera)?.track?.detach(videoEl);
-        participant.getTrackPublication(Track.Source.ScreenShare)?.track?.detach(videoEl);
-      }
-      if (audioEl) participant.getTrackPublication(Track.Source.Microphone)?.track?.detach(audioEl);
+      if (videoEl && videoTrack) videoTrack.detach(videoEl);
+      if (audioEl && microphoneTrack) microphoneTrack.detach(audioEl);
     };
-  }, [participant, showVideo, topologyRevision]);
+  }, [showVideo, videoTrack, microphoneTrack]);
 
   const micMuted = !participant.isMicrophoneEnabled;
   const tutor = isTutor(participant);
@@ -675,22 +609,7 @@ export default function LiveKitClassroom({
   // (and drifting), events bump this counter and the component re-reads.
   const [revision, forceRender] = useState(0);
   const bump = useCallback(() => forceRender((n) => n + 1), []);
-  /**
-   * A SEPARATE counter for track/participant topology only — publish,
-   * subscribe, mute, connect, disconnect. Tiles take this one as a prop so
-   * their attach effect re-runs — see ParticipantTile.
-   *
-   * It used to be the same counter as `revision`, which is also bumped by
-   * `ActiveSpeakersChanged` — an event LiveKit fires many times a second
-   * while anyone is talking. Since the attach effect's cleanup detaches the
-   * video/audio element before every re-run, that meant every tile in the
-   * room detached and reattached its media stream (a visible black flash)
-   * on every speaking tick, for anyone at all speaking, not just the tile
-   * whose track actually changed. Splitting it so only real topology events
-   * re-run the attach effect keeps the fix for the blank-camera bug (see the
-   * comment in ParticipantTile) without also re-triggering it on every
-   * speaking event.
-   */
+  /** Track topology refreshes mutable room state and audio-level membership. */
   const [topologyRevision, forceTopologyRender] = useState(0);
   const bumpTopology = useCallback(() => forceTopologyRender((n) => n + 1), []);
   const bumpAll = useCallback(() => {
@@ -930,9 +849,8 @@ export default function LiveKitClassroom({
         }
       })
       .on(RoomEvent.TrackUnmuted, bumpAll)
-      // Deliberately plain `bump`, NOT `bumpAll` — see the comment on
-      // `topologyRevision` above. This event fires many times a second while
-      // anyone is speaking, and must never re-run a tile's media attach effect.
+      // This event fires many times a second; keep speaker updates separate
+      // from track changes so they don't detach and reattach tile media.
       .on(RoomEvent.ActiveSpeakersChanged, bump)
       .on(RoomEvent.LocalTrackPublished, bumpAll)
       .on(RoomEvent.LocalTrackUnpublished, bumpAll)
@@ -1664,7 +1582,6 @@ export default function LiveKitClassroom({
               mode="low"
               large
               isSpeaking={ringIds.has(stageParticipant.identity)}
-              revision={topologyRevision}
               levels={levels}
               handPosition={null}
               light={null}
@@ -1979,7 +1896,6 @@ export default function LiveKitClassroom({
                   mode={mode}
                   large
                   isSpeaking={ringIds.has(stageParticipant.identity)}
-                  revision={topologyRevision}
                   levels={levels}
                   handPosition={handPositions.get(stageParticipant.identity) ?? null}
                   light={lightFor(stageParticipant)}
@@ -2020,7 +1936,6 @@ export default function LiveKitClassroom({
                       participant={participant}
                       mode={mode}
                       isSpeaking={ringIds.has(participant.identity)}
-                      revision={topologyRevision}
                       levels={levels}
                       handPosition={handPositions.get(participant.identity) ?? null}
                       light={lightFor(participant)}
