@@ -31,7 +31,18 @@ const nextConfig = {
    * resolves against the real `node_modules/ffmpeg-static` folder the tracing
    * config copies in, and `__dirname` inside it means what it always meant.
    */
-  serverExternalPackages: ['ffmpeg-static'],
+  /**
+   * `web-push` (reached via src/instrumentation.ts -> capture-error.ts ->
+   * incidents.ts -> notify.ts -> push.ts) pulls in `https-proxy-agent` and
+   * `agent-base`, which `require("http")`/`require("https")` directly.
+   * Webpack still needs to resolve that chain when compiling the shared
+   * instrumentation bundle even though the call is behind a NEXT_RUNTIME
+   * guard, and bundling Node's own `http`/`https` fails outright — "Module
+   * not found: Can't resolve 'http'", on every single request. Externalizing
+   * it leaves the require() to Node's real module resolution at runtime,
+   * the same fix as ffmpeg-static above.
+   */
+  serverExternalPackages: ['ffmpeg-static', 'web-push', 'https-proxy-agent', 'agent-base'],
 
   /**
    * Force the serverless functions that need them to carry two things Next's
