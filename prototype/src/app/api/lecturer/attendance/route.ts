@@ -187,33 +187,47 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
     }
-
-    /**
-     * Attendance is only ever what a tutor explicitly said. An entry with no
-     * recognised status is "not marked" and is skipped — it is never read as
-     * absent. (This used to be `entry.present ? 'present' : 'absent'`, so any
-     * entry without a status silently became an absence plus a notification.)
-     * A student whose batch has not begun cannot have attended or missed
-     * anything either, so they are skipped too.
-     */
-    const startDayOverrides = await readIntakeStartDayOverrides(session.user.tenantId ?? null);
-    let saved = 0;
-    let skippedUnmarked = 0;
-    let skippedNotStarted = 0;
-    for (const entry of rows) {
-      const status = explicitStatus(entry.status);
-      if (!status) {
-        skippedUnmarked += 1;
-        continue;
+      if (new Set(rows.map((entry) => entry.studentId)).size !== rows.length) {
+        return NextResponse.json(
+          { error: 'That register contains duplicate students.' },
+          { status: 400 },
+        );
       }
-      const info = studentInfoById.get(entry.studentId);
-      if (info && !classesHaveBegun(info, day, startDayOverrides)) {
-        skippedNotStarted += 1;
-        continue;
-      }
-      const present = status === 'present' || status === 'late';
 
       /**
+       * An omitted status is a no-op for older callers. Explicit null clears a
+       * previous mark; it is never converted to absent.
+       */
+      const startDayOverrides = await readIntakeStartDayOverrides(session.user.tenantId ?? null);
+      let skippedUnmarked = 0;
+      let skippedNotStarted = 0;
+      const writes: Array<
+        | { kind: 'clear'; studentId: string }
+        | { kind: 'mark'; studentId: string; present: boolean; status: string; notes: string | null }
+      > = [];
+      const absences: Array<{ studentId: string; notes: string | null }> = [];
+
+      for (const entry of rows) {
+        const status = explicitStatus(entry.status);
+        const clearing = entry.status === null;
+        if (!status && !clearing) {
+          skippedUnmarked += 1;
+          continue;
+        }
+        const info = studentInfoById.get(entry.studentId);
+        if (info && !classesHaveBegun(info, day, startDayOverrides)) {
+          skippedNotStarted += 1;
+          continue;
+        }
+        if (clearing) {
+          writes.push({ kind: 'clear', studentId: entry.studentId });
+          continue;
+        }
+        if (!status) continue;
+
+        const present = status === 'present' || status === 'late';
+
+        /**
        * A class started straight from the live room (see
        * `ensureClassSessionForLiveStart`) never reached a student's calendar
        * in advance — the only notice they had was the same-instant "class is
@@ -246,61 +260,79 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      await prisma.attendance.upsert({
-        where: { studentId_date: { studentId: entry.studentId, date: day } },
-        update: { present, status, classId: cls?.id ?? undefined, notes: unscheduledNote },
-        create: {
-          studentId: entry.studentId,
-          date: day,
-          present,
-          status,
-          classId: cls?.id ?? null,
-          notes: unscheduledNote ?? null,
-        },
+      writes.push({
+        kind: 'mark',
+        studentId: entry.studentId,
+        present,
+        status,
+        notes: unscheduledNote ?? null,
       });
-      saved += 1;
-
-      /**
-       * Only the absent mark is worth a notification. A register is dozens of
-       * students at once, nearly all of them present — buzzing every one of
-       * them every single class day is the alert-fatigue mistake the gradebook
-       * route already avoids by only notifying when a score actually moved.
-       * Being marked absent is the one outcome a student would want to catch
-       * quickly, in case it is wrong. `dedupeKey` includes the mark itself, so
-       * re-saving the same register does not re-notify, but a correction that
-       * flips somebody TO absent still reaches them.
-       */
-      if (!present) {
-        // Absent from WHICH class matters to a hybrid student — their campus
-        // tutor and their online tutor each take their own register.
-        const tutorWho = tutorPhrase(await attributeTutorAction(entry.studentId, lecturerId));
-        const studentMessage = unscheduledNote
-          ? `${tutorWho} recorded you as absent for today's class. That class was started directly from the live room and wasn't on your calendar in advance — if you weren't told about it in time, let them know so they can review it.`
-          : `${tutorWho} recorded you as absent for today's class. If that's wrong, let them know.`;
-        notifyInBackground({
-          to: { studentIds: [entry.studentId] },
-          kind: KIND.attendanceMarked,
-          severity: "info",
-          title: "Marked absent today",
-          message: studentMessage,
-          link: "/attendance",
-          dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent`,
-        });
-        // Same fact, a parent's own copy — a linked guardian would rather
-        // hear this from the school than notice a gap later.
-        notifyInBackground({
-          to: { parentsOfStudentIds: [entry.studentId] },
-          kind: KIND.attendanceMarked,
-          severity: "info",
-          title: "Marked absent today",
-          message: "Your child's tutor recorded them as absent for today's class.",
-          link: "/parent/attendance",
-          dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent:parent`,
-        });
-      }
+      if (!present) absences.push({ studentId: entry.studentId, notes: unscheduledNote ?? null });
     }
 
-    return NextResponse.json({ count: saved, skippedUnmarked, skippedNotStarted });
+    let saved = 0;
+    let cleared = 0;
+    await prisma.$transaction(async (tx) => {
+      for (const write of writes) {
+        if (write.kind === 'clear') {
+          const result = await tx.attendance.deleteMany({
+            where: { studentId: write.studentId, date: day },
+          });
+          cleared += result.count;
+          continue;
+        }
+
+        await tx.attendance.upsert({
+          where: { studentId_date: { studentId: write.studentId, date: day } },
+          update: {
+            present: write.present,
+            status: write.status,
+            classId: cls?.id ?? undefined,
+            notes: write.notes,
+          },
+          create: {
+            studentId: write.studentId,
+            date: day,
+            present: write.present,
+            status: write.status,
+            classId: cls?.id ?? null,
+            notes: write.notes,
+          },
+        });
+        saved += 1;
+      }
+    });
+
+    /**
+     * Notify only after the register transaction commits, so a failed save
+     * cannot announce a mark that was rolled back.
+     */
+    for (const absence of absences) {
+      const tutorWho = tutorPhrase(await attributeTutorAction(absence.studentId, lecturerId));
+      const studentMessage = absence.notes
+        ? `${tutorWho} recorded you as absent for today's class. That class was started directly from the live room and wasn't on your calendar in advance — if you weren't told about it in time, let them know so they can review it.`
+        : `${tutorWho} recorded you as absent for today's class. If that's wrong, let them know.`;
+      notifyInBackground({
+        to: { studentIds: [absence.studentId] },
+        kind: KIND.attendanceMarked,
+        severity: "info",
+        title: "Marked absent today",
+        message: studentMessage,
+        link: "/attendance",
+        dedupeKey: `attendance-marked:${absence.studentId}:${day.toISOString()}:absent`,
+      });
+      notifyInBackground({
+        to: { parentsOfStudentIds: [absence.studentId] },
+        kind: KIND.attendanceMarked,
+        severity: "info",
+        title: "Marked absent today",
+        message: "Your child's tutor recorded them as absent for today's class.",
+        link: "/parent/attendance",
+        dedupeKey: `attendance-marked:${absence.studentId}:${day.toISOString()}:absent:parent`,
+      });
+    }
+
+    return NextResponse.json({ count: saved, cleared, skippedUnmarked, skippedNotStarted });
   } catch (error) {
     console.error('Attendance POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
