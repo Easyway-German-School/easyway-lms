@@ -22,6 +22,8 @@ import {
   readLecturerStatus,
 } from "@/lib/lecturer-status";
 import { lecturerFeatures, parseLecturerFeatures } from "@/lib/lecturer-features";
+import { generateTempPassword } from "@/lib/student-password";
+import { sendTutorWelcomeEmail } from "@/lib/tutor-welcome-email";
 
 /**
  * Tutor administration.
@@ -209,17 +211,22 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body?.password === "string" ? body.password : "";
+  const requestedPassword = typeof body?.password === "string" ? body.password : "";
+  const password = requestedPassword.trim() ? requestedPassword : generateTempPassword();
   const specialization = typeof body?.specialization === "string" ? body.specialization.trim() : "";
   const bio = typeof body?.bio === "string" ? body.bio.trim() : "";
   const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
   const photoUrl = typeof body?.photoUrl === "string" ? body.photoUrl.trim() : "";
 
-  if (!name || !email || !password) {
-    return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
+  if (!name || !email) {
+    return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
   }
 
-  if (password.length < 8) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  }
+
+  if (requestedPassword.trim() && password.length < 8) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
@@ -282,18 +289,29 @@ export async function POST(request: NextRequest) {
     await announceTutorBatches({ lecturerId: user.lecturer.id }).catch((error) => console.error("Batch notice failed", error));
   }
 
+  let welcomeEmailStatus: "queued" | "suppressed" | "failed" = "failed";
+  try {
+    const welcomeEmail = await sendTutorWelcomeEmail({
+      tutorName: name,
+      tutorEmail: email,
+      temporaryPassword: password,
+    });
+    welcomeEmailStatus = welcomeEmail.status === "suppressed" ? "suppressed" : "queued";
+  } catch (error) {
+    console.error("Tutor account was created, but its welcome email could not be queued:", { email, error });
+  }
+
   return NextResponse.json(
     {
       success: true,
+      welcomeEmailStatus,
       lecturer: {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
         lecturerId: user.lecturer?.id || null,
-        // Echoed back once so the admin can hand it over. It is never stored
-        // in plain text and never readable again after this response.
-        password,
+        ...(welcomeEmailStatus === "queued" ? {} : { password }),
       },
     },
     { status: 201 },
