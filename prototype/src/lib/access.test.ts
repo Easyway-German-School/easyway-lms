@@ -157,6 +157,47 @@ describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
     }
   });
 
+  describe("deriveStudentAccess — previous-level debt blocks current access", () => {
+    const charges = [
+      { id: "a1", level: "A1", amount: 180_000, legacyArrears: false, createdAt: daysAgo(90) },
+      { id: "a2", level: "A2", amount: 180_000, legacyArrears: false, createdAt: daysAgo(1) },
+    ];
+
+    it("locks an otherwise fully paid current level while the completed level still has debt", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 180_000,
+        tuitionFee: 180_000,
+        requiredDeposit: 108_000,
+        level: "A2",
+        charges,
+        payments: [{ amount: 180_000, level: "A2", createdAt: daysAgo(1) }],
+        now: NOW,
+      });
+
+      expect(access.outstanding).toBe(0);
+      expect(access.currentLevelOutstanding).toBe(0);
+      expect(access.previousLevelOutstanding).toBe(180_000);
+      expect(access.hasAccess).toBe(false);
+      expect(access.lockReason).toBe("previous_level_balance");
+    });
+
+    it("opens current access once every earlier level is settled", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 360_000,
+        tuitionFee: 180_000,
+        requiredDeposit: 108_000,
+        level: "A2",
+        charges,
+        payments: [{ amount: 360_000, level: "A2", createdAt: daysAgo(1) }],
+        now: NOW,
+      });
+
+      expect(access.previousLevelOutstanding).toBe(0);
+      expect(access.hasAccess).toBe(true);
+      expect(access.lockReason).toBeNull();
+    });
+  });
+
   it("opens the portal on the first day for someone who has paid", () => {
     const access = deriveStudentAccess({ ...october, totalPaid: 150_000, now: new Date("2026-10-01T00:30:00+01:00") });
     expect(access.hasAccess).toBe(true);
@@ -223,7 +264,7 @@ describe("deriveStudentAccess — August money must not open October", () => {
     expect(access.outstanding).toBe(93_000);
   });
 
-  it("opens B1 access when its payment clears the deposit and older debt is legacy arrears", () => {
+  it("keeps B1 locked until older legacy arrears are settled", () => {
     const access = deriveStudentAccess({
       totalPaid: 180_000,
       tuitionFee: 180_000,
@@ -256,10 +297,12 @@ describe("deriveStudentAccess — August money must not open October", () => {
       now: NOW,
     });
 
-    expect(access.hasAccess).toBe(true);
+    expect(access.hasAccess).toBe(false);
     expect(access.depositCleared).toBe(true);
     expect(access.totalPaid).toBe(180_000);
     expect(access.outstandingBalance).toBe(0);
+    expect(access.previousLevelOutstanding).toBe(180_000);
+    expect(access.lockReason).toBe("previous_level_balance");
     expect(access.lifetimeOutstanding).toBe(180_000);
   });
 
@@ -298,7 +341,7 @@ describe("deriveStudentAccess — August money must not open October", () => {
 
     expect(access.depositCleared).toBe(true);
     expect(access.hasAccess).toBe(false);
-    expect(access.lockReason).toBe("unsettled_balance");
+    expect(access.lockReason).toBe("previous_level_balance");
     expect(access.outstandingBalance).toBe(180_000);
   });
 

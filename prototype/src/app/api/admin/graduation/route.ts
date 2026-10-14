@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { graduateStudents, loadGraduationDesk, setBatchAutomatic } from "@/lib/graduation-server";
+import { graduateStudents, loadGraduationDesk, setAutoPromotion, setBatchAutomatic } from "@/lib/graduation-server";
 import { undoWrongMoves } from "@/lib/graduation-repair-server";
 import { adoptIntoBatch, moveIntoBatch, sweepBatch } from "@/lib/batch-sweep-server";
 
@@ -140,6 +140,12 @@ export async function POST(request: Request) {
     if (action === "setAuto") {
       if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
       const auto = await setBatchAutomatic(tenantId, body.enabled === true);
+      return NextResponse.json({ ok: true, auto });
+    }
+
+    if (action === "setAutoPromotion") {
+      if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
+      const auto = await setAutoPromotion(tenantId, body.autoPromote === true);
       return NextResponse.json({ ok: true, auto });
     }
 

@@ -27,6 +27,7 @@ type OfferResponse = {
   branchName: string | null;
   sellable: boolean;
   requiredDeposit: number;
+  previousLevelOutstanding: number;
   offer: FullPaymentOffer;
   options: {
     full: { amount: number; headline: string; subline: string };
@@ -74,7 +75,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
     };
   }, []);
 
-  async function startCheckout(stage: "full" | "deposit" | "custom", amount?: number) {
+  async function startCheckout(stage: "full" | "deposit" | "custom", amount?: number, forPriorBalance = false) {
     setBusy(stage);
     setError(null);
     try {
@@ -90,6 +91,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
           pathwayName,
           pathwayId: pathwayName,
           paymentStage: stage,
+          ...(forPriorBalance ? { forPriorBalance: true } : {}),
           ...(stage === "custom" ? { amount } : {}),
         }),
       });
@@ -127,6 +129,28 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
   }
 
   const { offer, options, socialProof } = data;
+
+  if (data.previousLevelOutstanding > 0) {
+    return (
+      <div className="rounded-[32px] border border-amber-300 bg-amber-50 p-8 text-amber-950">
+        <p className="text-xs font-semibold uppercase tracking-[0.25em]">Previous-level balance</p>
+        <h2 className="mt-3 text-2xl font-bold">Clear the previous tuition before paying for {data.level}</h2>
+        <p className="mt-3 text-sm">
+          {naira(data.previousLevelOutstanding)} remains from a completed level. This payment settles that
+          balance only; once it clears, you can pay for {data.level} separately.
+        </p>
+        <button
+          type="button"
+          onClick={() => startCheckout("full", undefined, true)}
+          disabled={busy !== null}
+          className="mt-5 rounded-full bg-[#FF6600] px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {busy === "full" ? "Opening secure checkout…" : "Pay previous-level balance"}
+        </button>
+        {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
+      </div>
+    );
+  }
 
   // Nothing to sell: either it is settled, or the level is quoted off-portal.
   if (offer.fullPaid) {

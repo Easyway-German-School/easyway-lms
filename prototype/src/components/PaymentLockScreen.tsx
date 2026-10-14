@@ -145,7 +145,12 @@ export default function PaymentLockScreen({
   // deposit) and no "study one-to-one instead" offer, since they are already
   // enrolled.
   const balanceLock = access?.lockReason === "unsettled_balance";
-  const outstanding = balanceLock ? access?.outstandingBalance ?? 0 : access?.outstanding ?? 0;
+  const previousLevelLock = access?.lockReason === "previous_level_balance";
+  const outstanding = previousLevelLock
+    ? access?.previousLevelOutstanding ?? 0
+    : balanceLock
+      ? access?.outstandingBalance ?? 0
+      : access?.outstanding ?? 0;
   const progress = balanceLock ? access?.feeProgressPercent ?? 0 : access?.progressPercent ?? 0;
   const registrationPaid = access?.registrationPaid ?? true;
   const lockedSince = balanceLock && access?.lockAt ? new Date(access.lockAt) : null;
@@ -155,6 +160,7 @@ export default function PaymentLockScreen({
   const returningUnpaidLevel = Boolean(
     access &&
       !balanceLock &&
+      !previousLevelLock &&
       !access.depositCleared &&
       access.tuitionFee > 0 &&
       access.totalPaid >= access.tuitionFee,
@@ -334,13 +340,22 @@ export default function PaymentLockScreen({
                 <span className="absolute -left-2 top-1/2 hidden h-5 w-5 -translate-y-1/2 rotate-45 border-b border-l border-white/15 bg-white/[0.07] sm:block" />
 
                 <p className="text-2xl font-semibold leading-snug text-white sm:text-[26px]">
-                  {balanceLock
+                  {previousLevelLock
+                    ? "Please settle your previous-level tuition balance to keep going."
+                    : balanceLock
                     ? "Please settle your tuition balance to keep going."
                     : "Please proceed to pay the tuition fee to start your classes."}
                 </p>
 
                 <div className="mt-6 space-y-3">
-                  {balanceLock ? (
+                  {previousLevelLock ? (
+                    <div className="flex items-center gap-3 text-sm text-amber-100">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400/20 text-xs">!</span>
+                      {outstanding > 0
+                        ? `${naira(outstanding)} remains from a completed level`
+                        : "Previous-level tuition remains outstanding"}
+                    </div>
+                  ) : balanceLock ? (
                     <>
                       <div className="flex items-center gap-3 text-sm text-emerald-200">
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
@@ -429,10 +444,10 @@ export default function PaymentLockScreen({
 
                 <div className="mt-7 flex flex-wrap gap-3">
                   <Link
-                    href="/programs"
+                    href={previousLevelLock ? "/programs?payPriorBalance=1" : "/programs"}
                     className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/30 transition hover:-translate-y-0.5 hover:brightness-110"
                   >
-                    {balanceLock ? "Pay my balance" : "Pay tuition now"}
+                    {previousLevelLock ? "Clear previous-level debt" : balanceLock ? "Pay my balance" : "Pay tuition now"}
                   </Link>
                   <Link
                     href="/payments"
@@ -452,7 +467,7 @@ export default function PaymentLockScreen({
                   on a track, so switching them to private here makes no sense —
                   they just need to settle what they owe.
                 */}
-                {!balanceLock && <PrivateClassAlternative price={access?.privateClassPrice} />}
+                {!balanceLock && !previousLevelLock && <PrivateClassAlternative price={access?.privateClassPrice} />}
               </motion.div>
             </motion.div>
           )}
@@ -460,7 +475,9 @@ export default function PaymentLockScreen({
 
         {!revealed && (
           <p className="mt-10 max-w-md text-sm leading-7 text-white/60">
-            {balanceLock
+            {previousLevelLock
+              ? `Your previous-level tuition is outstanding — settle it before accessing ${areaLabel.toLowerCase()} again.`
+              : balanceLock
               ? `Your tuition balance is outstanding — settle it to unlock ${areaLabel.toLowerCase()} again.`
               : returningUnpaidLevel
                 ? `Pay this level's tuition to unlock ${areaLabel.toLowerCase()}.`

@@ -190,6 +190,10 @@ export type PromotionOptions = {
    * `admission.classesStartedAtBeforePromotion` so the move can be undone.
    */
   placement?: "next-intake";
+  /** For scheduled progression, do not place the learner before this date. */
+  notBefore?: Date;
+  /** Compare-and-set guard for scheduled promotions. */
+  expectedLevel?: string;
 };
 
 /** The bare month the student chose on the next-level journey for `level`, or null. */
@@ -316,6 +320,7 @@ export async function promoteStudents(
         level: next,
         // The batch they picked on the next-level journey, if it was for this level.
         preferredMonth: chosenBatch(admission, next),
+        notBefore: options.notBefore,
       });
     }
     const landingMonth = place?.month ?? monthName;
@@ -334,9 +339,7 @@ export async function promoteStudents(
       continue;
     }
 
-    await prisma.student.update({
-      where: { id: studentId },
-      data: {
+    const studentUpdate = {
         level: next,
         admission: {
           ...admission,
@@ -353,8 +356,19 @@ export async function promoteStudents(
               startPromptSnoozedUntil: null,
             }
           : {}),
-      },
-    });
+      };
+    if (options.expectedLevel) {
+      const moved = await prisma.student.updateMany({
+        where: { id: studentId, level: options.expectedLevel },
+        data: studentUpdate,
+      });
+      if (moved.count !== 1) {
+        result.skipped.push({ studentId, reason: "Level changed while promotion was being processed" });
+        continue;
+      }
+    } else {
+      await prisma.student.update({ where: { id: studentId }, data: studentUpdate });
+    }
 
     // Close the level they just left and open the one they are moving into —
     // see src/lib/student-enrolment.ts. This is the record that makes

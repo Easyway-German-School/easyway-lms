@@ -108,6 +108,7 @@ export async function GET() {
     /** False for C1/C2, which the branch office still quotes by hand. */
     sellable: isLevelSellable(student.level),
     requiredDeposit: access?.requiredDeposit ?? requiredDepositFor(feeLookup),
+    previousLevelOutstanding: access?.previousLevelOutstanding ?? 0,
     offer,
     options: paymentOptionsFor(offer),
     socialProof: await branchFullPaymentRate(student.branchId),
