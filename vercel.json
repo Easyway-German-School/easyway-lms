@@ -16,7 +16,7 @@
     },
     {
       "path": "/api/cron/tick-fast",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 * * * *"
     }
   ],
   "functions": {
