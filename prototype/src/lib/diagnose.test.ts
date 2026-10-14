@@ -18,7 +18,7 @@ const tx = (over: Partial<PaystackTx> = {}): PaystackTx => ({
 });
 
 const base = (over: Partial<Facts> = {}): Facts => ({
-  student: { id: "s1", studentCode: "EW/2026/B1/SEP/A001", tenantId: "t1", level: "B1" },
+  student: { id: "s1", studentCode: "EW/2026/B1/SEP/A001", tenantId: "t1", level: "B1", status: "active" },
   user: { id: "u1", email: "ada@example.com", name: "Ada", tenantId: "t1" },
   access: { hasAccess: true, lockReason: null, totalPaid: 300_000, tuitionFee: 400_000, requiredDeposit: 240_000, outstanding: 0, graceUntil: null, batchLabel: null },
   hasPhoto: true,
@@ -140,6 +140,63 @@ describe("the rules", () => {
   it("missing-level-charge: says nothing when they simply have not paid enough yet (no drift, just unpaid)", () => {
     const d = diagnose(base({ access: { ...base().access, totalPaid: 50_000, currentLevelPaid: 50_000, tuitionFee: 400_000 } }));
     expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("missing-level-charge: detects an absent current charge even before payments reach the new level fee", () => {
+    const d = diagnose(base({
+      access: { ...base().access, totalPaid: 180_000, currentLevelPaid: 0, tuitionFee: 400_000 },
+      levelAlignment: {
+        currentLevelChargeExists: false,
+        currentChargeId: null,
+        currentChargeAmount: null,
+        ongoingEnrolment: null,
+        expectedBatchMonth: "September",
+        expectedBatchYear: 2026,
+      },
+    }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(true);
+  });
+
+  it("current-enrolment-mismatch: catches a changed level with a stale ongoing fee snapshot", () => {
+    const d = diagnose(base({
+      levelAlignment: {
+        currentLevelChargeExists: true,
+        currentChargeId: "charge-b1",
+        currentChargeAmount: 400_000,
+        ongoingEnrolment: {
+          id: "enrolment-a2",
+          level: "A2",
+          tuitionChargeId: "charge-a2",
+          feeSnapshot: 180_000,
+          batchMonth: "September",
+          batchYear: 2026,
+        },
+        expectedBatchMonth: "September",
+        expectedBatchYear: 2026,
+      },
+    }));
+    expect(d.findings.some((f) => f.rule === "current-enrolment-mismatch")).toBe(true);
+  });
+
+  it("current-enrolment-mismatch: stays quiet when the active level, fee and batch are aligned", () => {
+    const d = diagnose(base({
+      levelAlignment: {
+        currentLevelChargeExists: true,
+        currentChargeId: "charge-b1",
+        currentChargeAmount: 400_000,
+        ongoingEnrolment: {
+          id: "enrolment-b1",
+          level: "B1",
+          tuitionChargeId: "charge-b1",
+          feeSnapshot: 400_000,
+          batchMonth: "September",
+          batchYear: 2026,
+        },
+        expectedBatchMonth: "September",
+        expectedBatchYear: 2026,
+      },
+    }));
+    expect(d.findings.some((f) => f.rule === "current-enrolment-mismatch")).toBe(false);
   });
 
   it("stale-prior-level-lock: current level settled, an earlier level's charge is what is actually locking them", () => {

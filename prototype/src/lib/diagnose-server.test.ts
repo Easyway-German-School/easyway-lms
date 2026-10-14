@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   ensureCharge: vi.fn(),
   chargeFind: vi.fn(),
   chargeUpdate: vi.fn(),
+  enrolmentUpdate: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -23,6 +24,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: (...a: unknown[]) => m.chargeFind(...a),
       update: (...a: unknown[]) => m.chargeUpdate(...a),
     },
+    studentEnrolment: { updateMany: (...a: unknown[]) => m.enrolmentUpdate(...a) },
   },
   unguardedPrisma: {},
 }));
@@ -49,16 +51,53 @@ const rawTx = (over: Record<string, unknown> = {}) => ({
 });
 
 /** A little in-memory world the mocks read from, so "after the repair" really is different. */
-let world: { code: string | null; payments: Array<{ id: string; amount: number; status: string; method: string; stripeSessionId: string | null; paymentIntentId: string | null; createdAt: Date }>; paystack: unknown[] };
+let world: {
+  code: string | null;
+  chargePresent: boolean;
+  enrolment: {
+    id: string;
+    level: string;
+    tuitionChargeId: string | null;
+    feeSnapshot: number | null;
+    batchMonth: string | null;
+    batchYear: number | null;
+  };
+  payments: Array<{ id: string; amount: number; status: string; method: string; stripeSessionId: string | null; paymentIntentId: string | null; createdAt: Date }>;
+  paystack: unknown[];
+};
 
 beforeEach(() => {
   // fetchPaystackTransactions refuses to run with no key (correctly), so the tests need a dummy one.
   process.env.PAYSTACK_SECRET_KEY = "sk_test_dummy";
   Object.values(m).forEach((fn) => fn.mockReset());
-  world = { code: "EW/2026/B1/SEP/A001", payments: [], paystack: [rawTx()] };
+  world = {
+    code: "EW/2026/B1/SEP/A001",
+    chargePresent: true,
+    enrolment: {
+      id: "e1",
+      level: "B1",
+      tuitionChargeId: "c1",
+      feeSnapshot: 400_000,
+      batchMonth: null,
+      batchYear: null,
+    },
+    payments: [],
+    paystack: [rawTx()],
+  };
 
   m.studentFind.mockImplementation(async () => ({
     id: "s1", studentCode: world.code, tenantId: "t1", level: "B1", classType: "group", admission: { photoUrl: "x.jpg" }, branch: null,
+    createdAt: new Date("2026-09-01T00:00:00.000Z"),
+    tuitionCharges: world.chargePresent
+      ? [{ id: "c1", level: "B1", amount: 400_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-09-01T00:00:00.000Z") }]
+      : [],
+    status: "active",
+    branchId: null,
+    tutorId: null,
+    sessionSlot: "Weekday",
+    deliveryMode: "physical",
+    classesStartedAt: null,
+    enrolments: [world.enrolment],
     user: { id: "u1", email: "ada@example.com", name: "Ada", tenantId: "t1" },
   }));
   m.paymentFind.mockImplementation(async () => world.payments);
@@ -82,9 +121,16 @@ beforeEach(() => {
   m.accessFromStudent.mockImplementation(() => ({
     hasAccess: true, lockReason: null, totalPaid: 0, currentLevelPaid: 0, tuitionFee: 400_000, requiredDeposit: 240_000, outstanding: 240_000, graceUntil: null, batchLabel: null,
   }));
-  m.ensureCharge.mockImplementation(async () => ({ created: true, chargeId: "c1", level: "B1", amount: 400_000 }));
+  m.ensureCharge.mockImplementation(async () => {
+    world.chargePresent = true;
+    return { created: true, chargeId: "c1", level: "B1", amount: 400_000 };
+  });
   m.chargeFind.mockResolvedValue(null);
   m.chargeUpdate.mockResolvedValue(undefined);
+  m.enrolmentUpdate.mockImplementation(async ({ data }: { data: typeof world.enrolment }) => {
+    world.enrolment = { ...world.enrolment, ...data };
+    return { count: 1 };
+  });
 });
 
 describe("runDiagnosis", () => {
@@ -244,10 +290,12 @@ describe("runRepair — sync_tuition_charge", () => {
   const settled = () => ({ ...drifted(), hasAccess: true, lockReason: null, currentLevelPaid: 400_000, outstanding: 0 });
 
   it("raises the missing charge, verifies the finding clears, and audits", async () => {
+    world.chargePresent = false;
     let healed = false;
     m.accessFromStudent.mockImplementation(() => (healed ? settled() : drifted()));
     m.ensureCharge.mockImplementation(async () => {
       healed = true;
+      world.chargePresent = true;
       return { created: true, chargeId: "c1", level: "B1", amount: 400_000 };
     });
 
@@ -268,10 +316,27 @@ describe("runRepair — sync_tuition_charge", () => {
   });
 
   it("reports honestly when the charge could not be raised", async () => {
+    world.chargePresent = false;
     m.accessFromStudent.mockImplementation(drifted);
     m.ensureCharge.mockResolvedValue(null);
     const outcome = await runRepair({ studentId: "s1", repairId: "sync_tuition_charge" });
     expect(outcome).toMatchObject({ ok: false, verified: false });
+  });
+
+  it("repairs an outdated current-level enrolment and verifies the alignment", async () => {
+    world.enrolment = {
+      ...world.enrolment,
+      level: "A2",
+      tuitionChargeId: "old-charge",
+      feeSnapshot: 180_000,
+    };
+    const outcome = await runRepair({ studentId: "s1", repairId: "sync_tuition_charge" });
+    expect(outcome).toMatchObject({ ok: true, verified: true });
+    expect(m.enrolmentUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "e1", studentId: "s1", outcome: "ongoing", deletedAt: null },
+      data: expect.objectContaining({ level: "B1", tuitionChargeId: "c1", feeSnapshot: 400_000 }),
+    }));
+    expect(world.enrolment).toMatchObject({ level: "B1", tuitionChargeId: "c1", feeSnapshot: 400_000 });
   });
 
   it("names the capability it needs", () => {
@@ -293,6 +358,7 @@ describe("runRepair — resolve_prior_level_arrears", () => {
     });
     m.studentFind.mockImplementation(async () => ({
       id: "s1", studentCode: world.code, tenantId: "t1", level: "B1", classType: "group",
+      createdAt: new Date("2026-09-01T00:00:00.000Z"),
       admission: { photoUrl: "x.jpg" }, branch: null,
       user: { id: "u1", email: "ada@example.com", name: "Ada", tenantId: "t1" },
       tuitionCharges: [

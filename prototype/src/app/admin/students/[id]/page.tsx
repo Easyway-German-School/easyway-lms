@@ -837,7 +837,9 @@ export default function StudentDossierPage() {
       // Pathway changes used to leave the tuition charge priced at whatever
       // it was before — this is the server confirming it actually re-priced
       // it, so the admin knows the fee really moved and is not stuck.
-      if (json?.pathwayReprice?.repriced) {
+      if (json?.levelSyncWarning) {
+        setEditNotice(json.levelSyncWarning);
+      } else if (json?.pathwayReprice?.repriced) {
         const { from, to, level } = json.pathwayReprice;
         setEditNotice(`${level} tuition re-priced: ₦${Number(from).toLocaleString("en-NG")} → ₦${Number(to).toLocaleString("en-NG")}.`);
       } else if (json?.pathwayReprice?.reason === "already_paid") {

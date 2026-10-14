@@ -75,6 +75,15 @@ export type Facts = {
     studentCode: string | null;
     tenantId: string | null;
     level: string;
+    status?: string;
+    branchId?: string | null;
+    tutorId?: string | null;
+    sessionSlot?: string;
+    classType?: string;
+    deliveryMode?: string;
+    createdAt?: string;
+    classesStartedAt?: string | null;
+    admission?: unknown;
   };
   user: { id: string; email: string; name: string | null; tenantId: string | null };
   access: {
@@ -93,6 +102,21 @@ export type Facts = {
     outstanding: number;
     graceUntil: string | null;
     batchLabel: string | null;
+  };
+  levelAlignment?: {
+    currentLevelChargeExists: boolean;
+    currentChargeId: string | null;
+    currentChargeAmount: number | null;
+    ongoingEnrolment: {
+      id: string;
+      level: string;
+      tuitionChargeId: string | null;
+      feeSnapshot: number | null;
+      batchMonth: string | null;
+      batchYear: number | null;
+    } | null;
+    expectedBatchMonth: string | null;
+    expectedBatchYear: number | null;
   };
   hasPhoto: boolean;
   verdict: PortalVerdict;
@@ -296,37 +320,107 @@ const ruleMissingLevelCharge: Rule = {
     const { access } = facts;
     if (access.currentLevelPaid === undefined) return null;
     if (access.tuitionFee <= 0) return null;
-    // They have, somewhere on their record, at least as much money as this
-    // level costs — but the ledger has not credited this level with it.
-    if (access.totalPaid < access.tuitionFee) return null;
-    if (access.currentLevelPaid >= access.tuitionFee) return null;
+    if (facts.levelAlignment?.currentLevelChargeExists === true) return null;
+    if (facts.levelAlignment === undefined) {
+      // Compatibility for older test fixtures/callers without charge facts.
+      if (access.totalPaid < access.tuitionFee || access.currentLevelPaid >= access.tuitionFee) return null;
+    }
 
     return {
       rule: "missing-level-charge",
       severity: "problem",
-      title: `${facts.student.level} has no priced tuition charge the ledger can credit`,
+      title: `${facts.student.level} has no current tuition charge`,
       detail:
-        `This student has paid ${naira(access.totalPaid)} in total — enough to cover ${facts.student.level}'s ` +
-        `${naira(access.tuitionFee)} fee — but the ledger shows only ${naira(access.currentLevelPaid)} allocated to ` +
-        `${facts.student.level} itself, usually because no TuitionCharge row was ever raised for this level (a level ` +
-        "correction made outside Promotions, or a returning student re-added by hand). The portal locks them out for " +
-        "unpaid tuition on a level they have, in reality, already paid for.",
+        `The student's current level is ${facts.student.level}, but there is no TuitionCharge for that level. ` +
+        `The ledger therefore cannot reliably track this level's ${naira(access.tuitionFee)} fee or allocate ` +
+        `payments against it. This commonly follows a level change that did not finish syncing its finance records.`,
       evidence: [
         { label: "Current level", value: facts.student.level },
         { label: "Paid in total", value: naira(access.totalPaid) },
         { label: `Credited to ${facts.student.level}`, value: naira(access.currentLevelPaid) },
         { label: `${facts.student.level} tuition fee`, value: naira(access.tuitionFee) },
+        { label: "Current-level charge", value: "missing" },
         { label: "Portal", value: access.hasAccess ? "open" : `locked (${access.lockReason ?? "unknown"})` },
       ],
       offers: [
         {
           id: "sync_tuition_charge",
-          label: `Raise the missing ${facts.student.level} tuition charge`,
+          label: `Sync ${facts.student.level} tuition records`,
           preview:
-            `Make sure a priced TuitionCharge exists for ${facts.student.level} at this student's current fee, the same ` +
-            "way signup, promotion and a recorded payment already would. No money moves and nothing already on file is " +
-            "rewritten — this only gives their existing payments a row to be credited against.",
+            `Create the missing ${facts.student.level} charge and align the ongoing enrolment's level and fee snapshot. ` +
+            "No payment is created or changed.",
           needs: "payments" as Capability,
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
+const ruleCurrentEnrolmentMismatch: Rule = {
+  id: "current-enrolment-mismatch",
+  run(facts) {
+    const alignment = facts.levelAlignment;
+    if (!alignment || facts.student.status !== "active") return null;
+    const enrolment = alignment.ongoingEnrolment;
+    const mismatches = [
+      !enrolment ? "no ongoing enrolment" : null,
+      enrolment && enrolment.level.trim().toUpperCase() !== facts.student.level.trim().toUpperCase()
+        ? `enrolment level is ${enrolment.level}`
+        : null,
+      enrolment &&
+      alignment.currentLevelChargeExists &&
+      (enrolment.tuitionChargeId !== alignment.currentChargeId ||
+        enrolment.feeSnapshot !== alignment.currentChargeAmount)
+        ? "enrolment fee snapshot does not match the current tuition charge"
+        : null,
+      enrolment &&
+      alignment.expectedBatchMonth !== null &&
+      (enrolment.batchMonth !== alignment.expectedBatchMonth ||
+        enrolment.batchYear !== alignment.expectedBatchYear)
+        ? "enrolment batch does not match the student's current batch"
+        : null,
+    ].filter((issue): issue is string => issue !== null);
+    if (mismatches.length === 0) return null;
+
+    return {
+      rule: "current-enrolment-mismatch",
+      severity: "problem",
+      title: "Current level, batch and enrolment records do not match",
+      detail:
+        `The student record says ${facts.student.level}, but the ongoing enrolment or its saved fee/batch details ` +
+        `are out of sync (${mismatches.join("; ")}). This can make the roster, payment desk and student portal ` +
+        "show different current-level information.",
+      evidence: [
+        { label: "Student record level", value: facts.student.level },
+        { label: "Ongoing enrolment level", value: enrolment?.level ?? "missing" },
+        {
+          label: "Ongoing enrolment fee snapshot",
+          value: enrolment?.feeSnapshot === null || enrolment?.feeSnapshot === undefined
+            ? "missing"
+            : naira(enrolment.feeSnapshot),
+        },
+        {
+          label: "Current tuition charge",
+          value: alignment.currentLevelChargeExists
+            ? naira(alignment.currentChargeAmount ?? 0)
+            : "missing",
+        },
+        {
+          label: "Current batch",
+          value: alignment.expectedBatchMonth
+            ? `${alignment.expectedBatchMonth}${alignment.expectedBatchYear ? ` ${alignment.expectedBatchYear}` : ""}`
+            : "not set",
+        },
+      ],
+      offers: [
+        {
+          id: "sync_tuition_charge",
+          label: "Sync current level and enrolment records",
+          preview:
+            "Align the current tuition charge and ongoing enrolment with the student's saved level and batch. " +
+            "No payment is created or changed.",
+          needs: "payments",
           params: {},
         },
       ],
@@ -453,6 +547,7 @@ export const RULES: Rule[] = [
   ruleTenantMismatch,
   ruleStaleScreen,
   ruleMissingLevelCharge,
+  ruleCurrentEnrolmentMismatch,
   ruleMissingCode,
   rulePortalLocked,
 ];
