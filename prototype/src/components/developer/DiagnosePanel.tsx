@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { Finding, RepairOffer } from "@/lib/diagnose";
+import type { Finding, RepairId, RepairOffer } from "@/lib/diagnose";
 
 type StudentHit = { id: string; studentCode: string | null; level: string; name: string | null; email: string };
 type DiagnosisResult = {
@@ -13,6 +13,13 @@ type DiagnosisResult = {
   verdictKey: string;
 };
 type Outcome = { ok: boolean; verified: boolean; message: string; after?: DiagnosisResult };
+type ScanProgress = { scanned: number; total: number };
+type ScanFailure = { studentId: string; error: string };
+type BatchRepairOutcome = {
+  studentId: string;
+  repairId: RepairId;
+  outcome: Outcome;
+};
 
 export type DiagnoseTarget = { studentId?: string; userId?: string } | null;
 
@@ -23,13 +30,8 @@ const SEVERITY = {
   info: { dot: "bg-sky-500", ring: "border-sky-400/40", label: "Explained", text: "text-sky-600" },
 } as const;
 
-const RULE_NAMES = [
-  "Paystack has a payment we did not record",
-  "Account missing its school (tenant) link",
-  "Their screen out of sync with the database",
-  "No student ID",
-  "Why the portal is locked",
-];
+const BATCHABLE_REPAIRS = new Set<RepairId>(["sync_tuition_charge", "assign_student_code"]);
+const BATCH_SIZE = 10;
 
 export default function DiagnosePanel({ target, onTargetUsed }: { target: DiagnoseTarget; onTargetUsed: () => void }) {
   const [query, setQuery] = useState("");
@@ -41,7 +43,17 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
   const [confirming, setConfirming] = useState<string | null>(null); // offer key awaiting confirmation
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [snapshotStale, setSnapshotStale] = useState(false);
+  const [scanRows, setScanRows] = useState<DiagnosisResult[]>([]);
+  const [scanFailures, setScanFailures] = useState<ScanFailure[]>([]);
+  const [scanState, setScanState] = useState<"idle" | "running" | "done">("idle");
+  const [scanProgress, setScanProgress] = useState<ScanProgress>({ scanned: 0, total: 0 });
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [batchOutcomes, setBatchOutcomes] = useState<BatchRepairOutcome[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanAbort = useRef<AbortController | null>(null);
 
   const diagnose = useCallback(async (studentId: string, opts: { deep?: boolean; references?: string[] } = {}) => {
     setBusy(true);
@@ -103,6 +115,120 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
     }, 300);
   }
 
+  async function scanSchool() {
+    if (scanState === "running") {
+      scanAbort.current?.abort();
+      return;
+    }
+
+    const controller = new AbortController();
+    scanAbort.current = controller;
+    setScanState("running");
+    setScanProgress({ scanned: 0, total: 0 });
+    setScanRows([]);
+    setScanFailures([]);
+    setScanError(null);
+    setBatchMessage(null);
+    setBatchOutcomes([]);
+
+    let cursor: string | null = null;
+    let scanned = 0;
+    let total = 0;
+    try {
+      do {
+        const response = await fetch("/api/admin/developer/diagnose/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cursor }),
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+
+        const page = payload as {
+          students: DiagnosisResult[];
+          errors: ScanFailure[];
+          scanned: number;
+          total: number;
+          nextCursor: string | null;
+        };
+        scanned += page.scanned;
+        total = page.total;
+        cursor = page.nextCursor;
+        setScanRows((current) => [...current, ...page.students]);
+        setScanFailures((current) => [...current, ...page.errors]);
+        setScanProgress({ scanned, total });
+      } while (cursor);
+      setScanState("done");
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setScanError(e instanceof Error ? e.message : "The school-wide scan could not finish.");
+      }
+      setScanState("idle");
+    } finally {
+      if (scanAbort.current === controller) scanAbort.current = null;
+    }
+  }
+
+  const batchRepairs = scanRows.flatMap((student) =>
+    student.diagnosis.findings.flatMap((finding) =>
+      finding.offers
+        .filter((offer) => BATCHABLE_REPAIRS.has(offer.id))
+        .map((offer) => ({ studentId: student.student.id, repairId: offer.id })),
+    ),
+  );
+  const uniqueBatchRepairs = [...new Map(batchRepairs.map((repair) => [`${repair.studentId}:${repair.repairId}`, repair])).values()];
+
+  async function repairAllSafe() {
+    if (batchBusy || uniqueBatchRepairs.length === 0) return;
+    setBatchBusy(true);
+    setScanError(null);
+    setBatchMessage(null);
+    setBatchOutcomes([]);
+    setBatchProgress(0);
+    let fixed = 0;
+    let needsReview = 0;
+    let completed = 0;
+    try {
+      for (let start = 0; start < uniqueBatchRepairs.length; start += BATCH_SIZE) {
+        const items = uniqueBatchRepairs.slice(start, start + BATCH_SIZE);
+        const response = await fetch("/api/admin/developer/repair/batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+
+        const results = payload.results as BatchRepairOutcome[];
+        fixed += results.filter((result) => result.outcome.ok && result.outcome.verified).length;
+        needsReview += results.filter((result) => !result.outcome.ok || !result.outcome.verified).length;
+        completed += results.length;
+        setBatchOutcomes((current) => [...current, ...results]);
+        setBatchProgress(completed);
+        setScanRows((current) => {
+          const updated = new Map(results.flatMap((result) => result.outcome.after
+            ? [[result.studentId, result.outcome.after] as const]
+            : []));
+          return current
+            .map((student) => updated.get(student.student.id) ?? student)
+            .filter((student) =>
+              student.diagnosis.ruleErrors.length > 0 ||
+              student.diagnosis.findings.some((finding) => finding.severity !== "info"),
+            );
+        });
+      }
+      setBatchMessage(
+        `${fixed} repair${fixed === 1 ? "" : "s"} verified${needsReview ? `; ${needsReview} need${needsReview === 1 ? "s" : ""} review` : ""}.`,
+      );
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "The batch repair could not finish.";
+      setScanError(`Batch repair stopped after ${completed} of ${uniqueBatchRepairs.length} items: ${reason}`);
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
   async function repair(offer: RepairOffer) {
     if (!result || snapshotStale) return;
     setBusy(true);
@@ -132,6 +258,127 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
 
   return (
     <div className="space-y-6">
+      <section className={card}>
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold">Scan the whole school</h2>
+            <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
+              Check every student against the same live-record rules as an individual diagnosis. The scan is read-only and shows
+              every student with a problem or warning; normal payment locks are not counted as faults.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={batchBusy}
+            onClick={() => void scanSchool()}
+            className="rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {scanState === "running" ? "Stop scan" : scanState === "done" ? "Scan again" : "Scan all students"}
+          </button>
+        </div>
+        {scanState === "running" && (
+          <p className="mt-3 text-xs text-[var(--muted)]" role="status">
+            Checked {scanProgress.scanned}{scanProgress.total ? ` of ${scanProgress.total}` : ""} students…
+          </p>
+        )}
+        {scanState === "done" && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <p role="status" className="text-[var(--muted)]">
+              Scan complete: {scanProgress.scanned} of {scanProgress.total} students checked; {scanRows.length} need attention
+              {scanFailures.length ? `; ${scanFailures.length} could not be checked` : ""}.
+            </p>
+            {uniqueBatchRepairs.length > 0 && (
+              <button
+                type="button"
+                disabled={batchBusy}
+                onClick={() => void repairAllSafe()}
+                className="rounded-xl bg-emerald-600 px-3 py-2 font-semibold text-white disabled:opacity-50"
+              >
+                {batchBusy
+                  ? `Repairing ${batchProgress} of ${uniqueBatchRepairs.length}…`
+                  : `Fix ${uniqueBatchRepairs.length} safe record issue${uniqueBatchRepairs.length === 1 ? "" : "s"}`}
+              </button>
+            )}
+          </div>
+        )}
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          Bulk repair only syncs tuition/enrolment records or issues missing student IDs. It does not create payment records,
+          change or waive balances, and does not contact Paystack. Run an individual deep check to compare payments with Paystack.
+        </p>
+        {scanError && <p className="mt-3 rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-xs text-red-500">{scanError}</p>}
+        {batchMessage && <p className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-3 text-xs text-emerald-700">{batchMessage}</p>}
+        {batchOutcomes.some((result) => !result.outcome.ok || !result.outcome.verified) && (
+          <ul className="mt-3 space-y-1 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-700">
+            {batchOutcomes
+              .filter((result) => !result.outcome.ok || !result.outcome.verified)
+              .map((result) => (
+                <li key={`${result.studentId}:${result.repairId}`}>
+                  {result.studentId} · {result.repairId}: {result.outcome.message}
+                </li>
+              ))}
+          </ul>
+        )}
+        {scanRows.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {scanRows.map((student) => (
+              <article key={student.student.id} className="rounded-2xl border border-[var(--border)] p-3">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold">{student.student.name ?? student.student.email}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {student.student.email} · {student.student.studentCode ?? "no student ID"} · {student.student.level}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResult(student);
+                      setOutcome(null);
+                      setSnapshotStale(false);
+                    }}
+                    className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs font-semibold"
+                  >
+                    Open diagnosis
+                  </button>
+                </div>
+                <ul className="mt-2 space-y-1">
+                  {student.diagnosis.findings
+                    .filter((finding) => finding.severity !== "info")
+                    .map((finding) => (
+                      <li key={finding.rule} className="text-xs">
+                        <span className={finding.severity === "problem" ? "font-semibold text-red-500" : "font-semibold text-amber-600"}>
+                          {finding.title}
+                        </span>
+                        <span className="text-[var(--muted)]">
+                          {finding.offers.some((offer) => BATCHABLE_REPAIRS.has(offer.id)) ? " · safe bulk fix available" : " · review individually"}
+                        </span>
+                      </li>
+                    ))}
+                  {student.diagnosis.ruleErrors.map((ruleError) => (
+                    <li key={ruleError.rule} className="text-xs font-semibold text-amber-600">
+                      {ruleError.rule} could not be checked: {ruleError.error}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        )}
+        {scanFailures.length > 0 && (
+          <section className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-3">
+            <h3 className="text-xs font-bold text-amber-700">Some records could not be checked</h3>
+            <ul className="mt-2 space-y-1 text-xs text-amber-700">
+              {scanFailures.map((failure) => (
+                <li key={failure.studentId}>{failure.studentId}: {failure.error}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {scanState === "done" && scanRows.length === 0 && scanFailures.length === 0 && (
+          <p className="mt-3 text-sm font-semibold text-emerald-600">No problem or warning findings in the current checks.</p>
+        )}
+      </section>
+
       <section className={card}>
         <h2 className="text-base font-bold">Diagnose a student</h2>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
@@ -221,12 +468,9 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
             <section className={card}>
               <p className="text-sm font-bold text-emerald-600">The rules found nothing wrong.</p>
               <p className="mt-1 text-sm text-[var(--muted)]">
-                That means these {result.diagnosis.rulesRun} checks came back clean — <strong>not</strong> that nothing is wrong. It cannot see a bug in the
-                code, or a problem none of these rules cover:
+                That means these {result.diagnosis.rulesRun} current-record checks came back clean — <strong>not</strong> that nothing is wrong.
+                This diagnosis does not inspect application code or contact Paystack unless you run the deep check:
               </p>
-              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-[var(--muted)]">
-                {RULE_NAMES.map((n) => <li key={n}>{n}</li>)}
-              </ul>
               {!result.paystack.checked && <p className="mt-2 text-xs text-amber-600">The first check only runs on a deep check — try that if they say they paid.</p>}
             </section>
           ) : (

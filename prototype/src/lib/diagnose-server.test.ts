@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   studentFind: vi.fn(),
+  studentMany: vi.fn(),
+  studentCount: vi.fn(),
   paymentFind: vi.fn(),
   snapshotFind: vi.fn(),
   verify: vi.fn(),
@@ -17,7 +19,11 @@ const m = vi.hoisted(() => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    student: { findUnique: (...a: unknown[]) => m.studentFind(...a), findMany: vi.fn() },
+    student: {
+      findUnique: (...a: unknown[]) => m.studentFind(...a),
+      findMany: (...a: unknown[]) => m.studentMany(...a),
+      count: (...a: unknown[]) => m.studentCount(...a),
+    },
     payment: { findMany: (...a: unknown[]) => m.paymentFind(...a) },
     accessSnapshot: { findUnique: (...a: unknown[]) => m.snapshotFind(...a) },
     tuitionCharge: {
@@ -42,7 +48,7 @@ vi.mock("@/lib/guarded-fetch", () => ({
   isCircuitOpen: (e: unknown) => (e as Error)?.name === "BreakerOpenError",
 }));
 
-import { repairCapability, runDiagnosis, runRepair } from "./diagnose-server";
+import { repairCapability, runDiagnosis, runRepair, scanDiagnoses } from "./diagnose-server";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const rawTx = (over: Record<string, unknown> = {}) => ({
@@ -70,6 +76,8 @@ beforeEach(() => {
   // fetchPaystackTransactions refuses to run with no key (correctly), so the tests need a dummy one.
   process.env.PAYSTACK_SECRET_KEY = "sk_test_dummy";
   Object.values(m).forEach((fn) => fn.mockReset());
+  m.studentMany.mockResolvedValue([{ id: "s1" }]);
+  m.studentCount.mockResolvedValue(1);
   world = {
     code: "EW/2026/B1/SEP/A001",
     chargePresent: true,
@@ -85,8 +93,10 @@ beforeEach(() => {
     paystack: [rawTx()],
   };
 
-  m.studentFind.mockImplementation(async () => ({
-    id: "s1", studentCode: world.code, tenantId: "t1", level: "B1", classType: "group", admission: { photoUrl: "x.jpg" }, branch: null,
+  m.studentFind.mockImplementation(async (args?: { where?: { id?: string } }) => {
+    const id = args?.where?.id ?? "s1";
+    return {
+    id, studentCode: world.code, tenantId: "t1", level: "B1", classType: "group", admission: { photoUrl: "x.jpg" }, branch: null,
     createdAt: new Date("2026-09-01T00:00:00.000Z"),
     tuitionCharges: world.chargePresent
       ? [{ id: "c1", level: "B1", amount: 400_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-09-01T00:00:00.000Z") }]
@@ -98,8 +108,9 @@ beforeEach(() => {
     deliveryMode: "physical",
     classesStartedAt: null,
     enrolments: [world.enrolment],
-    user: { id: "u1", email: "ada@example.com", name: "Ada", tenantId: "t1" },
-  }));
+    user: { id: `u-${id}`, email: "ada@example.com", name: "Ada", tenantId: "t1" },
+  };
+  });
   m.paymentFind.mockImplementation(async () => world.payments);
   m.snapshotFind.mockResolvedValue(null);
   m.audit.mockResolvedValue(undefined);
@@ -163,6 +174,52 @@ describe("runDiagnosis", () => {
   it("returns null for a student that does not exist", async () => {
     m.studentFind.mockResolvedValue(null);
     expect(await runDiagnosis("nope")).toBeNull();
+  });
+});
+
+describe("scanDiagnoses", () => {
+  it("paginates all students, reports problem findings, and never calls Paystack", async () => {
+    const ids = Array.from({ length: 21 }, (_, index) => `s${index + 1}`);
+    m.studentMany.mockImplementation(async (args: { cursor?: { id: string }; take: number }) => {
+      const start = args.cursor ? ids.indexOf(args.cursor.id) + 1 : 0;
+      return ids.slice(start, start + args.take).map((id) => ({ id }));
+    });
+    m.studentCount.mockResolvedValue(ids.length);
+    world.chargePresent = false;
+
+    const first = await scanDiagnoses();
+    expect(first.scanned).toBe(20);
+    expect(first.total).toBe(21);
+    expect(first.nextCursor).toBe("s20");
+    expect(first.students).toHaveLength(20);
+    expect(first.students[0].diagnosis.findings.map((finding) => finding.rule)).toContain("missing-level-charge");
+    expect(first.errors).toEqual([]);
+    expect(m.fetch).not.toHaveBeenCalled();
+
+    const second = await scanDiagnoses(first.nextCursor);
+    expect(second.scanned).toBe(1);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("reports per-student load failures without hiding findings from other students", async () => {
+    m.studentMany.mockResolvedValue([{ id: "s1" }, { id: "s2" }]);
+    m.studentCount.mockResolvedValue(2);
+    m.studentFind.mockImplementation(async (args?: { where?: { id?: string } }) => {
+      if (args?.where?.id === "s1") throw new Error("database timeout");
+      return {
+        id: "s2", studentCode: "EW/2026/B1/SEP/A001", tenantId: "t1", level: "B1", classType: "group",
+        admission: { photoUrl: "x.jpg" }, branch: null, createdAt: new Date("2026-09-01T00:00:00.000Z"),
+        tuitionCharges: [{ id: "c1", level: "B1", amount: 400_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-09-01T00:00:00.000Z") }],
+        status: "active", branchId: null, tutorId: null, sessionSlot: "Weekday", deliveryMode: "physical",
+        classesStartedAt: null, enrolments: [world.enrolment],
+        user: { id: "u-s2", email: "ada@example.com", name: "Ada", tenantId: "t1" },
+      };
+    });
+
+    const page = await scanDiagnoses();
+    expect(page.scanned).toBe(2);
+    expect(page.errors).toEqual([{ studentId: "s1", error: "database timeout" }]);
+    expect(page.students).toEqual([]);
   });
 });
 

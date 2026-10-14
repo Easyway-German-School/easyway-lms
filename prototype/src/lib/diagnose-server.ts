@@ -323,6 +323,75 @@ export async function runDiagnosis(studentId: string, options: LoadOptions = {})
   return summarise(facts, diagnose(facts));
 }
 
+const SCAN_PAGE_SIZE = 20;
+const SCAN_CONCURRENCY = 4;
+
+export type DiagnosisScanPage = {
+  students: DiagnosisResult[];
+  errors: Array<{ studentId: string; error: string }>;
+  scanned: number;
+  total: number;
+  nextCursor: string | null;
+};
+
+/**
+ * Scan the current tenant's student records using the same diagnosis rules as
+ * the individual check. Paystack is deliberately excluded: a school-wide scan
+ * must not trigger hundreds of external payment-provider lookups.
+ */
+export async function scanDiagnoses(cursor?: string | null): Promise<DiagnosisScanPage> {
+  const [page, total] = await Promise.all([
+    prisma.student.findMany({
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      orderBy: { id: "asc" },
+      take: SCAN_PAGE_SIZE + 1,
+      select: { id: true },
+    }),
+    prisma.student.count(),
+  ]);
+
+  const hasMore = page.length > SCAN_PAGE_SIZE;
+  const selected = page.slice(0, SCAN_PAGE_SIZE);
+  const results: DiagnosisResult[] = [];
+  const errors: DiagnosisScanPage["errors"] = [];
+
+  for (let start = 0; start < selected.length; start += SCAN_CONCURRENCY) {
+    const group = selected.slice(start, start + SCAN_CONCURRENCY);
+    const diagnosed = await Promise.all(group.map(async ({ id }) => {
+      try {
+        return { studentId: id, result: await runDiagnosis(id) };
+      } catch (error) {
+        return { studentId: id, error: error instanceof Error ? error.message : String(error) };
+      }
+    }));
+    for (const item of diagnosed) {
+      if ("error" in item) {
+        errors.push({
+          studentId: typeof item.studentId === "string" ? item.studentId : "unknown",
+          error: typeof item.error === "string" ? item.error : "The student record could not be loaded.",
+        });
+        continue;
+      }
+      const { result } = item;
+      if (
+        result &&
+        (result.diagnosis.ruleErrors.length > 0 ||
+          result.diagnosis.findings.some((finding) => finding.severity !== "info"))
+      ) {
+        results.push(result);
+      }
+    }
+  }
+
+  return {
+    students: results,
+    errors,
+    scanned: selected.length,
+    total,
+    nextCursor: hasMore ? selected[selected.length - 1]?.id ?? null : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Repairs
 // ---------------------------------------------------------------------------
