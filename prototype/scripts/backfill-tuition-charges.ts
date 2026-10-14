@@ -1,6 +1,8 @@
 /**
  * One-time cutover: give every existing student a TuitionCharge for their
- * current level AND every level below it they must have passed through.
+ * current level and lower levels supported by existing enrolment/payment
+ * evidence. A student's current level alone is not proof they attended every
+ * lower level at this school.
  *
  * WHY: before the per-level ledger, "what a student owes" only ever looked at
  * their current level's fee, so a promotion silently erased the previous
@@ -8,10 +10,9 @@
  * owing money nobody could see. This raises the missing charges so that debt
  * becomes visible.
  *
- * QUARANTINE: the current-level charge is a normal go-forward charge. Every
- * LOWER level charge is flagged `legacyArrears = true` — fully visible and
- * chased, but it does NOT trip the automatic portal lock and does NOT
- * hard-block promotion. Students already mid-course never agreed to those rules.
+ * QUARANTINE: lower-level estimates are marked unreviewed until staff verify
+ * whether the student attended here and actually owes. They are not collectible
+ * and do not gate portal access while their history is unknown.
  *
  * PRICE: lower levels are priced at TODAY's tier for that level and branch.
  * There is no historical price table, so this is a documented approximation.
@@ -32,7 +33,8 @@ import { prisma } from "@/lib/prisma";
 import { runUnscoped } from "@/lib/tenant/context";
 import { runWithAuditActor } from "@/lib/audit-context";
 import { LEVELS } from "@/lib/levels";
-import { tuitionFeeFor } from "@/lib/payment";
+import { receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
+import { resolvePaymentLevel } from "@/lib/payment-level";
 import { naira } from "@/lib/finance/receivables";
 
 const COMMIT = process.argv.includes("--commit");
@@ -60,6 +62,14 @@ async function build(): Promise<Row[]> {
       tenantId: true,
       branch: { select: { name: true } },
       tuitionCharges: { select: { level: true } },
+      enrolments: {
+        where: { deletedAt: null, outcome: { in: ["ongoing", "completed", "transferred"] } },
+        select: { level: true },
+      },
+      payments: {
+        where: receivedPaymentFilter(),
+        select: { level: true, description: true },
+      },
     },
   });
 
@@ -70,7 +80,14 @@ async function build(): Promise<Row[]> {
     const currentIndex = LADDER.indexOf(current);
     // An unrecognised level (bad data) still gets exactly its own charge.
     const topIndex = currentIndex === -1 ? 0 : currentIndex;
-    const levels = currentIndex === -1 ? [current] : LADDER.slice(0, topIndex + 1);
+    const reachedLevels = currentIndex === -1 ? [current] : LADDER.slice(0, topIndex + 1);
+    const evidencedLevels = new Set([
+      ...student.enrolments.map((enrolment) => enrolment.level.trim().toUpperCase()),
+      ...student.payments
+        .map((payment) => resolvePaymentLevel({ stamped: payment.level, description: payment.description }))
+        .filter((level): level is string => Boolean(level)),
+    ]);
+    const levels = reachedLevels.filter((level) => level === current || evidencedLevels.has(level));
 
     const have = new Set(student.tuitionCharges.map((charge) => charge.level.toUpperCase()));
     const anchor = student.classesStartedAt ?? student.createdAt;
@@ -165,6 +182,7 @@ async function main() {
             branchName: row.branchName,
             origin: "backfill",
             legacyArrears: row.legacyArrears,
+            historyStatus: row.legacyArrears ? "unreviewed" : "confirmed",
             createdAt: row.createdAt,
             note: row.legacyArrears ? "Backfilled at ledger cutover — level passed before the ledger existed" : "Backfilled at ledger cutover",
             ...(row.tenantId ? { tenantId: row.tenantId } : {}),

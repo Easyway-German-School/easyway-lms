@@ -57,6 +57,8 @@ export type LedgerChargeInput = {
   amount: number;
   waivedAmount?: number | null;
   legacyArrears?: boolean | null;
+  historyStatus?: string | null;
+  historicalPaidAmount?: number | null;
   createdAt: Date | string;
   settledAt?: Date | string | null;
 };
@@ -79,10 +81,17 @@ export type LedgerLine = {
   net: number;
   /** How much of the student's paid money FIFO assigns to this charge. */
   allocated: number;
+  /** Actual received cash allocated to this charge. */
+  cashAllocated: number;
+  /** Non-cash historical credit explicitly recorded by staff. */
+  historicalPaidAmount: number;
   /** net − allocated. */
   outstanding: number;
+  /** Potential balance on an unreviewed inferred legacy charge; not collectible yet. */
+  reviewOutstanding: number;
   settled: boolean;
   legacyArrears: boolean;
+  historyStatus: "confirmed" | "owing" | "paid" | "not_taken_here" | "unreviewed";
   createdAt: string;
   /** Whole days since the charge was raised; 0 if it is future-dated. */
   ageDays: number;
@@ -92,7 +101,7 @@ export type Ledger = {
   /** FIFO order — oldest charge first. */
   lines: LedgerLine[];
 
-  /** Σ net across all charges — the total the student was ever expected to pay. */
+  /** Σ net across recognized charges; unreviewed estimates are excluded. */
   lifetimeCharged: number;
   /** Received payments handed in (clamped ≥ 0). */
   lifetimePaid: number;
@@ -107,6 +116,8 @@ export type Ledger = {
   goForwardOutstanding: number;
   /** Outstanding on pre-ledger levels backfilled at cutover — chased, never walled. */
   legacyOutstanding: number;
+  /** Potential, unreviewed legacy balance. Excluded from debt and access totals. */
+  unreviewedOutstanding: number;
 
   /** Oldest charge with anything still outstanding (any kind). Ageing anchor. */
   oldestOpenLevel: string | null;
@@ -147,7 +158,19 @@ export function buildLedger(
   const lines: LedgerLine[] = ordered.map((charge) => {
     const amount = toWholeNaira(charge.amount);
     const waived = Math.min(amount, toWholeNaira(charge.waivedAmount));
-    const net = Math.max(0, amount - waived);
+    const historyStatus =
+      charge.historyStatus === "owing" ||
+      charge.historyStatus === "paid" ||
+      charge.historyStatus === "not_taken_here" ||
+      charge.historyStatus === "unreviewed"
+        ? charge.historyStatus
+        : "confirmed";
+    const net =
+      historyStatus === "not_taken_here" ? 0 : Math.max(0, amount - waived);
+    const historicalPaidAmount =
+      historyStatus === "paid"
+        ? Math.min(net, toWholeNaira(charge.historicalPaidAmount))
+        : 0;
     const created = toDate(charge.createdAt);
     const ageDays = created ? Math.max(0, Math.floor((nowMs - created.getTime()) / DAY_MS)) : 0;
 
@@ -157,10 +180,14 @@ export function buildLedger(
       amount,
       waived,
       net,
-      allocated: 0,
-      outstanding: net,
-      settled: net === 0,
+      allocated: historicalPaidAmount,
+      cashAllocated: 0,
+      historicalPaidAmount,
+      outstanding: net - historicalPaidAmount,
+      reviewOutstanding: 0,
+      settled: net === historicalPaidAmount,
       legacyArrears: Boolean(charge.legacyArrears),
+      historyStatus,
       createdAt: created ? created.toISOString() : new Date(0).toISOString(),
       ageDays,
     };
@@ -172,6 +199,7 @@ export function buildLedger(
       const line = lines[index];
       const allocated = Math.min(remaining, line.outstanding);
       line.allocated += allocated;
+      line.cashAllocated += allocated;
       line.outstanding -= allocated;
       line.settled = line.outstanding === 0;
       remaining -= allocated;
@@ -180,7 +208,9 @@ export function buildLedger(
     return remaining;
   };
 
-  const fifoIndices = lines.map((_, index) => index);
+  const fifoIndices = lines.flatMap((line, index) =>
+    line.historyStatus === "unreviewed" ? [] : [index],
+  );
   let remaining = paid;
   if (paymentDetails) {
     const chronological = [...paymentDetails].sort((a, b) => {
@@ -197,7 +227,9 @@ export function buildLedger(
         description: payment.description,
       });
       const matchingIndices = level
-        ? lines.flatMap((line, index) => line.level.toUpperCase() === level ? [index] : [])
+        ? lines.flatMap((line, index) =>
+            line.historyStatus !== "unreviewed" && line.level.toUpperCase() === level ? [index] : [],
+          )
         : [];
       const afterLevel = allocate(matchingIndices, amount);
       allocate(fifoIndices, afterLevel);
@@ -205,16 +237,25 @@ export function buildLedger(
   }
   remaining = allocate(fifoIndices, remaining);
 
-  const lifetimeCharged = lines.reduce((sum, line) => sum + line.net, 0);
-  const lifetimeAllocated = lines.reduce((sum, line) => sum + line.allocated, 0);
-  const lifetimeOutstanding = lines.reduce((sum, line) => sum + line.outstanding, 0);
+  for (const line of lines) {
+    if (line.historyStatus !== "unreviewed") continue;
+    line.reviewOutstanding = line.net;
+    line.outstanding = 0;
+    line.settled = true;
+  }
+
+  const recognized = lines.filter((line) => line.historyStatus !== "unreviewed");
+  const lifetimeCharged = recognized.reduce((sum, line) => sum + line.net, 0);
+  const lifetimeAllocated = recognized.reduce((sum, line) => sum + line.cashAllocated, 0);
+  const lifetimeOutstanding = recognized.reduce((sum, line) => sum + line.outstanding, 0);
+  const unreviewedOutstanding = lines.reduce((sum, line) => sum + line.reviewOutstanding, 0);
   const goForwardOutstanding = lines
-    .filter((line) => !line.legacyArrears)
+    .filter((line) => line.historyStatus !== "unreviewed" && !line.legacyArrears)
     .reduce((sum, line) => sum + line.outstanding, 0);
   const legacyOutstanding = lifetimeOutstanding - goForwardOutstanding;
 
-  const firstOpen = lines.find((line) => line.outstanding > 0) ?? null;
-  const firstOpenGoForward = lines.find((line) => line.outstanding > 0 && !line.legacyArrears) ?? null;
+  const firstOpen = recognized.find((line) => line.outstanding > 0) ?? null;
+  const firstOpenGoForward = recognized.find((line) => line.outstanding > 0 && !line.legacyArrears) ?? null;
 
   return {
     lines,
@@ -225,6 +266,7 @@ export function buildLedger(
     lifetimeOutstanding,
     goForwardOutstanding,
     legacyOutstanding,
+    unreviewedOutstanding,
     oldestOpenLevel: firstOpen?.level ?? null,
     oldestOpenAgeDays: firstOpen?.ageDays ?? null,
     oldestOpenGoForwardLevel: firstOpenGoForward?.level ?? null,

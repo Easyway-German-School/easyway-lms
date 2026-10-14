@@ -66,7 +66,17 @@ export async function sendDueFeeReminders(options: {
           user: true,
           tuitionCharges: {
             where: { deletedAt: null },
-            select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+            select: {
+              id: true,
+              level: true,
+              amount: true,
+              waivedAmount: true,
+              legacyArrears: true,
+              historyStatus: true,
+              historicalPaidAmount: true,
+              createdAt: true,
+              settledAt: true,
+            },
           },
           payments: {
             where: receivedPaymentFilter(),

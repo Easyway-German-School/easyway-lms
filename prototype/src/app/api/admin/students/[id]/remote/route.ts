@@ -93,7 +93,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       // figure the student's own shell does.
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
       payments: { select: { amount: true, status: true, description: true } },
     },

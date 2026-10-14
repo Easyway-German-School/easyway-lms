@@ -1747,6 +1747,8 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
               amount: true,
               waivedAmount: true,
               legacyArrears: true,
+              historyStatus: true,
+              historicalPaidAmount: true,
               createdAt: true,
               settledAt: true,
             },

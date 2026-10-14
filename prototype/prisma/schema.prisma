@@ -2614,11 +2614,15 @@ model TuitionCharge {
   /// admin | import | backfill.
   origin String
 
-  /// True for a lower level a student had already passed BEFORE the ledger
-  /// existed, created by the cutover backfill. Legacy arrears are fully visible
-  /// and chased, but they do NOT trip the automatic portal lock and do NOT
-  /// hard-block promotion — the student never agreed to these rules mid-course.
+  /// True for a lower level inferred by the cutover backfill. This is provenance,
+  /// not a debt decision; historyStatus controls collection and access behavior.
   legacyArrears Boolean @default(false)
+
+  /// confirmed | owing | paid | not_taken_here | unreviewed.
+  /// Backfilled prior-level estimates are quarantined until staff verify them.
+  historyStatus String @default("confirmed")
+  /// Non-cash historical tuition credit; never written as a Payment/revenue row.
+  historicalPaidAmount Int @default(0)
 
   /// A scholarship or negotiated write-off. `amount - waivedAmount` is what the
   /// student is actually expected to pay; allocation and every rollup use the

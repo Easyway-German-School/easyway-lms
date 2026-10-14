@@ -147,6 +147,8 @@ export async function GET(request: Request) {
             amount: true,
             waivedAmount: true,
             legacyArrears: true,
+            historyStatus: true,
+            historicalPaidAmount: true,
             createdAt: true,
           },
         }),

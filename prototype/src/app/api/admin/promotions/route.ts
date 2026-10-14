@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     const charges = ids.length
       ? await prisma.tuitionCharge.findMany({
           where: { studentId: { in: ids }, deletedAt: null },
-          select: { studentId: true, id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+          select: { studentId: true, id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
         })
       : [];
     const payments = ids.length

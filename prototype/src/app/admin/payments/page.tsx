@@ -3,6 +3,7 @@
 import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { paymentLevelsForStudent } from "@/lib/payment-level";
 
@@ -1144,6 +1145,8 @@ function StudentBillingCard({
           </table>
         </div>
       ) : null}
+
+      <LevelHistoryManager key={card.id} studentId={card.id} currentLevel={card.level} />
 
       <div className="mt-3 flex flex-wrap gap-2">
         {card.suggested.current ? (

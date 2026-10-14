@@ -95,9 +95,33 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
 
   const existing = await prisma.tuitionCharge.findUnique({
     where: { studentId_level: { studentId: student.id, level } },
-    select: { id: true, amount: true },
+    select: { id: true, amount: true, historyStatus: true },
   });
   if (existing) {
+    if (existing.historyStatus === "not_taken_here") {
+      const amount =
+        typeof input.amountOverride === "number" && input.amountOverride >= 0
+          ? Math.round(input.amountOverride)
+          : tuitionFeeFor({
+              level,
+              branch: student.branch?.name ?? null,
+              classType: student.classType,
+              pathway: student.pathway,
+            });
+      const reopened = await prisma.tuitionCharge.update({
+        where: { id: existing.id },
+        data: {
+          amount,
+          origin: input.origin,
+          legacyArrears: Boolean(input.legacyArrears),
+          historyStatus: "confirmed",
+          historicalPaidAmount: 0,
+          createdAt: input.now ?? new Date(),
+        },
+        select: { id: true },
+      });
+      return { created: false, chargeId: reopened.id, level, amount };
+    }
     return { created: false, chargeId: existing.id, level, amount: existing.amount };
   }
 
@@ -124,6 +148,8 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
         branchName: student.branch?.name ?? null,
         origin: input.origin,
         legacyArrears: Boolean(input.legacyArrears),
+        historyStatus: "confirmed",
+        historicalPaidAmount: 0,
         waivedAmount: 0,
         waivedReason: null,
         note: input.note ?? null,
@@ -220,7 +246,7 @@ export async function reconcileCurrentLevelChargeForPathway(studentId: string, n
       branch: { select: { name: true } },
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true },
       },
       payments: {
         where: { deletedAt: null },
