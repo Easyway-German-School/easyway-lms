@@ -130,6 +130,54 @@ export function severityFor(input: Pick<IncidentInput, "kind" | "source" | "rout
   return "medium";
 }
 
+export const LIVE_CONNECT_ALERT_THRESHOLD = 5;
+
+export function shouldEscalateLiveConnect(
+  input: Pick<IncidentInput, "kind" | "source" | "route" | "message">,
+  occurrences: number,
+): boolean {
+  return (
+    input.kind === "health" &&
+    input.source === "client" &&
+    input.route === "/live" &&
+    input.message.toLowerCase().includes("could not connect to the live classroom") &&
+    occurrences >= LIVE_CONNECT_ALERT_THRESHOLD
+  );
+}
+
+const SEVERITY_WEIGHT: Record<IncidentSeverity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+function higherSeverity(current: string, incoming: IncidentSeverity): IncidentSeverity {
+  const currentSeverity = current in SEVERITY_WEIGHT ? (current as IncidentSeverity) : "medium";
+  return SEVERITY_WEIGHT[currentSeverity] >= SEVERITY_WEIGHT[incoming] ? currentSeverity : incoming;
+}
+
+async function notifyMissionControl(
+  input: IncidentInput,
+  fingerprint: string,
+  message: string,
+  severity: IncidentSeverity,
+  eventKey: string,
+): Promise<void> {
+  if (severity !== "high" && severity !== "critical") return;
+  try {
+    const { KIND, notify } = await import("@/lib/notify");
+    await notify({
+      to: { audience: "admin", capability: "security" },
+      kind: KIND.missionControlIncident,
+      severity: severity === "critical" ? "critical" : "warning",
+      title: `${severity === "critical" ? "Critical" : "High"} Mission Control incident`,
+      message: `${input.kind} incident on ${input.route ?? "the platform"}: ${message.slice(0, 180)}`,
+      link: "/admin/developer",
+      dedupeKey: `mission-control:${fingerprint}:${eventKey}`,
+      push: true,
+      email: false,
+    });
+  } catch (error) {
+    console.warn("[incidents] could not notify Mission Control admins:", error);
+  }
+}
+
 function titleOf(input: IncidentInput): string {
   const firstLine = scrub(input.message).split("\n").find((line) => line.trim()) ?? "Unknown problem";
   const where = input.route ?? input.source;
@@ -154,10 +202,18 @@ const SAMPLE_LIMIT = 5;
  */
 const recent = new Map<string, { at: number; pending: number }>();
 
-function shouldWrite(fingerprint: string, now: number): { write: boolean; extra: number } {
+function shouldWrite(
+  fingerprint: string,
+  now: number,
+  forceAtOccurrences?: number,
+): { write: boolean; extra: number } {
   const hit = recent.get(fingerprint);
   if (hit && now - hit.at < THROTTLE_MS) {
     hit.pending += 1;
+    if (forceAtOccurrences && hit.pending >= forceAtOccurrences - 1) {
+      recent.set(fingerprint, { at: now, pending: 0 });
+      return { write: true, extra: hit.pending - 1 };
+    }
     return { write: false, extra: 0 };
   }
   const extra = hit?.pending ?? 0;
@@ -185,30 +241,52 @@ async function persistIncident(input: IncidentInput, fingerprint: string, messag
   };
 
   // A recurrence of something marked fixed is a regression — reopen it and say so.
-  await guardedPrisma.incident.updateMany({
+  const reopened = await guardedPrisma.incident.updateMany({
     where: { fingerprint, status: "resolved" },
-    data: { status: "open", resolvedAt: null, reopenedCount: { increment: 1 } },
+    data: {
+      status: "open",
+      resolvedAt: null,
+      resolvedById: null,
+      resolutionNote: null,
+      reopenedCount: { increment: 1 },
+    },
   });
 
   const existing = await guardedPrisma.incident.findUnique({
     where: { fingerprint },
-    select: { id: true, samples: true },
+    select: { id: true, samples: true, occurrences: true, severity: true, reopenedCount: true },
   });
 
   if (existing) {
     const samples = [...(Array.isArray(existing.samples) ? existing.samples : []), sample].slice(-SAMPLE_LIMIT);
+    const occurrences = existing.occurrences + 1 + extra;
+    const incomingSeverity = input.severity ?? severityFor(input);
+    const previousSeverity = higherSeverity(existing.severity, "low");
+    const repeatedLiveFailure = shouldEscalateLiveConnect(input, occurrences);
+    const severity = higherSeverity(existing.severity, repeatedLiveFailure ? "high" : incomingSeverity);
     await guardedPrisma.incident.update({
       where: { id: existing.id },
       data: {
         occurrences: { increment: 1 + extra },
         lastSeenAt: at,
+        ...(severity !== existing.severity ? { severity } : {}),
         samples: samples as never,
       },
     });
+    if (reopened.count > 0 && (severity === "high" || severity === "critical")) {
+      await notifyMissionControl(input, fingerprint, message, severity, `reopened:${existing.reopenedCount}`);
+    } else if (
+      (severity === "high" || severity === "critical") &&
+      SEVERITY_WEIGHT[severity] > SEVERITY_WEIGHT[previousSeverity]
+    ) {
+      await notifyMissionControl(input, fingerprint, message, severity, repeatedLiveFailure ? "repeated-live-failure" : "escalated");
+    }
     return;
   }
 
-  const severity = input.severity ?? severityFor(input);
+  const occurrences = 1 + extra;
+  const requestedSeverity = input.severity ?? severityFor(input);
+  const severity = shouldEscalateLiveConnect(input, occurrences) ? "high" : requestedSeverity;
   try {
     await guardedPrisma.incident.create({
       data: {
@@ -223,7 +301,7 @@ async function persistIncident(input: IncidentInput, fingerprint: string, messag
         method: input.method ?? null,
         context: (input.context ?? undefined) as never,
         samples: [sample] as never,
-        occurrences: 1 + extra,
+        occurrences,
         tenantId: input.tenantId ?? null,
         userId: input.userId ?? null,
         feedbackId: input.feedbackId ?? null,
@@ -232,22 +310,13 @@ async function persistIncident(input: IncidentInput, fingerprint: string, messag
       },
     });
     if (severity === "high" || severity === "critical") {
-      try {
-        const { KIND, notify } = await import("@/lib/notify");
-        await notify({
-          to: { audience: "admin", capability: "security" },
-          kind: KIND.missionControlIncident,
-          severity: severity === "critical" ? "critical" : "warning",
-          title: `${severity === "critical" ? "Critical" : "High"} Mission Control incident`,
-          message: `${input.kind} incident on ${input.route ?? "the platform"}: ${message.slice(0, 180)}`,
-          link: "/admin/developer",
-          dedupeKey: `mission-control:${fingerprint}`,
-          push: true,
-          email: false,
-        });
-      } catch (error) {
-        console.warn("[incidents] could not notify Mission Control admins:", error);
-      }
+      await notifyMissionControl(
+        input,
+        fingerprint,
+        message,
+        severity,
+        shouldEscalateLiveConnect(input, occurrences) ? "repeated-live-failure" : "new",
+      );
     }
   } catch (error) {
     // Two isolates raced to create the same fingerprint; the loser just counts.
@@ -315,7 +384,13 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
 
     let extra = 0;
     if (input.kind !== "complaint") {
-      const gate = shouldWrite(fingerprint, now);
+      const gate = shouldWrite(
+        fingerprint,
+        now,
+        shouldEscalateLiveConnect(input, LIVE_CONNECT_ALERT_THRESHOLD)
+          ? LIVE_CONNECT_ALERT_THRESHOLD
+          : undefined,
+      );
       if (!gate.write) return;
       extra = gate.extra;
     }

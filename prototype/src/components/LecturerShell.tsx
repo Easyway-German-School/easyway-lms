@@ -136,10 +136,17 @@ const navGroups: NavGroup[] = [
 
 // Flattened once for the lookups below that don't care about grouping.
 const navItems: NavItem[] = navGroups.flatMap((group) => group.items);
+const MOBILE_PRIMARY_PATHS = new Set([
+  '/lecturer/dashboard',
+  '/live',
+  '/lecturer/students',
+  '/lecturer/attendance',
+]);
 
 export default function LecturerShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const insideLiveClass = pathname?.startsWith('/live') ?? false;
   const { data: session, status } = useSession();
   useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
@@ -293,6 +300,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
     const feature = featureForLecturerPath(item.href);
     return !feature || features === null || features.includes(feature);
   };
+  const mobileItems = navItems.filter(
+    (item) => MOBILE_PRIMARY_PATHS.has(item.href) && visibleToThisTutor(item),
+  );
 
   const blockedFeature = (() => {
     const feature = featureForLecturerPath(pathname);
@@ -490,6 +500,43 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           children
         )}
       </main>
+
+      {!insideLiveClass && (
+        <nav
+          aria-label="Tutor navigation"
+          className="fixed inset-x-0 bottom-0 z-30 grid border-t border-[var(--border)] bg-[var(--surface)]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
+          style={{ gridTemplateColumns: `repeat(${mobileItems.length + 1}, minmax(0, 1fr))` }}
+        >
+          {mobileItems.map((item) => {
+            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            const isLive = item.href === '/live' && liveNow > 0;
+            return (
+              <button
+                key={item.href}
+                type="button"
+                aria-current={active ? 'page' : undefined}
+                onClick={() => router.push(item.href)}
+                className={`flex min-w-0 flex-col items-center gap-0.5 px-1 pb-1 pt-2 text-[11px] font-semibold ${active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'}`}
+              >
+                <span className="relative grid h-7 place-items-center">
+                  {item.icon}
+                  {isLive && <LiveDot />}
+                </span>
+                <span className="truncate">{item.label === 'Dashboard' ? 'Home' : item.label === 'Live classroom' ? 'Live' : item.label}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            aria-expanded={drawerOpen}
+            onClick={() => setDrawerOpen(true)}
+            className={`flex min-w-0 flex-col items-center gap-0.5 px-1 pb-1 pt-2 text-[11px] font-semibold ${drawerOpen ? 'text-[var(--accent)]' : 'text-[var(--muted)]'}`}
+          >
+            <MenuIcon className="h-5 w-5" />
+            More
+          </button>
+        </nav>
+      )}
 
       {/* Tutors get the same desk. A tutor whose roster is wrong or whose
           classroom will not open has exactly the same problem a student does,

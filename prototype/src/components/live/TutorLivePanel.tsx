@@ -231,6 +231,14 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
           </ul>
         </div>
       )}
+      <div className="border-t border-[var(--border)] px-5 py-3">
+        <Link
+          href="/lecturer/attendance"
+          className="text-sm font-semibold text-[#0D7C7E] underline-offset-2 hover:underline"
+        >
+          Open the full class roster and attendance register →
+        </Link>
+      </div>
     </motion.div>
   );
 }

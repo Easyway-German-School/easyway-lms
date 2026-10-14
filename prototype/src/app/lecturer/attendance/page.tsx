@@ -16,6 +16,8 @@ interface Student {
   branch: string;
   /** The intake month ("September"), or "" when the student has none on record. */
   batch?: string;
+  liveJoinedAt?: string | null;
+  liveSessionTitle?: string | null;
   /** null = nobody has marked this student. Never defaulted. */
   present: boolean | null;
   status: 'present' | 'late' | 'absent' | null;
@@ -156,6 +158,16 @@ export default function LecturerAttendance() {
     );
   }
 
+  function applyLiveJoinSuggestions() {
+    setStudents((prev) =>
+      prev.map((student) =>
+        student.liveJoinedAt && !student.status && !student.notStarted && inBatch(student)
+          ? { ...student, status: 'present', present: true }
+          : student,
+      ),
+    );
+  }
+
   async function handleSubmit() {
     if (studentsLoading) return;
     const editableStudents = students.filter((s) => !s.notStarted && (s.status !== null || s.alreadyMarked));
@@ -213,10 +225,14 @@ export default function LecturerAttendance() {
   const roster = students.filter(inBatch);
   const visibleStudents =
     studentFilter === 'all' ? roster : roster.filter((s) => s.id === studentFilter);
+  const liveJoinedCount = roster.filter((student) => student.liveJoinedAt).length;
+  const unmarkedLiveJoinedCount = roster.filter(
+    (student) => student.liveJoinedAt && !student.status && !student.notStarted,
+  ).length;
 
   return (
     <LecturerShell>
-      <div className="h-screen overflow-y-auto">
+      <div className="h-screen overflow-y-auto pb-24 md:pb-0">
         {/* Header */}
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto">
@@ -393,6 +409,27 @@ export default function LecturerAttendance() {
             </div>
           </div>
 
+          {liveJoinedCount > 0 && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+              <div>
+                <p className="font-semibold text-[var(--foreground)]">
+                  {liveJoinedCount} {liveJoinedCount === 1 ? 'student has' : 'students have'} a live-class check-in
+                </p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  This confirms a connection, not formal attendance. Students without a check-in stay unmarked; nobody is automatically marked absent.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={applyLiveJoinSuggestions}
+                disabled={unmarkedLiveJoinedCount === 0 || marking}
+                className="min-h-10 rounded-full bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Mark {unmarkedLiveJoinedCount} joined {unmarkedLiveJoinedCount === 1 ? 'student' : 'students'} present
+              </button>
+            </div>
+          )}
+
           {/* Students List */}
           {studentsLoading ? (
             <div className="py-12 text-center text-sm text-[var(--muted)]">Loading your assigned students...</div>
@@ -421,8 +458,47 @@ export default function LecturerAttendance() {
                 </div>
               )}
 
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
-                <table className="w-full">
+              <div className="space-y-3 md:hidden">
+                {visibleStudents.map((student) => (
+                  <article key={student.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-[var(--foreground)]">{student.name}</p>
+                        <p className="break-all text-xs text-[var(--muted)]">{student.email}</p>
+                        <p className="mt-1 text-xs text-[var(--muted)]">{student.branch}</p>
+                      </div>
+                      {student.liveJoinedAt && (
+                        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700" title={student.liveSessionTitle ?? undefined}>
+                          Joined live
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {student.notStarted ? (
+                        <span className="text-sm text-[var(--muted)]">Classes haven&apos;t started</span>
+                      ) : ([
+                        ['present', 'Present', 'bg-green-100 text-green-700 ring-green-400'],
+                        ['late', 'Late', 'bg-amber-100 text-amber-700 ring-amber-400'],
+                        ['absent', 'Absent', 'bg-red-100 text-red-700 ring-red-400'],
+                      ] as const).map(([mark, label, tone]) => (
+                        <button
+                          key={mark}
+                          type="button"
+                          onClick={() => setMark(student.id, mark)}
+                          disabled={marking}
+                          aria-pressed={student.status === mark}
+                          className={`min-h-10 rounded-full px-4 py-2 text-sm font-semibold ${student.status === mark ? `${tone} ring-2` : 'bg-[var(--surface-alt)] text-[var(--muted)]'} disabled:opacity-50`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="hidden overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] md:block">
+                <table className="w-full min-w-[760px]">
                   <thead className="bg-[var(--surface-alt)] border-b border-[var(--border)]">
                     <tr>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-[var(--foreground)]">Student Name</th>
@@ -437,7 +513,14 @@ export default function LecturerAttendance() {
                         key={student.id}
                         className="border-b border-[var(--border)] hover:bg-[var(--surface-alt)] transition-colors"
                       >
-                        <td className="px-4 py-3 text-sm text-[var(--foreground)]">{student.name}</td>
+                        <td className="px-4 py-3 text-sm text-[var(--foreground)]">
+                          <span>{student.name}</span>
+                          {student.liveJoinedAt && (
+                            <span className="ml-2 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700" title={student.liveSessionTitle ?? undefined}>
+                              Joined live
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.email}</td>
                         <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.branch}</td>
                         <td className="px-4 py-3 text-center">

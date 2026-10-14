@@ -74,7 +74,7 @@ export const KIND = {
   growthDailyDigest: "growth.daily_digest",
   /** A partner (influencer/travel agent/other) asked for help from their own dashboard. See /api/admin/influencer's POST. */
   influencerHelpRequest: "influencer.help_request",
-  /** A new high/critical incident appeared in Mission Control. */
+  /** A high/critical Mission Control incident appeared, escalated, or regressed. */
   missionControlIncident: "mission_control.incident",
   /** Mission Control's auto-heal: this student's screen stopped checking in while stale; a nudge to reopen the app. See src/lib/auto-heal.ts. */
   portalResync: "portal.resync",
