@@ -363,7 +363,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   // One gate for the whole portal. Every student page renders through this
   // shell, so locking here covers pages that do not exist yet — and there is no
   // per-page payment fetch to forget to add.
-  const routeLocked = !hasAccess && isTuitionGatedRoute(pathname);
+  const previousLevelPreviewRoute =
+    !hasAccess &&
+    access?.previousLevelOutstanding === 0 &&
+    (pathname === "/materials" || pathname.startsWith("/materials/"));
+  const routeLocked = !hasAccess && isTuitionGatedRoute(pathname) && !previousLevelPreviewRoute;
   const lockedAreaLabel =
     navItems.find((item) => pathname === item.href || pathname.startsWith(item.href + "/"))?.label ??
     "This page";

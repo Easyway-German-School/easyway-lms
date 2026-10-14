@@ -14,7 +14,7 @@ import {
   resolvePartialPaymentAmount,
   tuitionFeeFor,
 } from "@/lib/payment";
-import { nextLevelAfter } from "@/lib/levels";
+import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { signOffForCheckout } from "@/lib/graduation-server";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     const requestedStage = String(body?.paymentStage ?? body?.stage ?? "full").toLowerCase();
     const requestType = String(body?.type ?? "").toLowerCase();
     const forNextLevel = Boolean(body?.forNextLevel);
+    const forPriorBalance = Boolean(body?.forPriorBalance);
 
     const studentRecord = await prisma.student.findUnique({
       where: { userId: session.user.id as string },
@@ -156,8 +157,36 @@ export async function POST(request: Request) {
     let alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
     let priorOpenBalance = 0;
     let priorOwedLevel: string | null = null;
+    let priorBalanceToPay = 0;
 
-    if (forNextLevel) {
+    if (forPriorBalance) {
+      let balanceBeforeLevel = studentRecord.level;
+      if (forNextLevel) {
+        if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
+          return NextResponse.json(
+            { error: "Your level has not been signed off yet — no previous-level balance is due." },
+            { status: 409 },
+          );
+        }
+        const target = nextLevelAfter(studentRecord.level);
+        if (!target) {
+          return NextResponse.json({ error: "You are already at the top of the ladder." }, { status: 409 });
+        }
+        balanceBeforeLevel = target;
+      }
+      const currentPosition = (LEVELS as readonly string[]).indexOf(balanceBeforeLevel.toUpperCase());
+      const ledger = await loadStudentLedger(studentRecord.id);
+      const priorLines = ledger.lines.filter((line) => {
+        const position = (LEVELS as readonly string[]).indexOf(line.level.toUpperCase());
+        return position >= 0 && currentPosition >= 0 && position < currentPosition && line.outstanding > 0;
+      });
+      priorBalanceToPay = priorLines.reduce((sum, line) => sum + line.outstanding, 0);
+      if (priorBalanceToPay <= 0 || priorLines.length === 0) {
+        return NextResponse.json({ error: "There is no previous-level balance to settle." }, { status: 409 });
+      }
+      billingLevel = priorLines[0].level;
+      alreadyPaid = priorLines[0].allocated;
+    } else if (forNextLevel) {
       // Paying is signing off: a student whose batch ended (or whom the office
       // invited) is signed off here, so nobody waits for a button. Held-back and
       // never-started students still get the 409 below.
@@ -191,12 +220,27 @@ export async function POST(request: Request) {
       // next-level payment made earlier) is credited so we do not double-bill.
       const targetLine = ledger.lines.find((line) => line.level === target);
       alreadyPaid = targetLine ? targetLine.allocated : 0;
+    } else {
+      const currentPosition = (LEVELS as readonly string[]).indexOf(studentRecord.level.toUpperCase());
+      const ledger = await loadStudentLedger(studentRecord.id);
+      const previousLevelOutstanding = ledger.lines
+        .filter((line) => {
+          const position = (LEVELS as readonly string[]).indexOf(line.level.toUpperCase());
+          return position >= 0 && currentPosition >= 0 && position < currentPosition;
+        })
+        .reduce((sum, line) => sum + line.outstanding, 0);
+      if (previousLevelOutstanding > 0) {
+        return NextResponse.json(
+          { error: "Clear your previous-level tuition balance first. This checkout is for your current level." },
+          { status: 409 },
+        );
+      }
     }
 
     const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType, pathway: studentRecord.pathway };
     const grossTuitionFee = tuitionFeeFor(feeLookup);
 
-    if (requestedStage !== "registration" && !isLevelSellable(billingLevel)) {
+    if (requestedStage !== "registration" && !forPriorBalance && !isLevelSellable(billingLevel)) {
       return NextResponse.json(
         {
           error:
@@ -283,13 +327,17 @@ export async function POST(request: Request) {
       effectivePaymentType = "full";
       amountToCharge = Math.max(0, normalizedTuitionFee - alreadyPaid);
     }
+    if (forPriorBalance) {
+      effectivePaymentType = "full";
+      amountToCharge = priorBalanceToPay;
+    }
 
     // The portion of this payment that goes toward the level being bought.
     const targetPortion = amountToCharge;
     // A next-level checkout also collects whatever is still open on a level the
     // student has already been in. FIFO on the verify side does the actual
     // split; here we just bill the sum.
-    amountToCharge = amountToCharge + priorOpenBalance;
+    if (!forPriorBalance) amountToCharge = amountToCharge + priorOpenBalance;
 
     const breakdown =
       forNextLevel && priorOpenBalance > 0
@@ -320,6 +368,7 @@ export async function POST(request: Request) {
             Math.min(100, Math.round(((alreadyPaid + amountToCharge) / Math.max(1, normalizedTuitionFee)) * 100)),
           );
     const requiredThreshold = effectivePaymentType === "deposit" ? requiredDeposit : normalizedTuitionFee;
+    const invoiceTotal = forPriorBalance ? priorBalanceToPay : normalizedTuitionFee;
 
     const resolvedPathway = await prisma.pathway.findFirst({
       where: {
@@ -397,14 +446,15 @@ export async function POST(request: Request) {
           // The name is free text and only ever used for wording the receipt,
           // so it keeps the client's value even when no row matched.
           pathwayName: pathwayName || String(pathwayId || ""),
-          totalAmount: String(normalizedTuitionFee),
+          totalAmount: String(invoiceTotal),
           depositAmount: String(amountToCharge),
-          tuitionFee: String(normalizedTuitionFee),
+          tuitionFee: String(invoiceTotal),
           requiredThreshold: String(requiredThreshold),
           depositPercent: String(normalizedDepositPercent),
           paymentType: effectivePaymentType,
           paymentStage: effectivePaymentType,
           forNextLevel: forNextLevel ? "true" : "false",
+          forPriorBalance: forPriorBalance ? "true" : "false",
           targetLevel: billingLevel,
           level: billingLevel,
         },

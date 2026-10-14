@@ -9,6 +9,7 @@ import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 import { canDownloadOffline } from "@/lib/delivery";
 import { notExpiredForStudents } from "@/lib/retention";
 import { studentSeesBatch } from "@/lib/class-batch";
+import { loadPreviousLevelPreview } from "@/lib/previous-level-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -58,10 +59,21 @@ export async function GET() {
     // arrears, or an on-track payment plan on their record.
     const access = await getStudentAccess(student.id);
 
-    if (access && !access.hasAccess) {
+    const preview = access && !access.hasAccess && access.previousLevelOutstanding <= 0
+      ? await loadPreviousLevelPreview({
+          studentId: student.id,
+          level: student.level,
+          branchId: student.branchId,
+          sessionSlot: student.sessionSlot,
+          videoOnly: true,
+        })
+      : null;
+    if (access && !access.hasAccess && !preview) {
       const message =
-        access.lockReason === "unsettled_balance"
-          ? `Settle your tuition balance of ₦${access.outstandingBalance.toLocaleString()} to restore the video library.`
+        access.lockReason === "previous_level_balance"
+          ? `Settle your previous-level tuition balance of ₦${access.previousLevelOutstanding.toLocaleString()} before paying for this level.`
+          : access.lockReason === "unsettled_balance"
+          ? `Settle your current-level tuition balance of ₦${access.currentLevelOutstanding.toLocaleString()} to restore the video library.`
           : `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to unlock the video library.`;
       return NextResponse.json(
         {
@@ -86,14 +98,14 @@ export async function GET() {
     const teacherIds = [student.tutorId, ...student.coTutors.map((link) => link.lecturerId)].filter(
       (id): id is string => Boolean(id),
     );
-    const candidates = await prisma.material.findMany({
+    const candidates = preview?.materials ?? await prisma.material.findMany({
       where: {
         kind: { in: ["video", "recording"] },
         AND: [
           {
             OR: [
-              { level: student.level },
-              { course: { level: student.level } },
+              { level: preview?.level ?? student.level },
+              { course: { level: preview?.level ?? student.level } },
               { privateClasses: { some: { studentId: student.id } } },
               // `privateClassId: null` is load-bearing: without it a private
               // one-to-one tape would leak onto every OTHER student this same
@@ -127,7 +139,9 @@ export async function GET() {
     // THE BATCH: a class recording or a video aimed at the October batch is not
     // on the September batch's shelf. (Batch lives in the admission JSON, so it
     // is applied here, after the query. A private recording has no batch.)
-    const records = candidates.filter((record) => studentSeesBatch(record.batch, student.admission));
+    const records = preview
+      ? candidates
+      : candidates.filter((record) => studentSeesBatch(record.batch, student.admission));
 
     const progressRows = await prisma.videoProgress.findMany({
       where: { studentId: student.id, materialId: { in: records.map((record) => record.id) } },
@@ -180,6 +194,9 @@ export async function GET() {
       // online, hybrid and private students are; physical group students get
       // the notes-offline upsell instead.
       canDownloadOffline: canDownloadOffline(student),
+      preview: Boolean(preview),
+      previewLevel: preview?.level ?? null,
+      previewTotal: preview?.total ?? null,
     });
   } catch (error) {
     console.error("Failed to load the video library", error);

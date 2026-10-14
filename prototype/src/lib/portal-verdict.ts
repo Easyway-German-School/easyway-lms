@@ -26,6 +26,7 @@ import type { PaymentLockReason } from "@/lib/access";
 export type PortalLockCode =
   | "unpaid_deposit"
   | "unsettled_balance"
+  | "previous_level_balance"
   | "upcoming_batch"
   | "photo_missing";
 
@@ -53,6 +54,10 @@ const LOCKS: Record<PortalLockCode, Omit<PortalLock, "code">> = {
   unsettled_balance: {
     label: "Tuition balance overdue",
     fix: "Settle the outstanding balance, an on-track payment plan, or an admin grace period.",
+  },
+  previous_level_balance: {
+    label: "Previous-level tuition balance",
+    fix: "Settle tuition left on a completed level before accessing this level.",
   },
   upcoming_batch: {
     label: "Their intake has not started yet",
@@ -112,7 +117,7 @@ export function renderedLockOf(input: {
 function justifies(rendered: RenderedLock): PortalLockCode[] {
   switch (rendered) {
     case "payment":
-      return ["unpaid_deposit", "unsettled_balance"];
+      return ["unpaid_deposit", "unsettled_balance", "previous_level_balance"];
     case "batch":
       return ["upcoming_batch"];
     case "photo":

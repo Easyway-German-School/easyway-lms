@@ -71,7 +71,7 @@ type RunningBatch = {
   count: number;
 };
 
-type Auto = { enabled: boolean; lastRunAt: string | null; lastRunSummary: string | null };
+type Auto = { enabled: boolean; autoPromote: boolean; lastRunAt: string | null; lastRunSummary: string | null };
 
 type WrongMove = {
   studentId: string;
@@ -280,7 +280,7 @@ const money = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")
 export default function GraduationPage() {
   const [cohorts, setCohorts] = useState<Cohort[]>([]);
   const [running, setRunning] = useState<RunningBatch[]>([]);
-  const [auto, setAuto] = useState<Auto>({ enabled: false, lastRunAt: null, lastRunSummary: null });
+  const [auto, setAuto] = useState<Auto>({ enabled: false, autoPromote: false, lastRunAt: null, lastRunSummary: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -497,6 +497,19 @@ export default function GraduationPage() {
     }
   }
 
+  async function toggleAutoPromotion() {
+    setBusy(true);
+    setError("");
+    try {
+      const json = await post({ action: "setAutoPromotion", autoPromote: !auto.autoPromote });
+      setAuto(json.auto);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const toggleOpen = (key: string) =>
     setOpen((current) => {
       const next = new Set(current);
@@ -550,6 +563,29 @@ export default function GraduationPage() {
             }`}
           >
             {auto.enabled ? "Morning summary is on" : "Turn morning summary on"}
+          </button>
+        </section>
+
+        <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="space-y-1">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-800">Eight-week progression</p>
+            <p className="font-semibold text-amber-950">
+              {auto.autoPromote ? "On — eligible learners move up after 56 days" : "Off — staff move learners up manually"}
+            </p>
+            <p className="max-w-xl text-sm text-amber-900">
+              Only confirmed class starts count. Learners with uncertain start records stay for staff review. Previous-level tuition remains due and blocks access until paid.
+            </p>
+          </div>
+          <button
+            disabled={busy}
+            onClick={toggleAutoPromotion}
+            role="switch"
+            aria-checked={auto.autoPromote}
+            className={`rounded-full px-5 py-2.5 text-sm font-bold shadow-sm transition disabled:opacity-50 ${
+              auto.autoPromote ? "bg-amber-700 text-white" : "border border-amber-500 text-amber-950 hover:bg-amber-100"
+            }`}
+          >
+            {auto.autoPromote ? "Automatic progression is on" : "Turn automatic progression on"}
           </button>
         </section>
 
