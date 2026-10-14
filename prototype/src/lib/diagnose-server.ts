@@ -35,11 +35,14 @@ import { buildLedger } from "@/lib/finance/ledger";
 import { guardedFetch, isCircuitOpen } from "@/lib/guarded-fetch";
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
+import { isTravelPackagePathway } from "@/lib/payment";
 import { portalVerdict } from "@/lib/portal-verdict";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
+import { batchFromAdmission, resolveBatchWindow } from "@/lib/batch";
 import { assignStudentCode } from "@/lib/student-code";
+import { openEnrolment } from "@/lib/student-enrolment";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 
 // ---------------------------------------------------------------------------
@@ -155,11 +158,28 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
     select: {
       id: true,
       studentCode: true,
+      status: true,
+      branchId: true,
+      tutorId: true,
+      sessionSlot: true,
       // tenantId comes off STUDENT_ACCESS_SELECT now (it needs it too, for
       // the intake-start-day override) — declaring it again here duplicates
       // the key.
       user: { select: { id: true, email: true, name: true, tenantId: true } },
       ...STUDENT_ACCESS_SELECT,
+      enrolments: {
+        where: { outcome: "ongoing", deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          id: true,
+          level: true,
+          tuitionChargeId: true,
+          feeSnapshot: true,
+          batchMonth: true,
+          batchYear: true,
+        },
+      },
     },
   });
   if (!student || !student.user) return null;
@@ -180,6 +200,15 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
 
   const access = accessFromStudent(student, planSuppressesLock(plan?.adherence ?? null));
   const hasPhoto = hasProfilePhoto(student.admission);
+  const currentLevelChargeKey = String(student.level ?? "").trim().toUpperCase();
+  const tuitionCharges = student.tuitionCharges ?? [];
+  const currentLevelCharge = isTravelPackagePathway(student.pathway)
+    ? tuitionCharges[0] ?? null
+    : tuitionCharges.find((charge) => charge.level.trim().toUpperCase() === currentLevelChargeKey) ?? null;
+  const expectedBatchMonth = batchFromAdmission(student.admission);
+  const expectedBatch = expectedBatchMonth
+    ? resolveBatchWindow(expectedBatchMonth, { registeredAt: student.createdAt })
+    : null;
 
   // Same ledger `deriveStudentAccess` builds internally, rebuilt here because
   // the summary `access` object does not expose per-charge lines. `student.payments`
@@ -208,7 +237,21 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   }
 
   return {
-    student: { id: student.id, studentCode: student.studentCode, tenantId: student.tenantId ?? null, level: student.level },
+    student: {
+      id: student.id,
+      studentCode: student.studentCode,
+      tenantId: student.tenantId ?? null,
+      level: student.level,
+      status: student.status,
+      branchId: student.branchId,
+      tutorId: student.tutorId,
+      sessionSlot: student.sessionSlot,
+      classType: student.classType,
+      deliveryMode: student.deliveryMode,
+      createdAt: student.createdAt.toISOString(),
+      classesStartedAt: student.classesStartedAt?.toISOString() ?? null,
+      admission: student.admission,
+    },
     user: { id: student.user.id, email: student.user.email, name: student.user.name, tenantId: student.user.tenantId ?? null },
     access: {
       hasAccess: access.hasAccess,
@@ -220,6 +263,16 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       outstanding: access.outstanding,
       graceUntil: access.graceUntil,
       batchLabel: access.batchLabel,
+    },
+    levelAlignment: {
+      currentLevelChargeExists: Boolean(currentLevelCharge),
+      currentChargeId: currentLevelCharge?.id ?? null,
+      currentChargeAmount: currentLevelCharge
+        ? Math.max(0, currentLevelCharge.amount - (currentLevelCharge.waivedAmount ?? 0))
+        : null,
+      ongoingEnrolment: student.enrolments?.[0] ?? null,
+      expectedBatchMonth,
+      expectedBatchYear: expectedBatch?.year ?? null,
     },
     hasPhoto,
     verdict: portalVerdict(access, hasPhoto),
@@ -338,18 +391,64 @@ const REPAIRS: Record<RepairId, RepairDef> = {
   sync_tuition_charge: {
     needs: "payments",
     needsPaystack: false,
-    stillApplies: (finding) => finding.rule === "missing-level-charge",
+    stillApplies: (finding) =>
+      finding.rule === "missing-level-charge" || finding.rule === "current-enrolment-mismatch",
     async act(facts) {
       const result = await ensureChargeForLevel({ studentId: facts.student.id, level: facts.student.level, origin: "admin" });
       if (!result) return { ok: false, message: "Could not raise the tuition charge — the student record could not be read." };
+      const alignment = facts.levelAlignment;
+      if (alignment?.ongoingEnrolment) {
+        const updated = await prisma.studentEnrolment.updateMany({
+          where: {
+            id: alignment.ongoingEnrolment.id,
+            studentId: facts.student.id,
+            outcome: "ongoing",
+            deletedAt: null,
+          },
+          data: {
+            level: facts.student.level,
+            tuitionChargeId: result.chargeId,
+            feeSnapshot: result.amount,
+            ...(alignment.expectedBatchMonth
+              ? {
+                  batchMonth: alignment.expectedBatchMonth,
+                  batchYear: alignment.expectedBatchYear,
+                }
+              : {}),
+          },
+        });
+        if (updated.count !== 1) {
+          return { ok: false, message: "The current enrolment changed while this repair was running. Refresh the diagnosis and try again." };
+        }
+      } else if (facts.student.status === "active" && facts.student.createdAt) {
+        const batch = batchFromAdmission(facts.student.admission);
+        await openEnrolment({
+          studentId: facts.student.id,
+          level: facts.student.level,
+          branchId: facts.student.branchId,
+          tutorId: facts.student.tutorId,
+          sessionSlot: facts.student.sessionSlot ?? "Weekday",
+          classType: facts.student.classType ?? "group",
+          deliveryMode: facts.student.deliveryMode ?? "physical",
+          batch,
+          registeredAt: new Date(facts.student.createdAt),
+          tenantId: facts.student.tenantId,
+          startedAt: facts.student.classesStartedAt ? new Date(facts.student.classesStartedAt) : null,
+          tuitionChargeId: result.chargeId,
+          feeSnapshot: result.amount,
+        });
+      }
       return {
         ok: true,
         message: result.created
-          ? `Raised a ${facts.student.level} tuition charge of ${naira(result.amount)}. The ledger will now credit their existing payments against it.`
-          : `${facts.student.level} already had a tuition charge of ${naira(result.amount)} — nothing to change there.`,
+          ? `Raised a ${facts.student.level} tuition charge of ${naira(result.amount)} and synced the current enrolment. No payment was changed.`
+          : `${facts.student.level} already had a tuition charge of ${naira(result.amount)}; the current enrolment is now synced. No payment was changed.`,
       };
     },
-    resolved: (diagnosis) => !diagnosis.findings.some((f) => f.rule === "missing-level-charge"),
+    resolved: (diagnosis) =>
+      !diagnosis.findings.some(
+        (f) => f.rule === "missing-level-charge" || f.rule === "current-enrolment-mismatch",
+      ),
   },
 
   resolve_prior_level_arrears: {

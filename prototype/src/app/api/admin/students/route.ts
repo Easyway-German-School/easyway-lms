@@ -927,6 +927,8 @@ export async function PATCH(request: Request) {
       status === "active" &&
       (student.status === "graduated" || student.status === "withdrawn");
 
+    let levelCharge: Awaited<ReturnType<typeof ensureChargeForLevel>> = null;
+    let levelSyncWarning: string | null = null;
     if (levelChanged || enteringTerminal || leavingTerminal) {
       try {
         if (enteringTerminal) {
@@ -937,20 +939,17 @@ export async function PATCH(request: Request) {
           await closeOpenEnrolment(studentId, { outcome: "completed" });
         }
 
-        /**
-         * An ad-hoc level correction from this form is a level change exactly
-         * like a Promotions-flow advance (promotion.ts always calls this), but
-         * this path never did — so a student bumped to a new level here (the
-         * "returning student starting A2" case, typically) got a `Student.level`
-         * of A2 with NO TuitionCharge ever raised for it. The ledger
-         * (src/lib/finance/ledger.ts) then has nothing to match their level
-         * against, so any A2 money reads as paid toward nothing: the portal
-         * locks them out for "unpaid tuition" no matter how much they paid, and
-         * the office sees them as a correctly-paid, settled student. Idempotent
-         * — a level that already has a charge is a no-op (see ensureChargeForLevel).
-         */
-        if (levelChanged) {
-          await ensureChargeForLevel({ studentId, level: level || student.level, origin: "admin" });
+        if (levelChanged || leavingTerminal) {
+          levelCharge = await ensureChargeForLevel({
+            studentId,
+            level: level || student.level,
+            origin: "admin",
+          });
+          if (!levelCharge) {
+            levelSyncWarning =
+              "The student record changed, but the tuition charge could not be synced. Run Mission Control's current-level tuition repair.";
+            console.error("Tuition charge synchronization failed on admin edit", { studentId, level: level || student.level });
+          }
         }
 
         if (levelChanged || leavingTerminal) {
@@ -965,10 +964,14 @@ export async function PATCH(request: Request) {
             deliveryMode: updateStudent.deliveryMode || student.deliveryMode,
             batch: typeof effectiveAdmission.batch === "string" ? effectiveAdmission.batch : undefined,
             tenantId: gate.session.user.tenantId,
+            tuitionChargeId: levelCharge?.chargeId ?? null,
+            feeSnapshot: levelCharge?.amount ?? null,
           });
         }
       } catch (enrolmentError) {
         console.error("Enrolment history update failed on admin edit", { studentId, enrolmentError });
+        levelSyncWarning =
+          "The student record changed, but the current enrolment or tuition snapshot could not be synced. Run Mission Control's current-level tuition repair.";
       }
     }
 
@@ -1085,6 +1088,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({
       success: true,
+      ...(levelSyncWarning ? { levelSyncWarning } : {}),
       ...(travelPackageReconcile ? { travelPackage: travelPackageReconcile } : {}),
       ...(pathwayReprice ? { pathwayReprice } : {}),
     });

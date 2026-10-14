@@ -320,6 +320,20 @@ export async function promoteStudents(
     }
     const landingMonth = place?.month ?? monthName;
 
+    let charge: { chargeId: string; amount: number } | null = null;
+    try {
+      charge = await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
+    } catch (chargeError) {
+      console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
+    }
+    if (!charge) {
+      result.skipped.push({
+        studentId,
+        reason: `Could not prepare the ${next} tuition charge; the level was not changed. Retry the promotion or repair the charge in Mission Control.`,
+      });
+      continue;
+    }
+
     await prisma.student.update({
       where: { id: studentId },
       data: {
@@ -341,18 +355,6 @@ export async function promoteStudents(
           : {}),
       },
     });
-
-    // Raise the tuition charge for the level they just moved into, so what they
-    // owe follows them up the ladder instead of the old level's shortfall
-    // dropping out of the maths. Idempotent — a next-level payment may have
-    // created it already. Best-effort: a missing charge is repaired by the
-    // backfill and receivables falls back to the per-level figure meanwhile.
-    let charge: { chargeId: string; amount: number } | null = null;
-    try {
-      charge = await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
-    } catch (chargeError) {
-      console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
-    }
 
     // Close the level they just left and open the one they are moving into —
     // see src/lib/student-enrolment.ts. This is the record that makes
