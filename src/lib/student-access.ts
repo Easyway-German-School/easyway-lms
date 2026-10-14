@@ -51,6 +51,8 @@ export const STUDENT_ACCESS_SELECT = {
       amount: true,
       waivedAmount: true,
       legacyArrears: true,
+      historyStatus: true,
+      historicalPaidAmount: true,
       createdAt: true,
       settledAt: true,
     },

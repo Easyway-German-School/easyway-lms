@@ -132,7 +132,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       },
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
     },
   });

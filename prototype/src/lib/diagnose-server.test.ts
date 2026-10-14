@@ -12,8 +12,6 @@ const m = vi.hoisted(() => ({
   fetch: vi.fn(),
   accessFromStudent: vi.fn(),
   ensureCharge: vi.fn(),
-  chargeFind: vi.fn(),
-  chargeUpdate: vi.fn(),
   enrolmentUpdate: vi.fn(),
 }));
 
@@ -26,10 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     payment: { findMany: (...a: unknown[]) => m.paymentFind(...a) },
     accessSnapshot: { findUnique: (...a: unknown[]) => m.snapshotFind(...a) },
-    tuitionCharge: {
-      findUnique: (...a: unknown[]) => m.chargeFind(...a),
-      update: (...a: unknown[]) => m.chargeUpdate(...a),
-    },
+    tuitionCharge: {},
     studentEnrolment: { updateMany: (...a: unknown[]) => m.enrolmentUpdate(...a) },
   },
   unguardedPrisma: {},
@@ -136,8 +131,6 @@ beforeEach(() => {
     world.chargePresent = true;
     return { created: true, chargeId: "c1", level: "B1", amount: 400_000 };
   });
-  m.chargeFind.mockResolvedValue(null);
-  m.chargeUpdate.mockResolvedValue(undefined);
   m.enrolmentUpdate.mockImplementation(async ({ data }: { data: typeof world.enrolment }) => {
     world.enrolment = { ...world.enrolment, ...data };
     return { count: 1 };
@@ -401,75 +394,16 @@ describe("runRepair — sync_tuition_charge", () => {
   });
 });
 
-describe("runRepair — resolve_prior_level_arrears", () => {
-  beforeEach(() => {
-    // Exactly the returning-student shape: B1 (current level) is fully paid,
-    // but an older A2 charge is still open and never flagged legacy — the
-    // ledger's lock reads that, even though the admin file's per-level view
-    // would say "nothing outstanding" on B1. A different drift from
-    // sync_tuition_charge above: there the charge is MISSING; here it exists
-    // and is simply stale.
-    m.accessFromStudent.mockReturnValue({
-      hasAccess: false, lockReason: "unsettled_balance", totalPaid: 180_000, currentLevelPaid: 180_000, tuitionFee: 180_000,
-      requiredDeposit: 108_000, outstanding: 0, graceUntil: null, batchLabel: null,
-    });
-    m.studentFind.mockImplementation(async () => ({
-      id: "s1", studentCode: world.code, tenantId: "t1", level: "B1", classType: "group",
-      createdAt: new Date("2026-09-01T00:00:00.000Z"),
-      admission: { photoUrl: "x.jpg" }, branch: null,
-      user: { id: "u1", email: "ada@example.com", name: "Ada", tenantId: "t1" },
-      tuitionCharges: [
-        { id: "c-a2", level: "A2", amount: 215_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-06-01"), settledAt: null },
-        { id: "c-b1", level: "B1", amount: 180_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-09-01"), settledAt: null },
-      ],
-      payments: [{ amount: 180_000, level: null, description: "B1 tuition - September 2026", status: "completed", createdAt: new Date("2026-10-13") }],
-    }));
-  });
-
-  const run = () => runRepair({ studentId: "s1", repairId: "resolve_prior_level_arrears" });
-
-  it("marks only the stale earlier-level charge as legacy arrears, leaves the settled current level alone, and audits", async () => {
-    m.chargeFind.mockResolvedValue({ note: null, legacyArrears: false });
-    const outcome = await run();
-    expect(m.chargeUpdate).toHaveBeenCalledTimes(1);
-    expect(m.chargeUpdate.mock.calls[0][0]).toMatchObject({ where: { id: "c-a2" }, data: { legacyArrears: true } });
-    expect(outcome.ok).toBe(true);
-    expect(outcome.message).toMatch(/legacy arrears/i);
-    expect(m.audit).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps any existing note instead of overwriting it", async () => {
-    m.chargeFind.mockResolvedValue({ note: "Scholarship review pending", legacyArrears: false });
-    await run();
-    expect(m.chargeUpdate.mock.calls[0][0].data.note).toMatch(/^Scholarship review pending · Marked legacy arrears/);
-  });
-
-  it("does nothing once the drag is already cleared — stale click or a second admin", async () => {
-    m.accessFromStudent.mockReturnValue({
-      hasAccess: true, lockReason: null, totalPaid: 395_000, currentLevelPaid: 180_000, tuitionFee: 180_000,
-      requiredDeposit: 108_000, outstanding: 0, graceUntil: null, batchLabel: null,
-    });
-    const outcome = await run();
-    expect(m.chargeUpdate).not.toHaveBeenCalled();
-    expect(outcome.message).toMatch(/nothing to do/i);
-  });
-
-  it("is idempotent: a charge already marked legacy by someone else is skipped, not double-noted", async () => {
-    m.chargeFind.mockResolvedValue({ note: "already handled", legacyArrears: true });
-    const outcome = await run();
-    expect(m.chargeUpdate).not.toHaveBeenCalled();
-    expect(outcome.ok).toBe(false);
-    expect(outcome.message).toMatch(/already marked/i);
-  });
-
-  it("names the capability it needs", () => {
-    expect(repairCapability("resolve_prior_level_arrears")).toBe("payments");
-  });
-});
-
 describe("the whitelist", () => {
   it("refuses anything it does not know, touching nothing", async () => {
     const outcome = await runRepair({ studentId: "s1", repairId: "drop_all_tables" });
+    expect(outcome.ok).toBe(false);
+    expect(m.studentFind).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+
+  it("no longer supports the old automatic legacy-arrears unlock", async () => {
+    const outcome = await runRepair({ studentId: "s1", repairId: "resolve_prior_level_arrears" });
     expect(outcome.ok).toBe(false);
     expect(m.studentFind).not.toHaveBeenCalled();
     expect(m.audit).not.toHaveBeenCalled();

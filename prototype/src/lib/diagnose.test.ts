@@ -199,28 +199,29 @@ describe("the rules", () => {
     expect(d.findings.some((f) => f.rule === "current-enrolment-mismatch")).toBe(false);
   });
 
-  it("stale-prior-level-lock: current level settled, an earlier level's charge is what is actually locking them", () => {
-    // Exactly the returning-student shape: B1 fully paid, A2 still carries an
-    // open, un-flagged charge — the admin file would say "nothing outstanding"
-    // on B1 while the ledger-driven lock stays shut. A different shape from
-    // missing-level-charge above: there the charge does not exist at all; here
-    // it exists, is older, and was simply never flagged legacy.
-    const verdict = portalVerdict({ hasAccess: false, lockReason: "unsettled_balance" }, true);
+  it("reports a confirmed prior-level balance without proposing to waive it", () => {
+    const verdict = portalVerdict({ hasAccess: false, lockReason: "previous_level_balance" }, true);
     const f = diagnose(
       base({
         verdict,
-        access: { ...base().access, hasAccess: false, lockReason: "unsettled_balance" },
+        access: { ...base().access, hasAccess: false, lockReason: "previous_level_balance" },
         priorLevelArrears: [{ chargeId: "c-a2", level: "A2", outstanding: 35_000 }],
       }),
-    ).findings.find((x) => x.rule === "stale-prior-level-lock")!;
+    ).findings.find((x) => x.rule === "prior-level-balance")!;
     expect(f.severity).toBe("problem");
     expect(f.title).toContain("A2");
     expect(f.title).toContain("₦35,000");
-    expect(f.offers).toMatchObject([{ id: "resolve_prior_level_arrears", needs: "payments" }]);
+    expect(f.offers).toEqual([]);
   });
 
-  it("stale-prior-level-lock stays silent when nothing is dragging on an earlier level, or the lock is a plain deposit gate", () => {
-    expect(diagnose(base({ priorLevelArrears: [] })).findings.some((f) => f.rule === "stale-prior-level-lock")).toBe(false);
+  it("reports unreviewed inferred history as non-collectible and does not call it confirmed debt", () => {
+    const unreviewed = diagnose(base({
+      unreviewedPriorLevels: [{ level: "A2", potentialOutstanding: 35_000 }],
+    })).findings.find((finding) => finding.rule === "unreviewed-prior-level-history");
+    expect(unreviewed?.severity).toBe("warning");
+    expect(unreviewed?.offers).toEqual([]);
+
+    expect(diagnose(base({ priorLevelArrears: [] })).findings.some((f) => f.rule === "prior-level-balance")).toBe(false);
     const depositLock = portalVerdict({ hasAccess: false, lockReason: "unpaid_deposit" }, true);
     expect(
       diagnose(
@@ -229,7 +230,7 @@ describe("the rules", () => {
           access: { ...base().access, hasAccess: false, lockReason: "unpaid_deposit" },
           priorLevelArrears: [{ chargeId: "c-a2", level: "A2", outstanding: 35_000 }],
         }),
-      ).findings.some((f) => f.rule === "stale-prior-level-lock"),
+      ).findings.some((f) => f.rule === "prior-level-balance"),
     ).toBe(false);
   });
 

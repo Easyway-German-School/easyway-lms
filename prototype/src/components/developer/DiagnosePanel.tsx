@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 import type { Finding, RepairId, RepairOffer } from "@/lib/diagnose";
 
 type StudentHit = { id: string; studentCode: string | null; level: string; name: string | null; email: string };
@@ -533,6 +534,7 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
           {result.diagnosis.ruleErrors.length > 0 && (
             <p className="text-xs text-amber-600">{result.diagnosis.ruleErrors.length} check(s) could not run ({result.diagnosis.ruleErrors.map((e) => e.rule).join(", ")}) — the findings above are still valid, but incomplete.</p>
           )}
+          <LevelHistoryManager key={result.student.id} studentId={result.student.id} currentLevel={result.student.level} />
         </>
       )}
     </div>

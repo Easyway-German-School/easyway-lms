@@ -31,6 +31,7 @@ import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSetti
 import { isOnlineBranch } from "@/lib/online-branch";
 import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
 import SchedulePreview from "@/components/admin/SchedulePreview";
+import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 
 /**
  * One student's file.
@@ -638,9 +639,6 @@ export default function StudentDossierPage() {
   const [holdBusy, setHoldBusy] = useState(false);
   const [holdError, setHoldError] = useState<string | null>(null);
 
-  const [priorLevelFixBusy, setPriorLevelFixBusy] = useState(false);
-  const [priorLevelFixMsg, setPriorLevelFixMsg] = useState<string | null>(null);
-
   // Tuition balance & reminders panel — grace date + "send reminder now".
   const [graceInput, setGraceInput] = useState("");
   const [balanceBusy, setBalanceBusy] = useState<"grace" | "reminder" | null>(null);
@@ -874,35 +872,6 @@ export default function StudentDossierPage() {
     },
     [id, load],
   );
-
-  /**
-   * One click from the student's own file: the same "stale-prior-level-lock"
-   * repair the Diagnose & fix tab offers (lib/diagnose.ts /
-   * lib/diagnose-server.ts), reached straight from the screen the office is
-   * already looking at instead of making them go find this student again in
-   * a second tool. The server re-derives the problem itself before acting —
-   * nothing here is trusted from this page's own state.
-   */
-  const resolvePriorLevelArrears = useCallback(async () => {
-    if (!id) return;
-    setPriorLevelFixBusy(true);
-    setPriorLevelFixMsg(null);
-    try {
-      const response = await fetch("/api/admin/developer/repair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: id, repairId: "resolve_prior_level_arrears" }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json?.error || "Could not run that fix");
-      setPriorLevelFixMsg(json?.message ?? "Done.");
-      void load(false);
-    } catch (fixErr) {
-      setPriorLevelFixMsg(fixErr instanceof Error ? fixErr.message : "Could not run that fix");
-    } finally {
-      setPriorLevelFixBusy(false);
-    }
-  }, [id, load]);
 
   const saveGrace = useCallback(
     async (clear = false) => {
@@ -1361,20 +1330,13 @@ export default function StudentDossierPage() {
                       : "Nothing outstanding"}
                 </p>
               )}
-              {data.viewer.canSeeMoney && money.owesPriorLevel && (
-                <button
-                  type="button"
-                  onClick={() => resolvePriorLevelArrears()}
-                  disabled={priorLevelFixBusy}
-                  className="mt-2 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/25 disabled:opacity-50"
-                >
-                  {priorLevelFixBusy ? "Fixing…" : "Unlock — mark that earlier balance as legacy arrears"}
-                </button>
-              )}
-              {priorLevelFixMsg && <p className="mt-1 text-[11px] text-white/70">{priorLevelFixMsg}</p>}
             </div>
           </div>
         </motion.div>
+
+        {data.viewer.canSeeMoney && (
+          <LevelHistoryManager key={data.identity.id} studentId={data.identity.id} currentLevel={data.identity.level} />
+        )}
 
         {/* ---- Vitals ---------------------------------------------------- */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -217,8 +217,17 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   const ledger = buildLedger(student.tuitionCharges ?? [], access.totalPaid, new Date(), student.payments ?? []);
   const currentLevelKey = String(student.level ?? "").trim().toUpperCase();
   const priorLevelArrears = ledger.lines
-    .filter((line) => line.outstanding > 0 && !line.legacyArrears && line.level.toUpperCase() !== currentLevelKey)
+    .filter(
+      (line) =>
+        line.outstanding > 0 &&
+        !line.legacyArrears &&
+        line.historyStatus !== "unreviewed" &&
+        line.level.toUpperCase() !== currentLevelKey,
+    )
     .map((line) => ({ chargeId: line.chargeId, level: line.level, outstanding: line.outstanding }));
+  const unreviewedPriorLevels = ledger.lines
+    .filter((line) => line.historyStatus === "unreviewed" && line.level.toUpperCase() !== currentLevelKey)
+    .map((line) => ({ level: line.level, potentialOutstanding: line.reviewOutstanding }));
 
   let paystack: Facts["paystack"] = options.reusePaystack ?? null;
   if (!paystack && options.paystack) {
@@ -277,6 +286,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
     hasPhoto,
     verdict: portalVerdict(access, hasPhoto),
     priorLevelArrears,
+    unreviewedPriorLevels,
     payments: payments.map((p) => ({
       id: p.id,
       amount: p.amount,
@@ -520,39 +530,6 @@ const REPAIRS: Record<RepairId, RepairDef> = {
       ),
   },
 
-  resolve_prior_level_arrears: {
-    needs: "payments",
-    needsPaystack: false,
-    stillApplies: (finding) => finding.rule === "stale-prior-level-lock",
-    async act(facts) {
-      if (facts.priorLevelArrears.length === 0) {
-        return { ok: false, message: "No stale earlier-level charge found — nothing to fix." };
-      }
-      const stamp = new Date().toISOString().slice(0, 10);
-      let count = 0;
-      for (const arrears of facts.priorLevelArrears) {
-        const charge = await prisma.tuitionCharge.findUnique({
-          where: { id: arrears.chargeId },
-          select: { note: true, legacyArrears: true },
-        });
-        if (!charge || charge.legacyArrears) continue;
-        const line = `Marked legacy arrears on ${stamp} to lift a stale balance lock — ${naira(arrears.outstanding)} still open on ${arrears.level}, the current level is already settled.`;
-        await prisma.tuitionCharge.update({
-          where: { id: arrears.chargeId },
-          data: { legacyArrears: true, note: charge.note ? `${charge.note} · ${line}` : line },
-        });
-        count += 1;
-      }
-      if (count === 0) {
-        return { ok: false, message: "Those charges were already marked legacy arrears — nothing left to do." };
-      }
-      return {
-        ok: true,
-        message: `Marked ${count} earlier-level charge${count === 1 ? "" : "s"} as legacy arrears. The debt stays on file to chase; it no longer blocks the portal.`,
-      };
-    },
-    resolved: (diagnosis) => !diagnosis.findings.some((f) => f.rule === "stale-prior-level-lock"),
-  },
 };
 
 /**

@@ -112,7 +112,7 @@ export async function GET(
       // portal and the admin remote view show. See lib/finance/ledger.ts.
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
       // A Lecturer carries no name of its own — it hangs off the User row.
       tutor: {
@@ -340,16 +340,17 @@ export async function GET(
    * THIS LEVEL being clear is not the same question as THE PORTAL being open.
    * `owed` above only ever looks at the current level, so a returning student
    * whose current level is fully paid shows "nothing outstanding" here even
-   * when an older, un-flagged charge is still what `access.hasAccess` is
-   * reading to keep the balance lock shut — the exact split this file's own
-   * module comment promises never to allow. Surfacing it is what lets the
-   * page say why, instead of showing "Nothing outstanding" next to a locked
-   * padlock with no explanation. See lib/diagnose.ts's "stale-prior-level-lock"
-   * rule (Diagnose & fix tab) for the one-click repair.
+   * when a confirmed earlier-level charge is what `access.hasAccess` is
+   * reading to keep the balance lock shut. Unreviewed backfill estimates are
+   * excluded here and surfaced in the history review below.
    */
   const priorLevelLedger = buildLedger(student.tuitionCharges, access.totalPaid, now, receivedTuitionPayments);
   const priorLevelArrears = priorLevelLedger.lines.filter(
-    (line) => line.outstanding > 0 && !line.legacyArrears && line.level.toUpperCase() !== currentLevel,
+    (line) =>
+      line.outstanding > 0 &&
+      line.historyStatus !== "unreviewed" &&
+      !line.legacyArrears &&
+      line.level.toUpperCase() !== currentLevel,
   );
   const owesPriorLevel = priorLevelArrears.length > 0;
   const priorLevelOutstanding = priorLevelArrears.reduce((sum, line) => sum + line.outstanding, 0);
