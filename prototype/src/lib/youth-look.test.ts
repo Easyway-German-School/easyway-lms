@@ -3,35 +3,27 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_LOOK_WAVE, parseLookChoice, parseLookWave, promptFor, resolveLook } from "@/lib/youth-look";
 
 describe("resolveLook", () => {
-  it("puts under-25s on the new look by default", () => {
+  it("puts every student on the new look by default, regardless of age", () => {
     expect(resolveLook({ age: 16, choice: null })).toEqual({ look: "youth", reason: "wave", cohort: "wave", inWave: true });
     expect(resolveLook({ age: 24, choice: null }).look).toBe("youth");
+    expect(resolveLook({ age: 25, choice: null }).look).toBe("youth");
+    expect(resolveLook({ age: 52, choice: null }).look).toBe("youth");
   });
 
-  it("leaves 25 and over on the classic look", () => {
-    expect(resolveLook({ age: 25, choice: null })).toEqual({ look: "classic", reason: "default", cohort: "invited", inWave: false });
-    expect(resolveLook({ age: 52, choice: null }).look).toBe("classic");
+  it("does not need an age at all — a student we cannot work out still gets the new look", () => {
+    expect(resolveLook({ age: null, choice: null }).look).toBe("youth");
+    expect(resolveLook({ age: undefined, choice: null }).look).toBe("youth");
+    expect(resolveLook({ age: Number.NaN, choice: null }).look).toBe("youth");
   });
 
-  it("does not move a student whose age we cannot work out", () => {
-    expect(resolveLook({ age: null, choice: null }).look).toBe("classic");
-    expect(resolveLook({ age: undefined, choice: null }).look).toBe("classic");
-    expect(resolveLook({ age: Number.NaN, choice: null }).look).toBe("classic");
-  });
-
-  it("lets a wave include unknown ages when the school says so", () => {
-    const wave = { ...DEFAULT_LOOK_WAVE, includeUnknownAge: true };
+  it("ignores a wave setting — the age-based rollout is retired", () => {
+    const wave = { ...DEFAULT_LOOK_WAVE, maxAge: 0, includeUnknownAge: false };
+    expect(resolveLook({ age: 90, choice: null, wave }).look).toBe("youth");
     expect(resolveLook({ age: null, choice: null, wave }).look).toBe("youth");
   });
 
-  it("lets the school widen the wave without code", () => {
-    const wave = { ...DEFAULT_LOOK_WAVE, maxAge: 34 };
-    expect(resolveLook({ age: 30, choice: null, wave }).look).toBe("youth");
-    expect(resolveLook({ age: 35, choice: null, wave }).look).toBe("classic");
-  });
-
   it("always honours the student's own choice, in both directions", () => {
-    expect(resolveLook({ age: 60, choice: "youth" })).toEqual({ look: "youth", reason: "chosen", cohort: "invited", inWave: false });
+    expect(resolveLook({ age: 60, choice: "youth" })).toEqual({ look: "youth", reason: "chosen", cohort: "wave", inWave: true });
     expect(resolveLook({ age: 15, choice: "classic" })).toEqual({ look: "classic", reason: "chosen", cohort: "wave", inWave: true });
     expect(resolveLook({ age: null, choice: "youth" }).look).toBe("youth");
   });
@@ -73,23 +65,20 @@ describe("parseLookChoice", () => {
 });
 
 describe("promptFor", () => {
-  const wave = resolveLook({ age: 17, choice: null });
+  const young = resolveLook({ age: 17, choice: null });
   const older = resolveLook({ age: 29, choice: null });
   const senior = resolveLook({ age: 52, choice: null });
   const noBirthDate = resolveLook({ age: null, choice: null });
 
-  it("announces to wave students and offers the choice to everyone else, once", () => {
-    expect(promptFor(wave, false)).toBe("announce");
-    expect(promptFor(older, false)).toBe("invite");
-  });
-
-  it("offers the choice at any age, and when no birth date is on file", () => {
-    expect(promptFor(senior, false)).toBe("invite");
-    expect(promptFor(noBirthDate, false)).toBe("invite");
+  it("announces the new look to everyone, once, regardless of age", () => {
+    expect(promptFor(young, false)).toBe("announce");
+    expect(promptFor(older, false)).toBe("announce");
+    expect(promptFor(senior, false)).toBe("announce");
+    expect(promptFor(noBirthDate, false)).toBe("announce");
   });
 
   it("never prompts the same student twice", () => {
-    expect(promptFor(wave, true)).toBeNull();
+    expect(promptFor(young, true)).toBeNull();
     expect(promptFor(older, true)).toBeNull();
   });
 

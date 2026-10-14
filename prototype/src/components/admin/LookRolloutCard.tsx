@@ -19,13 +19,13 @@ function Count({ label, value, hint }: { label: string; value: number | string; 
 }
 
 /**
- * WHO GETS THE NEW STUDENT LOOK — the school's dial.
+ * WHO GETS THE NEW STUDENT LOOK.
  *
- * The student always has the last word (their profile switch beats everything
- * here), so this only sets the DEFAULT: which students are moved onto the new
- * look with Becca's announcement. Everyone else is offered it once. Every
- * change is previewed with real counts before it is saved, so nobody finds out
- * how many people they just moved after the fact. Counts only — see
+ * The age-based rollout is retired — every student gets the new look by
+ * default now, regardless of age (see lib/youth-look.ts). The controls below
+ * no longer change anything; they're kept rendered rather than ripped out so
+ * this card still shows real, accurate counts (everyone in "gets it by
+ * default") instead of disappearing outright. Counts only — see
  * lib/look-cohorts.ts.
  */
 export default function LookRolloutCard() {
@@ -98,19 +98,21 @@ export default function LookRolloutCard() {
     <section className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
       <h2 className="text-lg font-bold text-[var(--foreground)]">New student look — who gets it</h2>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        A phone-style menu, and avatars in the chat. Students up to the age below get it by
-        default, with a one-time note from Becca. Everyone older is <em>offered</em> it once and keeps their familiar
-        portal (with a WhatsApp/Facebook-style community) unless they say yes. Anyone can switch either way from their
-        profile, and that always wins.{" "}
+        A phone-style menu, and avatars in the chat. The age-based rollout is retired — every student gets it by
+        default now, with a one-time note from Becca. Anyone can switch either way from their profile, and that
+        always wins.{" "}
         <Link href="/admin/community" className="font-semibold text-[var(--accent)] underline">
           Community → Insights and People
         </Link>
         .
       </p>
+      <p className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
+        The age cutoff below no longer changes anything — kept here only so the counts underneath stay accurate.
+      </p>
 
       {error ? <p className="mt-3 text-sm font-semibold text-red-600">{error}</p> : null}
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 opacity-50">
         <label className="block text-sm">
           <span className="font-semibold text-[var(--foreground)]">Gets it by default up to age</span>
           <input
@@ -118,13 +120,14 @@ export default function LookRolloutCard() {
             min={0}
             max={120}
             value={maxAge}
+            disabled
             onChange={(e) => setMaxAge(Math.max(0, Math.min(120, Number(e.target.value) || 0)))}
             className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2"
           />
         </label>
       </div>
-      <label className="mt-3 flex items-center gap-2 text-sm text-[var(--foreground-soft)]">
-        <input type="checkbox" checked={includeUnknown} onChange={(e) => setIncludeUnknown(e.target.checked)} />
+      <label className="mt-3 flex items-center gap-2 text-sm text-[var(--foreground-soft)] opacity-50">
+        <input type="checkbox" checked={includeUnknown} disabled onChange={(e) => setIncludeUnknown(e.target.checked)} />
         Include students with no birth date on file in the default group
       </label>
 
