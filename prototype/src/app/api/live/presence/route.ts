@@ -5,6 +5,8 @@ import {
   addInvites,
   closeLiveSession,
   declineInvite,
+  liveSessionForStudent,
+  recordAttendance,
   ringStudents,
   touchLiveSession,
 } from "@/lib/live-presence";
@@ -26,7 +28,7 @@ export const dynamic = "force-dynamic";
  *   decline    student: not joining, stop asking
  */
 
-type Action = "heartbeat" | "end" | "ring" | "decline";
+type Action = "heartbeat" | "end" | "ring" | "decline" | "joined";
 
 export async function POST(request: Request) {
   try {
@@ -50,6 +52,57 @@ export async function POST(request: Request) {
       if (!sessionId) return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
       await declineInvite(sessionId, student.id);
       return NextResponse.json({ ok: true });
+    }
+
+    if (action === "joined") {
+      if (!student) return NextResponse.json({ error: "Students only" }, { status: 403 });
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!sessionId) return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
+
+      const profile = await prisma.student.findUnique({
+        where: { id: student.id },
+        select: {
+          id: true,
+          branchId: true,
+          level: true,
+          sessionSlot: true,
+          classType: true,
+          deliveryMode: true,
+          tutorId: true,
+          coTutors: { select: { lecturerId: true } },
+          admission: true,
+          branch: { select: { name: true, mode: true } },
+        },
+      });
+      if (!profile) return NextResponse.json({ error: "Student profile not found" }, { status: 404 });
+
+      const eligibleSession = await liveSessionForStudent({
+        ...profile,
+        coTutorIds: profile.coTutors.map((link) => link.lecturerId),
+      });
+      if (eligibleSession?.id !== sessionId) {
+        return NextResponse.json({ error: "This live class is not available to you." }, { status: 403 });
+      }
+
+      await recordAttendance(sessionId, student.id);
+      const recovered = await prisma.incident.updateMany({
+        where: {
+          kind: "health",
+          source: "client",
+          route: "/live",
+          userId: session.user.id,
+          occurrences: 1,
+          status: { in: ["open", "acknowledged"] },
+          context: { path: ["liveSessionId"], equals: sessionId },
+        },
+        data: {
+          status: "resolved",
+          resolvedAt: new Date(),
+          resolvedById: null,
+          resolutionNote: "The same student subsequently connected to this live class.",
+        },
+      });
+      return NextResponse.json({ ok: true, recoveredIncidents: recovered.count });
     }
 
     if (!isStaff) return NextResponse.json({ error: "Staff access required" }, { status: 403 });

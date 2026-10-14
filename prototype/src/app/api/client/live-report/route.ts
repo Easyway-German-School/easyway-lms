@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { requireAuthSession } from "@/lib/auth";
+
 import { recordIncident } from "@/lib/incidents";
 import { checkRateLimit, clientIp } from "@/lib/rate-limit";
 
@@ -17,11 +19,20 @@ export async function POST(request: Request) {
   if (!body || typeof body !== "object") return new NextResponse(null, { status: 204 });
 
   const report = body as Record<string, unknown>;
-  const role = ROLES.find((value) => value === report.role);
+  const session = await requireAuthSession();
+  if (!session?.user?.id) return new NextResponse(null, { status: 204 });
+
+  const accountRole = String(session.user.role ?? "").toLowerCase();
+  const authenticatedRole = accountRole === "lecturer" ? "tutor" : accountRole;
+  const role = ROLES.find((value) => value === report.role && value === authenticatedRole);
   const attempts = Number(report.attempts);
   if (!role || !Number.isInteger(attempts) || attempts < 1 || attempts > 3) {
     return new NextResponse(null, { status: 204 });
   }
+  const liveSessionId =
+    typeof report.liveSessionId === "string" && report.liveSessionId.length <= 100
+      ? report.liveSessionId
+      : null;
 
   await recordIncident({
     kind: "health",
@@ -33,7 +44,10 @@ export async function POST(request: Request) {
       role,
       attempts,
       online: report.online !== false,
+      liveSessionId,
     },
+    userId: session.user.id,
+    tenantId: session.user.tenantId ?? null,
   });
 
   return new NextResponse(null, { status: 204 });

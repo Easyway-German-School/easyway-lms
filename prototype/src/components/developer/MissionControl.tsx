@@ -350,6 +350,12 @@ function IncidentList({
         </div>
       )}
 
+      {!compact && (
+        <p className="text-xs text-[var(--muted)]">
+          A single-report live-connectivity issue resolves when that same signed-in student connects to the reported class. Repeated or shared incidents stay open until recovery is confirmed.
+        </p>
+      )}
+
       {loading ? (
         <p className="text-sm text-[var(--muted)]">Loading…</p>
       ) : failed ? (

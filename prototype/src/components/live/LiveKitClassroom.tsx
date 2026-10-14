@@ -780,6 +780,18 @@ export default function LiveKitClassroom({
         setStatus("connected");
         bumpAll();
 
+        if (role === "student" && liveSessionId) {
+          void fetch("/api/live/presence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "joined", sessionId: liveSessionId }),
+          }).then((response) => {
+            if (!response.ok) console.error("Could not record the confirmed live-class connection", response.status);
+          }).catch((reportError) => {
+            console.error("Could not report the confirmed live-class connection", reportError);
+          });
+        }
+
         // The recording starts here too, for the tutor only — see the module
         // comment on session/start-recording/route.ts for why this moved off
         // the page-load GET. Fire-and-forget: a slow or failing egress must
@@ -931,6 +943,7 @@ export default function LiveKitClassroom({
             role,
             attempts: attempts.length,
             online: navigator.onLine,
+            liveSessionId,
           }),
           keepalive: true,
         }).catch(() => {});
