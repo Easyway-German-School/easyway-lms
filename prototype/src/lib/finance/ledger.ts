@@ -57,7 +57,7 @@ export type LedgerChargeInput = {
   amount: number;
   waivedAmount?: number | null;
   legacyArrears?: boolean | null;
-  historyStatus?: "confirmed" | "owing" | "paid" | "not_taken_here" | "unreviewed" | null;
+  historyStatus?: string | null;
   historicalPaidAmount?: number | null;
   createdAt: Date | string;
   settledAt?: Date | string | null;
