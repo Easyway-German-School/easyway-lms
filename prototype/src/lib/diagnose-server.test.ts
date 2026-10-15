@@ -6,6 +6,8 @@ const m = vi.hoisted(() => ({
   studentCount: vi.fn(),
   paymentFind: vi.fn(),
   snapshotFind: vi.fn(),
+  privateClassFind: vi.fn(),
+  liveSessionFind: vi.fn(),
   verify: vi.fn(),
   assignCode: vi.fn(),
   audit: vi.fn(),
@@ -24,11 +26,14 @@ vi.mock("@/lib/prisma", () => ({
     },
     payment: { findMany: (...a: unknown[]) => m.paymentFind(...a) },
     accessSnapshot: { findUnique: (...a: unknown[]) => m.snapshotFind(...a) },
+    privateClass: { findMany: (...a: unknown[]) => m.privateClassFind(...a) },
+    liveClassSession: { findMany: (...a: unknown[]) => m.liveSessionFind(...a) },
     tuitionCharge: {},
     studentEnrolment: { updateMany: (...a: unknown[]) => m.enrolmentUpdate(...a) },
   },
   unguardedPrisma: {},
 }));
+vi.mock("@/lib/live-presence", () => ({ LIVE_STALE_AFTER_MS: 180_000 }));
 vi.mock("@/lib/prisma-guard", () => ({ writeAudit: (...a: unknown[]) => m.audit(...a) }));
 vi.mock("@/lib/paystack-verify", () => ({ verifyPaystackTransaction: (...a: unknown[]) => m.verify(...a) }));
 vi.mock("@/lib/student-code", () => ({ assignStudentCode: (...a: unknown[]) => m.assignCode(...a) }));
@@ -65,6 +70,28 @@ let world: {
   };
   payments: Array<{ id: string; amount: number; status: string; method: string; stripeSessionId: string | null; paymentIntentId: string | null; createdAt: Date }>;
   paystack: unknown[];
+  classType: string;
+  deliveryMode: string;
+  hybridOnlineSlot: string | null;
+  tutor: { id: string; status: string } | null;
+  coTutors: Array<{ lecturerId: string; role: string; lecturer: { status: string } }>;
+  privateClasses: Array<{
+    id: string;
+    lecturerId: string | null;
+    scheduledAt: Date;
+    durationMinutes: number;
+    deliveryMode: string | null;
+  }>;
+  liveSessions: Array<{
+    id: string;
+    kind: string;
+    title: string;
+    level: string | null;
+    sessionSlot: string | null;
+    batch: string | null;
+    lecturerId: string | null;
+    privateClassId: string | null;
+  }>;
 };
 
 beforeEach(() => {
@@ -86,21 +113,31 @@ beforeEach(() => {
     },
     payments: [],
     paystack: [rawTx()],
+    classType: "group",
+    deliveryMode: "physical",
+    hybridOnlineSlot: null,
+    tutor: null,
+    coTutors: [],
+    privateClasses: [],
+    liveSessions: [],
   };
 
   m.studentFind.mockImplementation(async (args?: { where?: { id?: string } }) => {
     const id = args?.where?.id ?? "s1";
     return {
-    id, studentCode: world.code, tenantId: "t1", level: "B1", classType: "group", admission: { photoUrl: "x.jpg" }, branch: null,
+    id, studentCode: world.code, tenantId: "t1", level: "B1", classType: world.classType, admission: { photoUrl: "x.jpg" }, branch: null,
     createdAt: new Date("2026-09-01T00:00:00.000Z"),
     tuitionCharges: world.chargePresent
       ? [{ id: "c1", level: "B1", amount: 400_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-09-01T00:00:00.000Z") }]
       : [],
     status: "active",
     branchId: null,
-    tutorId: null,
-    sessionSlot: "Weekday",
-    deliveryMode: "physical",
+    tutorId: world.tutor?.id ?? null,
+    tutor: world.tutor,
+    coTutors: world.coTutors,
+    sessionSlot: "morning",
+    deliveryMode: world.deliveryMode,
+    hybridOnlineSlot: world.hybridOnlineSlot,
     classesStartedAt: null,
     enrolments: [world.enrolment],
     user: { id: `u-${id}`, email: "ada@example.com", name: "Ada", tenantId: "t1" },
@@ -108,6 +145,8 @@ beforeEach(() => {
   });
   m.paymentFind.mockImplementation(async () => world.payments);
   m.snapshotFind.mockResolvedValue(null);
+  m.privateClassFind.mockImplementation(async () => world.privateClasses);
+  m.liveSessionFind.mockImplementation(async () => world.liveSessions);
   m.audit.mockResolvedValue(undefined);
   m.fetch.mockImplementation(async (_provider: string, url: string) => {
     if (url.includes("/customer/")) return json({ data: { id: 42 } });
@@ -168,6 +207,57 @@ describe("runDiagnosis", () => {
     m.studentFind.mockResolvedValue(null);
     expect(await runDiagnosis("nope")).toBeNull();
   });
+
+  it("diagnoses missing hybrid sitting and unassigned tutor setup from persisted student records", async () => {
+    world.deliveryMode = "hybrid";
+    world.hybridOnlineSlot = null;
+    const result = await runDiagnosis("s1");
+    expect(result!.diagnosis.findings.map((finding) => finding.rule)).toContain("class-schedule-setup");
+    expect(result!.diagnosis.findings.map((finding) => finding.rule)).toContain("class-tutor-assignment");
+  });
+
+  it("checks live room sitting and intake only during an individual live diagnosis", async () => {
+    world.deliveryMode = "hybrid";
+    world.hybridOnlineSlot = "evening";
+    world.coTutors = [{ lecturerId: "t1", role: "online", lecturer: { status: "active" } }];
+    world.liveSessions = [{
+      id: "room-1", kind: "cohort", title: "Lagos · B1 · October Morning", level: "B1",
+      sessionSlot: "morning", batch: "October", lecturerId: "t1", privateClassId: null,
+    }];
+
+    const result = await runDiagnosis("s1", { includeLive: true });
+    expect(result!.diagnosis.findings.map((finding) => finding.rule)).toContain("live-tutor-room-mismatch");
+    expect(m.liveSessionFind).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([expect.objectContaining({ kind: "cohort", lecturerId: { in: ["t1"] } })]),
+        endedAt: null,
+      }),
+    }));
+
+    m.liveSessionFind.mockClear();
+    await scanDiagnoses();
+    expect(m.liveSessionFind).not.toHaveBeenCalled();
+  });
+
+  it("checks an online private booking against its exact active private live room", async () => {
+    world.classType = "private";
+    world.deliveryMode = "online";
+    world.privateClasses = [{
+      id: "booking-1",
+      lecturerId: "t1",
+      scheduledAt: new Date(Date.now() - 30 * 60_000),
+      durationMinutes: 60,
+      deliveryMode: "online",
+    }];
+
+    const result = await runDiagnosis("s1", { includeLive: true });
+    expect(result!.diagnosis.findings.map((finding) => finding.rule)).toContain("private-live-session-missing");
+    expect(m.liveSessionFind).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([expect.objectContaining({ kind: "private", privateClassId: { in: ["booking-1"] } })]),
+      }),
+    }));
+  });
 });
 
 describe("scanDiagnoses", () => {
@@ -203,7 +293,7 @@ describe("scanDiagnoses", () => {
         id: "s2", studentCode: "EW/2026/B1/SEP/A001", tenantId: "t1", level: "B1", classType: "group",
         admission: { photoUrl: "x.jpg" }, branch: null, createdAt: new Date("2026-09-01T00:00:00.000Z"),
         tuitionCharges: [{ id: "c1", level: "B1", amount: 400_000, waivedAmount: 0, legacyArrears: false, createdAt: new Date("2026-09-01T00:00:00.000Z") }],
-        status: "active", branchId: null, tutorId: null, sessionSlot: "Weekday", deliveryMode: "physical",
+        status: "active", branchId: null, tutorId: null, sessionSlot: "morning", deliveryMode: "physical",
         classesStartedAt: null, enrolments: [world.enrolment],
         user: { id: "u-s2", email: "ada@example.com", name: "Ada", tenantId: "t1" },
       };

@@ -370,6 +370,8 @@ export async function liveSessionForStudent(student: {
    * the exact-slot match: they attend one specific sitting, in a building.
    */
   deliveryMode?: string | null;
+  /** The online half of a hybrid student's selected schedule. */
+  hybridOnlineSlot?: string | null;
   /** Branch row — so an Online-branch student whose `deliveryMode` column was
    *  never set is still treated as attending over video. */
   branch?: { name?: string | null; mode?: string | null } | null;
@@ -472,9 +474,18 @@ export async function liveSessionForStudent(student: {
   const ownTutorIds = new Set(
     [student.tutorId, ...(student.coTutorIds ?? [])].filter((id): id is string => Boolean(id)),
   );
+  const hybridTargetSlot = student.deliveryMode === "hybrid" ? student.hybridOnlineSlot ?? null : null;
   const cohort =
-    liveCohorts.find((room) => room.lecturerId && ownTutorIds.has(room.lecturerId)) ??
+    liveCohorts.find((room) => {
+      if (hybridTargetSlot) return room.sessionSlot === hybridTargetSlot;
+      return room.lecturerId && ownTutorIds.has(room.lecturerId);
+    }) ??
+    liveCohorts.find((room) => {
+      if (hybridTargetSlot) return room.sessionSlot === student.sessionSlot;
+      return room.lecturerId && ownTutorIds.has(room.lecturerId);
+    }) ??
     liveCohorts.find((room) => room.sessionSlot === student.sessionSlot) ??
+    liveCohorts.find((room) => room.lecturerId && ownTutorIds.has(room.lecturerId)) ??
     liveCohorts[0] ??
     null;
 

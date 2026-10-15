@@ -87,6 +87,63 @@ describe("the rules", () => {
     expect(d.rulesRun).toBe(RULES.length);
   });
 
+  it("flags a hybrid student without a usable online sitting", () => {
+    const d = diagnose(base({
+      student: { ...base().student, classType: "group", deliveryMode: "hybrid", sessionSlot: "morning" },
+      classSetup: { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [] },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "class-schedule-setup")).toMatchObject({
+      severity: "problem",
+      title: "The student's class sitting is missing or invalid",
+    });
+  });
+
+  it("flags an online class with no active tutor", () => {
+    const d = diagnose(base({
+      student: { ...base().student, classType: "group", deliveryMode: "online" },
+      classSetup: { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [] },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "class-tutor-assignment")?.severity).toBe("problem");
+  });
+
+  it("reports a private student with no upcoming booked session", () => {
+    const d = diagnose(base({
+      student: { ...base().student, classType: "private", deliveryMode: "online" },
+      classSetup: { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [] },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "private-class-coverage")?.title).toBe(
+      "No upcoming private session is booked",
+    );
+  });
+
+  it("identifies a live same-level tutor room in the wrong slot or intake", () => {
+    const d = diagnose(base({
+      student: {
+        ...base().student,
+        classType: "group",
+        deliveryMode: "hybrid",
+        sessionSlot: "morning",
+        admission: { batch: "September" },
+      },
+      classSetup: {
+        hybridOnlineSlot: "evening",
+        tutors: [{ id: "t1", status: "active", role: "online" }],
+        upcomingPrivateClasses: [],
+        liveSessions: [{
+          id: "room-1",
+          kind: "cohort",
+          title: "Lagos · B1 · October Morning",
+          level: "B1",
+          sessionSlot: "morning",
+          batch: "October",
+          lecturerId: "t1",
+          privateClassId: null,
+        }],
+      },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "live-tutor-room-mismatch")?.severity).toBe("warning");
+  });
+
   it("paid-not-recorded: a problem with one repair offer per transaction, with a plain preview", () => {
     const d = diagnose(base({ paystack: { checked: true, emailChecked: "ada@example.com", transactions: [tx(), tx({ reference: "ref-9", amountKobo: 5_000_000 })] } }));
     const f = d.findings.find((x) => x.rule === "paid-not-recorded")!;

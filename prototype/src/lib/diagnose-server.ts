@@ -33,6 +33,7 @@ import {
 } from "@/lib/diagnose";
 import { buildLedger } from "@/lib/finance/ledger";
 import { guardedFetch, isCircuitOpen } from "@/lib/guarded-fetch";
+import { LIVE_STALE_AFTER_MS } from "@/lib/live-presence";
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { isTravelPackagePathway } from "@/lib/payment";
@@ -146,6 +147,8 @@ export async function fetchPaystackReference(reference: string): Promise<Paystac
 export type LoadOptions = {
   /** Ask Paystack (the "deep check"). */
   paystack?: boolean;
+  /** Include a live-room check for an individual diagnosis; bulk scans omit transient room state. */
+  includeLive?: boolean;
   /** Extra references to look up individually and fold in (a receipt the student sent). */
   extraReferences?: string[];
   /** Reuse an earlier Paystack answer instead of asking again (used when verifying a repair). */
@@ -162,11 +165,14 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       branchId: true,
       tutorId: true,
       sessionSlot: true,
+      tutor: { select: { id: true, status: true } },
+      coTutors: { select: { lecturerId: true, role: true, lecturer: { select: { status: true } } } },
       // tenantId comes off STUDENT_ACCESS_SELECT now (it needs it too, for
       // the intake-start-day override) — declaring it again here duplicates
       // the key.
       user: { select: { id: true, email: true, name: true, tenantId: true } },
       ...STUDENT_ACCESS_SELECT,
+      hybridOnlineSlot: true,
       enrolments: {
         where: { outcome: "ongoing", deletedAt: null },
         orderBy: { createdAt: "desc" },
@@ -184,7 +190,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   });
   if (!student || !student.user) return null;
 
-  const [plan, payments, snapshot] = await Promise.all([
+  const [plan, payments, snapshot, privateClasses] = await Promise.all([
     planStatusForStudent(studentId),
     prisma.payment.findMany({
       where: { studentId },
@@ -196,7 +202,45 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       where: { studentId },
       select: { verdictKey: true, changedAt: true, lastWitnessAt: true, lastWitnessRendered: true },
     }),
+    student.classType === "private"
+      ? prisma.privateClass.findMany({
+          where: { studentId, status: "scheduled", scheduledAt: { gte: new Date(Date.now() - 3 * 60 * 60_000) } },
+          orderBy: { scheduledAt: "asc" },
+          take: 20,
+          select: { id: true, lecturerId: true, scheduledAt: true, durationMinutes: true, deliveryMode: true },
+        })
+      : Promise.resolve([]),
   ]);
+
+  const tutors = [
+    ...(student.tutor ? [{ id: student.tutor.id, status: student.tutor.status, role: "primary" as const }] : []),
+    ...(student.coTutors ?? []).map((tutor) => ({
+      id: tutor.lecturerId,
+      status: tutor.lecturer.status,
+      role: tutor.role === "online" ? ("online" as const) : ("other" as const),
+    })),
+  ];
+  const liveConditions = [
+    ...(tutors.length > 0
+      ? [{ kind: "cohort", lecturerId: { in: tutors.map((tutor) => tutor.id) } }]
+      : []),
+    ...(student.classType === "private" && privateClasses.length > 0
+      ? [{ kind: "private", privateClassId: { in: privateClasses.map((session) => session.id) } }]
+      : []),
+  ];
+  const liveSessions =
+    options.includeLive && liveConditions.length > 0
+      ? await prisma.liveClassSession.findMany({
+          where: {
+            OR: liveConditions,
+            endedAt: null,
+            lastSeenAt: { gte: new Date(Date.now() - LIVE_STALE_AFTER_MS) },
+          },
+          orderBy: { startedAt: "desc" },
+          take: 20,
+          select: { id: true, kind: true, title: true, level: true, sessionSlot: true, batch: true, lecturerId: true, privateClassId: true },
+        })
+      : [];
 
   const access = accessFromStudent(student, planSuppressesLock(plan?.adherence ?? null));
   const hasPhoto = hasProfilePhoto(student.admission);
@@ -257,9 +301,22 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       sessionSlot: student.sessionSlot,
       classType: student.classType,
       deliveryMode: student.deliveryMode,
+      hybridOnlineSlot: student.hybridOnlineSlot,
       createdAt: student.createdAt.toISOString(),
       classesStartedAt: student.classesStartedAt?.toISOString() ?? null,
       admission: student.admission,
+    },
+    classSetup: {
+      hybridOnlineSlot: student.hybridOnlineSlot ?? null,
+      tutors,
+      upcomingPrivateClasses: privateClasses.map((session) => ({
+        id: session.id,
+        lecturerId: session.lecturerId,
+        scheduledAt: session.scheduledAt.toISOString(),
+        durationMinutes: session.durationMinutes,
+        deliveryMode: session.deliveryMode,
+      })),
+      liveSessions,
     },
     user: { id: student.user.id, email: student.user.email, name: student.user.name, tenantId: student.user.tenantId ?? null },
     access: {
