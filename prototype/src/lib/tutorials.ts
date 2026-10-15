@@ -160,7 +160,7 @@ export function buildWelcomeTutorial(onboarding: OnboardingProfile): Tutorial {
         id: "welcome-done",
         route: "/dashboard",
         caption: "You are ready.",
-        narration: "Viel Erfolg. If you forget where something is, everything I showed you is in the menu on the left.",
+        narration: "Viel Erfolg. If you forget where something is, open the Learn tab and you’ll find the rest there.",
         mood: "celebrating",
         autoAdvance: false,
       },

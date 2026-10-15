@@ -15,19 +15,17 @@ type ReferralPromotionData = {
 
 const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
 
-/**
- * The actual sell — concrete cash, not "your school will confirm what you
- * earn." Every student referral code now ships with a real commissionFlat
- * from the moment it's created (see DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT
- * in lib/promo-pricing.ts), so this almost always has a real figure; the
- * generic fallback only shows for an account from before that shipped.
- */
 function rewardLine(data: ReferralPromotionData): string {
   const parts: string[] = [];
-  if (data.commissionPercent) parts.push(`${data.commissionPercent}% of their tuition`);
   if (data.commissionFlat) parts.push(naira(data.commissionFlat));
-  if (!parts.length) return "Cash back on your own tuition for every friend who joins and pays.";
-  return `You get ${parts.join(" + ")} cash back on your own tuition — paid out the moment they pay theirs.`;
+  if (data.commissionPercent) parts.push(`${data.commissionPercent}% of their first tuition payment`);
+  if (!parts.length) return "This referral reward is not available right now. Please contact the school office.";
+  return `Earn ${parts.join(" + ")} as a credit toward your next level’s tuition.`;
+}
+
+function rewardHeadline(data: ReferralPromotionData): string {
+  const amount = data.commissionFlat ?? (!data.commissionPercent ? 5000 : null);
+  return amount ? `Bring a friend. Get ${naira(amount)} closer.` : "Bring a friend. Earn a tuition credit.";
 }
 
 export default function ReferralPromotionMoment() {
@@ -79,7 +77,11 @@ export default function ReferralPromotionMoment() {
   async function shareReferralLink() {
     if (!data?.referralCode) return;
     const link = referralLink(data.referralCode);
-    const shareData = { title: "Join me at EasyWay German Language School", text: "Learn German with me — sign up with my link:", url: link };
+    const shareData = {
+      title: "Join me at EasyWay German Language School",
+      text: `Learn German with me. Sign up with my link, and I can earn ${rewardLine(data)} The reward follows your first qualifying tuition payment and school approval.`,
+      url: link,
+    };
 
     if (navigator.share) {
       try {
@@ -122,9 +124,14 @@ export default function ReferralPromotionMoment() {
 
         <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-amber-700">Refer a friend</p>
         <h2 id="referral-promotion-title" className="mt-2 pr-8 text-2xl font-black leading-tight text-slate-950">
-          Bring a friend, get paid.
+          {rewardHeadline(data)}
         </h2>
         <p className="mt-2 text-sm font-medium text-slate-600">{rewardLine(data)}</p>
+        <ol className="mt-3 space-y-2 text-xs leading-5 text-slate-600">
+          <li><span className="font-bold text-slate-900">1.</span> Share your personal link; your friend uses it to sign up.</li>
+          <li><span className="font-bold text-slate-900">2.</span> Their first qualifying tuition payment activates your reward. The registration fee does not count.</li>
+          <li><span className="font-bold text-slate-900">3.</span> After the school reviews it, the credit is applied to your next-level tuition charge. It is not an instant cash payout.</li>
+        </ol>
 
         {creditedTotal > 0 || pendingCredit > 0 ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">

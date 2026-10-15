@@ -24,8 +24,7 @@ export function resolveDiscountAmount(code: PromoDiscountConfig, grossFee: numbe
 }
 
 /**
- * PLACEHOLDER — not a confirmed business figure, same status as
- * src/lib/growth/commission.ts's PLACEHOLDER_COMMISSION_RATE. Every student
+ * Confirmed student referral reward. Every student
  * referral code used to ship with commissionPercent/commissionFlat both
  * null, so the referral promotion moment (ReferralPromotionMoment.tsx) had
  * nothing concrete to tell a student they'd earn — just "your school will
@@ -35,7 +34,7 @@ export function resolveDiscountAmount(code: PromoDiscountConfig, grossFee: numbe
  * /api/admin/promo-codes/[id] if the school wants to change it for anyone
  * specific; replace this constant to change the default for everyone new.
  */
-export const DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT = 5000; // ₦5,000 cashback per paying referral — NOT CONFIRMED
+export const DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT = 5000;
 
 export type PromoCommissionConfig = {
   commissionPercent: number | null;
@@ -48,4 +47,15 @@ export function resolveCommissionAmount(code: PromoCommissionConfig, paymentAmou
   if (code.commissionPercent) amount += Math.round((paymentAmount * code.commissionPercent) / 100);
   if (code.commissionFlat) amount += code.commissionFlat;
   return Math.max(0, amount);
+}
+
+/** Existing student codes with no stored rate inherit the confirmed flat reward. */
+export function resolveStudentReferralReward(
+  code: PromoCommissionConfig,
+  paymentAmount: number,
+): number {
+  if (code.commissionPercent === null && code.commissionFlat === null) {
+    return DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT;
+  }
+  return resolveCommissionAmount(code, paymentAmount);
 }

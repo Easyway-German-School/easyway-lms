@@ -2547,6 +2547,8 @@ model PromoPayout {
   amount Int
   /// commission (influencer) | referral_credit (student referrer)
   kind   String
+  /// Level the referrer's reward is reserved for, captured when it is earned.
+  creditLevel String?
 
   /// pending | approved | credited
   status       String    @default("pending")

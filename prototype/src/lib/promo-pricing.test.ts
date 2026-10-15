@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCommissionAmount, resolveDiscountAmount } from "./promo-pricing";
+import { resolveCommissionAmount, resolveDiscountAmount, resolveStudentReferralReward } from "./promo-pricing";
 
 describe("resolveDiscountAmount", () => {
   it("combines percent and flat, then caps and floors", () => {
@@ -29,5 +29,16 @@ describe("resolveCommissionAmount", () => {
 
   it("is zero when nothing is configured", () => {
     expect(resolveCommissionAmount({ commissionPercent: null, commissionFlat: null }, 100000)).toBe(0);
+  });
+});
+
+describe("resolveStudentReferralReward", () => {
+  it("uses the confirmed ₦5,000 amount for existing student codes with no configured rate", () => {
+    expect(resolveStudentReferralReward({ commissionPercent: null, commissionFlat: null }, 100000)).toBe(5000);
+  });
+
+  it("honors an explicit percentage or flat amount instead of the default", () => {
+    expect(resolveStudentReferralReward({ commissionPercent: 5, commissionFlat: null }, 100000)).toBe(5000);
+    expect(resolveStudentReferralReward({ commissionPercent: null, commissionFlat: 7500 }, 100000)).toBe(7500);
   });
 });

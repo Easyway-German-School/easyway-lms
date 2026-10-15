@@ -90,7 +90,7 @@ function ShelfRow({
               href={watchHref(video.id)}
               className="group relative w-52 shrink-0 sm:w-64"
             >
-              <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800 ring-1 ring-white/10 transition duration-200 group-hover:scale-[1.04] group-hover:ring-white/40">
+              <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800 transition duration-200 group-hover:scale-[1.04]">
                 <VideoThumb video={video} previewOnHover={previewOnHover} />
 
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
@@ -174,7 +174,7 @@ export default function VideoLibrary({
   }
 
   return (
-    <div className="overflow-hidden rounded-3xl bg-slate-950">
+    <div className="overflow-hidden bg-transparent">
       {billboard ? (
         <div className="relative">
           <div className="relative h-[280px] w-full overflow-hidden sm:h-[400px]">
@@ -219,13 +219,13 @@ export default function VideoLibrary({
         </div>
       ) : null}
 
-      <div className="space-y-8 p-5 sm:p-8">
+      <div className="space-y-8 px-5 pb-5 sm:px-8 sm:pb-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search your videos…"
-            className="w-full max-w-sm rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-white/30 focus:outline-none"
+            className="w-full max-w-sm rounded-xl bg-white/[0.06] px-4 py-2.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-400/70"
           />
           <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
             <input

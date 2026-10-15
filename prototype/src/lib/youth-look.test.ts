@@ -3,37 +3,17 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_LOOK_WAVE, parseLookChoice, parseLookWave, promptFor, resolveLook } from "@/lib/youth-look";
 
 describe("resolveLook", () => {
-  it("puts under-25s on the new look by default", () => {
+  it("puts every student on the new look regardless of age, saved choice, or rollout wave", () => {
     expect(resolveLook({ age: 16, choice: null })).toEqual({ look: "youth", reason: "wave", cohort: "wave", inWave: true });
-    expect(resolveLook({ age: 24, choice: null }).look).toBe("youth");
+    expect(resolveLook({ age: 52, choice: "classic" })).toEqual({ look: "youth", reason: "wave", cohort: "wave", inWave: true });
+    expect(resolveLook({ age: null, choice: null })).toEqual({ look: "youth", reason: "wave", cohort: "wave", inWave: true });
+    expect(resolveLook({ age: undefined, choice: null }).look).toBe("youth");
+    expect(resolveLook({ age: Number.NaN, choice: null }).look).toBe("youth");
   });
 
-  it("leaves 25 and over on the classic look", () => {
-    expect(resolveLook({ age: 25, choice: null })).toEqual({ look: "classic", reason: "default", cohort: "invited", inWave: false });
-    expect(resolveLook({ age: 52, choice: null }).look).toBe("classic");
-  });
-
-  it("does not move a student whose age we cannot work out", () => {
-    expect(resolveLook({ age: null, choice: null }).look).toBe("classic");
-    expect(resolveLook({ age: undefined, choice: null }).look).toBe("classic");
-    expect(resolveLook({ age: Number.NaN, choice: null }).look).toBe("classic");
-  });
-
-  it("lets a wave include unknown ages when the school says so", () => {
+  it("retains parsing of legacy rollout settings without letting them split the student experience", () => {
     const wave = { ...DEFAULT_LOOK_WAVE, includeUnknownAge: true };
-    expect(resolveLook({ age: null, choice: null, wave }).look).toBe("youth");
-  });
-
-  it("lets the school widen the wave without code", () => {
-    const wave = { ...DEFAULT_LOOK_WAVE, maxAge: 34 };
-    expect(resolveLook({ age: 30, choice: null, wave }).look).toBe("youth");
-    expect(resolveLook({ age: 35, choice: null, wave }).look).toBe("classic");
-  });
-
-  it("always honours the student's own choice, in both directions", () => {
-    expect(resolveLook({ age: 60, choice: "youth" })).toEqual({ look: "youth", reason: "chosen", cohort: "invited", inWave: false });
-    expect(resolveLook({ age: 15, choice: "classic" })).toEqual({ look: "classic", reason: "chosen", cohort: "wave", inWave: true });
-    expect(resolveLook({ age: null, choice: "youth" }).look).toBe("youth");
+    expect(resolveLook({ age: null, choice: "classic", wave }).look).toBe("youth");
   });
 });
 
@@ -73,28 +53,12 @@ describe("parseLookChoice", () => {
 });
 
 describe("promptFor", () => {
-  const wave = resolveLook({ age: 17, choice: null });
-  const older = resolveLook({ age: 29, choice: null });
-  const senior = resolveLook({ age: 52, choice: null });
-  const noBirthDate = resolveLook({ age: null, choice: null });
-
-  it("announces to wave students and offers the choice to everyone else, once", () => {
-    expect(promptFor(wave, false)).toBe("announce");
-    expect(promptFor(older, false)).toBe("invite");
-  });
-
-  it("offers the choice at any age, and when no birth date is on file", () => {
-    expect(promptFor(senior, false)).toBe("invite");
-    expect(promptFor(noBirthDate, false)).toBe("invite");
-  });
-
   it("never prompts the same student twice", () => {
-    expect(promptFor(wave, true)).toBeNull();
-    expect(promptFor(older, true)).toBeNull();
+    expect(promptFor(resolveLook({ age: 17, choice: null }), true)).toBeNull();
+    expect(promptFor(resolveLook({ age: 52, choice: "classic" }), true)).toBeNull();
   });
 
-  it("never prompts someone who already picked a look themselves", () => {
-    expect(promptFor(resolveLook({ age: 17, choice: "classic" }), false)).toBeNull();
-    expect(promptFor(resolveLook({ age: 52, choice: "youth" }), false)).toBeNull();
+  it("announces the universal experience rather than offering an age-based choice", () => {
+    expect(promptFor(resolveLook({ age: 52, choice: "classic" }), false)).toBe("announce");
   });
 });

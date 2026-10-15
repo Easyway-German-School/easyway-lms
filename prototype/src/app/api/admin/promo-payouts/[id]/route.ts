@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
+import { nextLevelAfter } from "@/lib/levels";
 import { loadStudentLedger } from "@/lib/tuition-charges";
 
 export const dynamic = "force-dynamic";
@@ -10,10 +11,10 @@ export const dynamic = "force-dynamic";
  * automated payout rail (see src/lib/growth/promo-rewards.ts): crediting is
  * an admin-triggered, auditable bookkeeping action, not a bank transfer.
  *
- *   referral_credit  applied as a waiver on the REFERRER's own oldest open
+ *   referral_credit  applied as a waiver on the REFERRER's next-level open
  *                     TuitionCharge, same mechanism as a scholarship — see
- *                     TuitionCharge.waivedAmount. Falls back to a free-text
- *                     note when the referrer has nothing open to waive.
+ *                     TuitionCharge.waivedAmount. It stays approved until
+ *                     that charge exists.
  *   commission        always a free-text note (an influencer has no in-app
  *                     ledger to credit against — paid off-system).
  */
@@ -33,6 +34,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       status: true,
       amount: true,
       kind: true,
+      creditLevel: true,
       promoCode: { select: { ownerStudentId: true, code: true } },
     },
   });
@@ -55,11 +57,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     let creditedViaChargeId: string | null = null;
+    const ownerStudentId = payout.promoCode.ownerStudentId;
 
-    if (payout.kind === "referral_credit" && payout.promoCode.ownerStudentId) {
-      // ledger.lines is already FIFO-ordered, oldest charge first.
-      const ledger = await loadStudentLedger(payout.promoCode.ownerStudentId);
-      const openLine = ledger.lines.find((line) => line.outstanding > 0 && !line.legacyArrears);
+    if (payout.kind === "referral_credit") {
+      if (!ownerStudentId) {
+        return NextResponse.json(
+          { error: "The student who owns this referral code could not be found." },
+          { status: 409 },
+        );
+      }
+      const owner = await prisma.student.findUnique({
+        where: { id: ownerStudentId },
+        select: { level: true },
+      });
+      const nextLevel = payout.creditLevel ?? (owner ? nextLevelAfter(owner.level) : null);
+      if (!nextLevel) {
+        return NextResponse.json(
+          { error: "There is no next level available to receive this tuition credit yet." },
+          { status: 409 },
+        );
+      }
+
+      const ledger = await loadStudentLedger(ownerStudentId);
+      const openLine = ledger.lines.find(
+        (line) => line.level === nextLevel && line.outstanding > 0 && !line.legacyArrears,
+      );
 
       if (openLine) {
         const charge = await prisma.tuitionCharge.findUnique({
@@ -78,11 +100,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           creditedViaChargeId = charge.id;
         }
       }
+
+      if (!creditedViaChargeId) {
+        return NextResponse.json(
+          { error: `The ${nextLevel} tuition charge is not open yet. Keep this reward approved and credit it when the charge is available.` },
+          { status: 409 },
+        );
+      }
     }
 
-    if (!creditedViaChargeId && !note) {
+    if (payout.kind !== "referral_credit" && !note) {
       return NextResponse.json(
-        { error: "No open charge to waive this against — add a note on how this was paid out." },
+        { error: "Add a note describing how this commission was paid out." },
         { status: 400 },
       );
     }

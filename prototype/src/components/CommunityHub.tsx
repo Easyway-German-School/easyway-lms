@@ -537,6 +537,13 @@ function CommunityHubInner({
 
   const channels = useMemo(() => spaces.flatMap((space) => space.channels), [spaces]);
   const active = useMemo(() => channels.find((c) => c.id === activeId) ?? null, [channels, activeId]);
+  useEffect(() => {
+    if (deepLinkChannel && channels.some((channel) => channel.id === deepLinkChannel)) {
+      // URL search params can change while CommunityHub stays mounted.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveId(deepLinkChannel);
+    }
+  }, [channels, deepLinkChannel]);
   const activeSpace = useMemo(
     () => spaces.find((space) => space.channels.some((c) => c.id === activeId)) ?? null,
     [spaces, activeId],

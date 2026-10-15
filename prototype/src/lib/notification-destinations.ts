@@ -75,9 +75,18 @@ export function storedNotificationLink(kind: string, link?: string | null): stri
 
 function isSamePage(href: string, currentPath: string): boolean {
   if (!currentPath) return false;
-  const dest = href.split("?")[0];
+  const [dest, query] = href.split("?");
   const here = currentPath.split("?")[0];
-  return dest === here;
+  // Query-bearing destinations often select a specific room or record on the
+  // current page; treating them as already-open would discard that context.
+  return dest === here && !query;
+}
+
+function routeCommunityForPortal(href: string, currentPath: string): string {
+  if (currentPath !== "/admin" && !currentPath.startsWith("/admin/")) return href;
+  const [path, query] = href.split("?");
+  if (path !== "/community") return href;
+  return `/admin/community${query ? `?${query}` : ""}`;
 }
 
 export function resolveNotificationHop(input: {
@@ -87,6 +96,7 @@ export function resolveNotificationHop(input: {
 }): NotificationHop {
   let href = rewriteNotificationLink(input.link);
   if (!href) href = hrefForKind(input.kind);
+  if (href) href = routeCommunityForPortal(href, input.currentPath ?? "");
 
   const here = input.currentPath ?? "";
   if (href && isSamePage(href, here)) href = null;

@@ -22,6 +22,7 @@ import { REGISTRATION_FEE } from "@/lib/payment";
 import { SIGNUP_ACCESS_GATE_ENABLED, validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
+import { phoneIdentityKey, sameStudentIdentity } from "@/lib/signup-identity";
 import { openEnrolment } from "@/lib/student-enrolment";
 import {
   archiveDeletedAccountHistory,
@@ -570,7 +571,6 @@ export async function POST(request: NextRequest) {
         { status: 409, headers: buildCorsHeaders(request) }
       );
     }
-    const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
     if (
       emailState.kind === "deleted" &&
       emailState.tenantId !== currentTenantId()
@@ -583,6 +583,88 @@ export async function POST(request: NextRequest) {
         { status: 409, headers: buildCorsHeaders(request) },
       );
     }
+    const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
+    const signupProfile = normalizeProfileInput(normalizedAdmission);
+    const phoneSearch = phoneIdentityKey(
+      signupProfile.phone ?? signupProfile.whatsapp ?? signupProfile.altPhone,
+    )?.slice(-7);
+    const governmentId = signupProfile.govIdNumber?.trim();
+    const governmentIdSearch = governmentId?.replace(/[^a-z0-9]/gi, "").slice(-6);
+    const identityFilters = [
+      ...(phoneSearch
+        ? [
+            { profile: { is: { phone: { contains: phoneSearch } } } },
+            { profile: { is: { altPhone: { contains: phoneSearch } } } },
+            { profile: { is: { whatsapp: { contains: phoneSearch } } } },
+            { admission: { path: ["phone"], string_contains: phoneSearch } },
+            { admission: { path: ["phoneNumber"], string_contains: phoneSearch } },
+            { admission: { path: ["whatsapp"], string_contains: phoneSearch } },
+          ]
+        : []),
+      ...(governmentIdSearch
+        ? [
+            { profile: { is: { govIdNumber: { contains: governmentIdSearch } } } },
+            { admission: { path: ["idNumber"], string_contains: governmentIdSearch } },
+            { admission: { path: ["govIdNumber"], string_contains: governmentIdSearch } },
+          ]
+        : []),
+    ];
+
+    // Email is the primary unique account key. This catches a second email
+    // being used to create the same student's record without treating a
+    // shared family phone number as proof of identity.
+    if (!revivedUserId && identityFilters.length > 0) {
+      const identityCandidates = await prisma.student.findMany({
+        where: { tenantId: currentTenantId(), OR: identityFilters },
+        select: {
+          admission: true,
+          user: { select: { name: true } },
+          profile: {
+            select: {
+              phone: true,
+              altPhone: true,
+              whatsapp: true,
+              dateOfBirth: true,
+              govIdNumber: true,
+            },
+          },
+        },
+      });
+      // The default soft-delete guard hides deleted students. Include them
+      // explicitly so an alternate email cannot create a second identity.
+      const deletedIdentityCandidates = await prisma.student.findMany({
+        where: { tenantId: currentTenantId(), deletedAt: { not: null }, OR: identityFilters },
+        select: {
+          admission: true,
+          user: { select: { name: true } },
+          profile: {
+            select: {
+              phone: true,
+              altPhone: true,
+              whatsapp: true,
+              dateOfBirth: true,
+              govIdNumber: true,
+            },
+          },
+        },
+      });
+      const duplicate = [...identityCandidates, ...deletedIdentityCandidates].some((candidate) =>
+        sameStudentIdentity(
+          { name: normalizedName, admission: normalizedAdmission, profile: signupProfile },
+          { name: candidate.user.name, admission: candidate.admission, profile: candidate.profile },
+        ),
+      );
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            error: "A student account already matches these details. Please sign in with the original email, or contact the school office if your details have changed.",
+            code: "duplicate_student",
+          },
+          { status: 409, headers: buildCorsHeaders(request) },
+        );
+      }
+    }
+
     const promoAttribution = await resolveSignupPromoAttribution(
       promoCodeInput,
       !revivedUserId,

@@ -156,16 +156,16 @@ export function useLook() {
   );
 
   return {
-    look: (state?.look ?? "classic") as Look,
-    reason: state?.reason ?? "default",
-    inWave: state?.inWave ?? false,
+    look: "youth" as Look,
+    reason: "wave" as const,
+    inWave: true,
     avatar: state?.avatar ?? null,
     name: state?.name ?? null,
     /** False until we have any answer at all — callers that must not guess wait on this. */
     ready: state !== null,
     /** Only ever the server's answer — a cached copy must not be able to re-open the popup. */
     prompt: (query.data?.prompt ?? null) as "announce" | "invite" | null,
-    cohort: (state?.cohort ?? "invited") as Cohort,
+    cohort: "wave" as Cohort,
     setLook,
     markPromptSeen,
     declinePrompt,
