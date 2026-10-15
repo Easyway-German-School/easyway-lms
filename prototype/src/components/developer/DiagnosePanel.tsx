@@ -264,8 +264,8 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-bold">Scan the whole school</h2>
             <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-              Check every student against the same live-record rules as an individual diagnosis. The scan is read-only and shows
-              every student with a problem or warning; normal payment locks are not counted as faults.
+              Check student access, class sitting, tutor assignment and private-session setup across the school. The scan is
+              read-only and shows every student with a problem or warning; active live-room checks run in an individual diagnosis.
             </p>
           </div>
           <button
@@ -383,9 +383,9 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
       <section className={card}>
         <h2 className="text-base font-bold">Diagnose a student</h2>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-          When a student complains, find out what is actually wrong. This runs a fixed set of rules against their real records — no
-          guessing, no AI — shows the evidence for every finding, and offers a repair only where one is safe. Nothing changes until you
-          click, and every repair is checked afterwards and written to the audit trail.
+          When a student complains, check payments, portal access, schedule settings, tutor assignments, private bookings and the
+          tutor&apos;s current live room. This runs fixed rules against real records — no guessing, no AI — and shows the evidence.
+          Class and schedule findings are guidance only; they never change student or tutor records automatically.
         </p>
         <div className="relative mt-4">
           <input

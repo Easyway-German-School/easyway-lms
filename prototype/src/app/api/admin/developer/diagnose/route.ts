@@ -44,7 +44,11 @@ export async function POST(request: Request) {
     ? body.references.filter((r): r is string => typeof r === "string" && REFERENCE.test(r)).slice(0, 5)
     : [];
 
-  const result = await runDiagnosis(studentId, { paystack: body.deep === true || references.length > 0, extraReferences: references });
+  const result = await runDiagnosis(studentId, {
+    paystack: body.deep === true || references.length > 0,
+    extraReferences: references,
+    includeLive: true,
+  });
   if (!result) return NextResponse.json({ error: "Student not found" }, { status: 404 });
   return NextResponse.json(result);
 }
