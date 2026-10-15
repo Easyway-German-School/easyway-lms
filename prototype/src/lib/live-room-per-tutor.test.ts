@@ -125,6 +125,22 @@ describe("liveSessionForStudent with two tutors live on one cohort", () => {
     const live = await liveSessionForStudent({ ...student, tutorId: null });
     expect(live?.roomName).toBe("room-2");
   });
+
+  it("prefers the hybrid online slot when the student has changed from morning to evening", async () => {
+    const morning = row("morning", "cmtutorA", "2026-09-26T18:00:00Z");
+    const evening = { ...row("evening", "cmtutorA", "2026-09-26T19:00:00Z"), sessionSlot: "evening" };
+    findManySessions.mockResolvedValueOnce([evening, morning]);
+
+    const live = await liveSessionForStudent({
+      ...student,
+      deliveryMode: "hybrid",
+      sessionSlot: "morning",
+      hybridOnlineSlot: "evening",
+      tutorId: "cmtutorA",
+    });
+
+    expect(live?.roomName).toBe("room-evening");
+  });
 });
 
 /**

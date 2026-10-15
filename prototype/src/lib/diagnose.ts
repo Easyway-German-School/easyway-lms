@@ -41,6 +41,7 @@ import type { Capability } from "@/lib/admin-roles";
 // The ONE definition of "this payment counts as received money". Re-deriving it here is exactly
 // how the paywall drifted apart in thirteen places.
 import { isReceivedPayment } from "@/lib/payment";
+import { studentMayJoinBatch } from "@/lib/class-batch";
 
 // ---------------------------------------------------------------------------
 // Facts — everything the rules may look at. Plain data; no Prisma, no fetch.
@@ -79,11 +80,33 @@ export type Facts = {
     branchId?: string | null;
     tutorId?: string | null;
     sessionSlot?: string;
+    hybridOnlineSlot?: string | null;
     classType?: string;
     deliveryMode?: string;
     createdAt?: string;
     classesStartedAt?: string | null;
     admission?: unknown;
+  };
+  classSetup?: {
+    hybridOnlineSlot: string | null;
+    tutors: Array<{ id: string; status: string; role: "primary" | "online" | "other" }>;
+    upcomingPrivateClasses: Array<{
+      id: string;
+      lecturerId: string | null;
+      scheduledAt: string;
+      durationMinutes: number;
+      deliveryMode: string | null;
+    }>;
+    liveSessions: Array<{
+      id: string;
+      kind: string;
+      title: string;
+      level: string | null;
+      sessionSlot: string | null;
+      batch: string | null;
+      lecturerId: string | null;
+      privateClassId: string | null;
+    }>;
   };
   user: { id: string; email: string; name: string | null; tenantId: string | null };
   access: {
@@ -543,12 +566,243 @@ const ruleStaleScreen: Rule = {
   },
 };
 
+const VALID_PHYSICAL_SLOTS = new Set(["morning", "afternoon", "evening", "weekend"]);
+const VALID_ONLINE_SLOTS = new Set(["morning", "evening"]);
+
+const ruleClassScheduleSetup: Rule = {
+  id: "class-schedule-setup",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (facts.student.status !== "active" || !setup) return null;
+
+    const problems: string[] = [];
+    if (
+      facts.student.deliveryMode === "hybrid" &&
+      (!setup.hybridOnlineSlot || !VALID_ONLINE_SLOTS.has(setup.hybridOnlineSlot.toLowerCase()))
+    ) {
+      problems.push(
+        setup.hybridOnlineSlot
+          ? `online sitting "${setup.hybridOnlineSlot}" is not a supported hybrid sitting`
+          : "online sitting has not been chosen",
+      );
+    }
+    if (
+      facts.student.classType !== "private" &&
+      !VALID_PHYSICAL_SLOTS.has(String(facts.student.sessionSlot ?? "").toLowerCase())
+    ) {
+      problems.push(`class sitting "${facts.student.sessionSlot ?? ""}" is not recognised`);
+    }
+    if (problems.length === 0) return null;
+
+    return {
+      rule: "class-schedule-setup",
+      severity: "problem",
+      title: "The student's class sitting is missing or invalid",
+      detail:
+        `The saved class schedule cannot reliably identify this student's ${facts.student.deliveryMode ?? "class"} ` +
+        `seat (${problems.join("; ")}). This can leave the portal showing the wrong sitting or make the right live class hard to find. ` +
+        "Correct the student's schedule in the student record, then refresh the diagnosis.",
+      evidence: [
+        { label: "Class type", value: facts.student.classType ?? "unknown" },
+        { label: "Delivery mode", value: facts.student.deliveryMode ?? "unknown" },
+        { label: "Campus/primary sitting", value: facts.student.sessionSlot ?? "missing" },
+        { label: "Hybrid online sitting", value: setup.hybridOnlineSlot ?? "missing" },
+      ],
+      offers: [],
+    };
+  },
+};
+
+const ruleTutorAssignmentHealth: Rule = {
+  id: "class-tutor-assignment",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (facts.student.status !== "active" || !setup) return null;
+
+    const activeTutors = setup.tutors.filter((tutor) => tutor.status === "active" || tutor.status === "probation");
+    const hasUpcomingPrivateTutor = setup.upcomingPrivateClasses.some((session) => session.lecturerId);
+    const needsNamedTutor =
+      facts.student.classType === "private" ||
+      facts.student.deliveryMode === "online" ||
+      facts.student.deliveryMode === "hybrid";
+    if (!needsNamedTutor || activeTutors.length > 0 || (facts.student.classType === "private" && hasUpcomingPrivateTutor)) {
+      return null;
+    }
+
+    const inactive = setup.tutors.length > 0;
+    return {
+      rule: "class-tutor-assignment",
+      severity: "problem",
+      title: inactive ? "The assigned class tutor is inactive" : "No active tutor is assigned to this class",
+      detail: inactive
+        ? "Every tutor linked to this student's online/private class is marked inactive. Reassign an active tutor before relying on live-class access."
+        : "This student's online or private class has no named active tutor. The roster and live-class routing use tutor assignments to identify the correct class.",
+      evidence: [
+        { label: "Class type", value: facts.student.classType ?? "unknown" },
+        { label: "Delivery mode", value: facts.student.deliveryMode ?? "unknown" },
+        {
+          label: "Assigned tutors",
+          value: setup.tutors.length
+            ? setup.tutors.map((tutor) => `${tutor.id} (${tutor.status})`).join(", ")
+            : "none",
+        },
+        {
+          label: "Private sessions with a named tutor",
+          value: String(setup.upcomingPrivateClasses.filter((session) => session.lecturerId).length),
+        },
+      ],
+      offers: [],
+    };
+  },
+};
+
+const rulePrivateClassCoverage: Rule = {
+  id: "private-class-coverage",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (facts.student.status !== "active" || facts.student.classType !== "private" || !setup) return null;
+
+    const now = Date.now();
+    const scheduled = setup.upcomingPrivateClasses.filter((session) => new Date(session.scheduledAt).getTime() >= now);
+    if (scheduled.length === 0) {
+      return {
+        rule: "private-class-coverage",
+        severity: "warning",
+        title: "No upcoming private session is booked",
+        detail:
+          "This student is marked as private, but there is no future scheduled one-to-one session. Their private-class calendar and live notifications depend on a booking being present.",
+        evidence: [
+          { label: "Class type", value: "private" },
+          { label: "Upcoming scheduled sessions", value: "0" },
+          { label: "Assigned tutor", value: setup.tutors.find((tutor) => tutor.role === "primary")?.id ?? "none" },
+        ],
+        offers: [],
+      };
+    }
+
+    const primaryTutorId = setup.tutors.find((tutor) => tutor.role === "primary")?.id;
+    const conflicts = scheduled.filter(
+      (session) => primaryTutorId && session.lecturerId && session.lecturerId !== primaryTutorId,
+    );
+    if (conflicts.length === 0) return null;
+
+    return {
+      rule: "private-class-coverage",
+      severity: "warning",
+      title: "A private booking uses a different tutor than the student record",
+      detail:
+        "The booking has its own tutor, which can be an intentional one-session override. Confirm the difference is expected so the tutor roster, live-room host and student notification all point to the intended person.",
+      evidence: conflicts.map((session) => ({
+        label: `Booking ${session.id} · ${new Date(session.scheduledAt).toLocaleDateString()}`,
+        value: `booking tutor ${session.lecturerId}; student tutor ${primaryTutorId}`,
+      })),
+      offers: [],
+    };
+  },
+};
+
+const rulePrivateLiveSessionMissing: Rule = {
+  id: "private-live-session-missing",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (!setup || facts.student.classType !== "private" || facts.student.status !== "active") return null;
+
+    const now = Date.now();
+    const onlineAppointments = setup.upcomingPrivateClasses.filter((session) => {
+      const startsAt = new Date(session.scheduledAt).getTime();
+      const isOnline = ["online", "hybrid"].includes(
+        String(session.deliveryMode ?? facts.student.deliveryMode ?? "").toLowerCase(),
+      );
+      return isOnline && startsAt <= now && startsAt + session.durationMinutes * 60_000 > now;
+    });
+    const missingRooms = onlineAppointments.filter(
+      (booking) => !setup.liveSessions.some((session) => session.privateClassId === booking.id),
+    );
+    if (missingRooms.length === 0) return null;
+
+    return {
+      rule: "private-live-session-missing",
+      severity: "warning",
+      title: "An online private appointment is in progress without an active live room",
+      detail:
+        "The booking is within its scheduled time, but Mission Control cannot find an active live session attached to it. Check that the tutor started the correct private booking and that the session heartbeat is current.",
+      evidence: missingRooms.map((booking) => ({
+        label: `Private booking ${booking.id}`,
+        value: `${new Date(booking.scheduledAt).toLocaleString()} · ${booking.deliveryMode ?? facts.student.deliveryMode ?? "online"}`,
+      })),
+      offers: [],
+    };
+  },
+};
+
+const ruleLiveTutorRoomMismatch: Rule = {
+  id: "live-tutor-room-mismatch",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (
+      !setup ||
+      setup.liveSessions.length === 0 ||
+      facts.student.classType === "private" ||
+      facts.student.status !== "active"
+    ) {
+      return null;
+    }
+
+    const liveTutorIds = new Set(setup.liveSessions.map((session) => session.lecturerId).filter(Boolean));
+    const assignedLiveTutors = setup.tutors.filter((tutor) => liveTutorIds.has(tutor.id));
+    if (assignedLiveTutors.length === 0) return null;
+
+    const sameLevelSessions = setup.liveSessions.filter(
+      (session) =>
+        session.kind === "cohort" &&
+        session.level?.trim().toLowerCase() === facts.student.level.trim().toLowerCase(),
+    );
+    if (sameLevelSessions.length === 0) return null;
+
+    const expectedSlots = new Set(
+      assignedLiveTutors
+        .map((tutor) =>
+          tutor.role === "online" && facts.student.deliveryMode === "hybrid"
+            ? setup.hybridOnlineSlot
+            : facts.student.sessionSlot,
+        )
+        .filter((slot): slot is string => Boolean(slot))
+        .map((slot) => slot.toLowerCase()),
+    );
+    const hasMatchingRoom = sameLevelSessions.some(
+      (session) =>
+        Boolean(session.sessionSlot) &&
+        expectedSlots.has(session.sessionSlot?.toLowerCase() ?? "") &&
+        studentMayJoinBatch(session.batch, facts.student.admission),
+    );
+    if (hasMatchingRoom) return null;
+
+    return {
+      rule: "live-tutor-room-mismatch",
+      severity: "warning",
+      title: "The assigned tutor is live, but not in this student's sitting or intake",
+      detail:
+        "A live session for this student's level is running under one of their assigned tutors, but its sitting or batch does not match this student's saved class details. It may be another group; confirm the tutor started the intended class before asking the student to join.",
+      evidence: sameLevelSessions.map((session) => ({
+        label: session.title,
+        value: `sitting ${session.sessionSlot ?? "not set"} · intake ${session.batch ?? "not pinned"} · room ${session.id}`,
+      })),
+      offers: [],
+    };
+  },
+};
+
 /** The order is the order findings are computed in; severity decides display order. */
 export const RULES: Rule[] = [
   ruleUnrecordedPayment,
   ruleUnreviewedPriorLevelHistory,
   rulePriorLevelBalance,
   ruleTenantMismatch,
+  ruleClassScheduleSetup,
+  ruleTutorAssignmentHealth,
+  rulePrivateClassCoverage,
+  rulePrivateLiveSessionMissing,
+  ruleLiveTutorRoomMismatch,
   ruleStaleScreen,
   ruleMissingLevelCharge,
   ruleCurrentEnrolmentMismatch,
