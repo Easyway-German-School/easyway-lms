@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { cohortRoomName } from "./live-classroom";
-import { liveSessionForStudent, ownOpenCohortRoom } from "./live-presence";
+import { hybridStudentMatchesOnlineSlot, liveSessionForStudent, ownOpenCohortRoom } from "./live-presence";
 import { readAssignment, teachingGroups } from "./lecturer-assignment";
 
 /**
@@ -140,6 +140,19 @@ describe("liveSessionForStudent with two tutors live on one cohort", () => {
     });
 
     expect(live?.roomName).toBe("room-evening");
+    expect(findManySessions.mock.calls[0][0].where).toMatchObject({ sessionSlot: "evening" });
+  });
+});
+
+describe("hybrid live-start notification slot", () => {
+  it("only notifies a hybrid student for their selected online sitting", () => {
+    expect(hybridStudentMatchesOnlineSlot("hybrid", "evening", "evening")).toBe(true);
+    expect(hybridStudentMatchesOnlineSlot("hybrid", "morning", "evening")).toBe(false);
+    expect(hybridStudentMatchesOnlineSlot("hybrid", null, "evening")).toBe(false);
+  });
+
+  it("keeps online-only notifications independent of the hybrid pairing", () => {
+    expect(hybridStudentMatchesOnlineSlot("online", null, "evening")).toBe(true);
   });
 });
 

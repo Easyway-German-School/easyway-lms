@@ -92,6 +92,17 @@ export function mayJoinAnyLiveCohort(deliveryMode?: string | null): boolean {
   return String(deliveryMode ?? "").toLowerCase() === "hybrid";
 }
 
+export function hybridStudentMatchesOnlineSlot(
+  deliveryMode: string | null | undefined,
+  hybridOnlineSlot: string | null | undefined,
+  sessionSlot: string,
+): boolean {
+  return (
+    String(deliveryMode ?? "").toLowerCase() !== "hybrid" ||
+    Boolean(hybridOnlineSlot && hybridOnlineSlot.toLowerCase() === sessionSlot.toLowerCase())
+  );
+}
+
 export type LiveSessionRow = {
   id: string;
   roomName: string;
@@ -430,6 +441,8 @@ export async function liveSessionForStudent(student: {
     canAttendLive(student.deliveryMode, student.classType) ||
     isOnlineBranch(student.branch ?? null);
   const mayJoinAnyCohortFlag = mayJoinAnyLiveCohort(student.deliveryMode);
+  const hybridTargetSlot =
+    student.deliveryMode === "hybrid" ? student.hybridOnlineSlot?.toLowerCase() ?? null : null;
 
   // THE BATCH IS PART OF THE CLASS. A room pinned to the October batch is not
   // the September student's class even when branch, level and sitting all
@@ -458,7 +471,11 @@ export async function liveSessionForStudent(student: {
         kind: "cohort",
         branchId: student.branchId,
         level: student.level,
-        ...(attendsOverVideo && mayJoinAnyCohortFlag ? {} : { sessionSlot: student.sessionSlot }),
+        ...(attendsOverVideo && mayJoinAnyCohortFlag
+          ? hybridTargetSlot
+            ? { sessionSlot: hybridTargetSlot }
+            : {}
+          : { sessionSlot: student.sessionSlot }),
         ...liveWhere(now),
       },
       include: { lecturer: { select: { user: { select: { name: true } } } } },
@@ -474,17 +491,16 @@ export async function liveSessionForStudent(student: {
   const ownTutorIds = new Set(
     [student.tutorId, ...(student.coTutorIds ?? [])].filter((id): id is string => Boolean(id)),
   );
-  const hybridTargetSlot = student.deliveryMode === "hybrid" ? student.hybridOnlineSlot ?? null : null;
   const cohort =
     liveCohorts.find((room) => {
-      if (hybridTargetSlot) return room.sessionSlot === hybridTargetSlot;
+      if (hybridTargetSlot) return room.sessionSlot?.toLowerCase() === hybridTargetSlot;
       return room.lecturerId && ownTutorIds.has(room.lecturerId);
     }) ??
     liveCohorts.find((room) => {
-      if (hybridTargetSlot) return room.sessionSlot === student.sessionSlot;
+      if (hybridTargetSlot) return room.sessionSlot?.toLowerCase() === student.sessionSlot.toLowerCase();
       return room.lecturerId && ownTutorIds.has(room.lecturerId);
     }) ??
-    liveCohorts.find((room) => room.sessionSlot === student.sessionSlot) ??
+    liveCohorts.find((room) => room.sessionSlot?.toLowerCase() === student.sessionSlot.toLowerCase()) ??
     liveCohorts.find((room) => room.lecturerId && ownTutorIds.has(room.lecturerId)) ??
     liveCohorts[0] ??
     null;
@@ -684,6 +700,7 @@ export function announceLiveToNamedStudents(session: LiveSessionRow, studentIds:
  */
 export async function announceLiveToVideoStudents(session: LiveSessionRow): Promise<void> {
   if (session.kind !== "cohort" || !session.branchId || !session.level || !session.sessionSlot) return;
+  const sessionSlot = session.sessionSlot;
 
   const found = await prisma.student.findMany({
     where: {
@@ -701,10 +718,12 @@ export async function announceLiveToVideoStudents(session: LiveSessionRow): Prom
         { branch: { is: { mode: "online" } } },
       ],
     },
-    select: { id: true, admission: true },
+    select: { id: true, admission: true, deliveryMode: true, hybridOnlineSlot: true },
   });
   // Only this batch's students — the other batch's class is not theirs.
-  const candidates = onlyBatchStudents(session, found);
+  const candidates = onlyBatchStudents(session, found).filter(
+    (student) => hybridStudentMatchesOnlineSlot(student.deliveryMode, student.hybridOnlineSlot, sessionSlot),
+  );
   if (!candidates.length) return;
 
   const reachable = await studentsWhoCanEnterLiveClass(candidates.map((s) => s.id));

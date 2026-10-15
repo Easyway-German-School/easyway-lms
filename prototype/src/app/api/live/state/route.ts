@@ -38,6 +38,7 @@ export async function GET() {
           branchId: true,
           level: true,
           sessionSlot: true,
+          hybridOnlineSlot: true,
           classType: true,
           deliveryMode: true,
           // So a named student sees their tutor's live class even when their
