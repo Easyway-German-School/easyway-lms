@@ -123,6 +123,7 @@ export type Facts = {
     tuitionFee: number;
     requiredDeposit: number;
     outstanding: number;
+    currentLevelOutstanding?: number;
     graceUntil: string | null;
     batchLabel: string | null;
   };
@@ -130,6 +131,9 @@ export type Facts = {
     currentLevelChargeExists: boolean;
     currentChargeId: string | null;
     currentChargeAmount: number | null;
+    currentChargeWaivedAmount?: number | null;
+    currentChargeAllocated?: number;
+    expectedCurrentChargeAmount?: number | null;
     ongoingEnrolment: {
       id: string;
       level: string;
@@ -146,6 +150,7 @@ export type Facts = {
   payments: PaymentFact[];
   /** Confirmed open tuition on earlier levels, which can hold portal access. */
   priorLevelArrears: Array<{ chargeId: string; level: string; outstanding: number }>;
+  registrationFeePayments?: Array<{ amount: number; description: string }>;
   /** Inferred backfill charges that need a staff decision before collection. */
   unreviewedPriorLevels?: Array<{ level: string; potentialOutstanding: number }>;
   /** What the student's own browser last reported (Phase 2's witness), if it ever has. */
@@ -160,7 +165,11 @@ export type Facts = {
 
 export type Severity = "problem" | "warning" | "info";
 
-export type RepairId = "record_paystack_payment" | "assign_student_code" | "sync_tuition_charge";
+export type RepairId =
+  | "record_paystack_payment"
+  | "assign_student_code"
+  | "sync_tuition_charge"
+  | "reprice_current_tuition";
 
 export type RepairOffer = {
   id: RepairId;
@@ -439,6 +448,88 @@ const ruleCurrentEnrolmentMismatch: Rule = {
           params: {},
         },
       ],
+    };
+  },
+};
+
+const ruleCurrentTuitionUnderpricedByRegistrationFee: Rule = {
+  id: "current-tuition-underpriced-by-registration-fee",
+  run(facts) {
+    const alignment = facts.levelAlignment;
+    const expected = alignment?.expectedCurrentChargeAmount;
+    const actual = alignment?.currentChargeAmount;
+    if (
+      !alignment?.currentLevelChargeExists ||
+      expected === null ||
+      expected === undefined ||
+      actual === null ||
+      actual === undefined ||
+      alignment.currentChargeAllocated !== 0 ||
+      (alignment.currentChargeWaivedAmount ?? 0) !== 0 ||
+      expected - actual !== 5_000
+    ) {
+      return null;
+    }
+
+    return {
+      rule: "current-tuition-underpriced-by-registration-fee",
+      severity: "problem",
+      title: `${facts.student.level} tuition is ₦5,000 below the current price`,
+      detail:
+        `The unpaid ${facts.student.level} charge is ${naira(actual)}, exactly ₦5,000 below the current ` +
+        `price of ${naira(expected)}. A registration fee must never be deducted from returning-student tuition.`,
+      evidence: [
+        { label: "Current level", value: facts.student.level },
+        { label: "Saved tuition charge", value: naira(actual) },
+        { label: "Current price-book tuition", value: naira(expected) },
+        { label: "Applied to this charge", value: naira(alignment.currentChargeAllocated ?? 0) },
+      ],
+      offers: [
+        {
+          id: "reprice_current_tuition",
+          label: `Correct ${facts.student.level} tuition to ${naira(expected)}`,
+          preview:
+            `Correct the unpaid ${facts.student.level} charge from ${naira(actual)} to ${naira(expected)} ` +
+            "and sync the current enrolment. No payment or registration fee will be changed.",
+          needs: "payments",
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
+const ruleRegistrationFeeCountedTowardTuition: Rule = {
+  id: "registration-fee-counted-toward-tuition",
+  run(facts) {
+    const fee = Math.max(0, Math.round(facts.access.tuitionFee));
+    const outstanding = facts.access.currentLevelOutstanding;
+    if (
+      outstanding === undefined ||
+      fee <= outstanding ||
+      (facts.levelAlignment?.currentChargeWaivedAmount ?? 0) > 0
+    ) {
+      return null;
+    }
+    const apparentCredit = fee - outstanding;
+    const registrationCredit = (facts.registrationFeePayments ?? [])
+      .filter((payment) => payment.amount > 0)
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    if (apparentCredit !== registrationCredit || registrationCredit === 0) return null;
+
+    return {
+      rule: "registration-fee-counted-toward-tuition",
+      severity: "problem",
+      title: "A registration fee appears to have reduced the tuition balance",
+      detail:
+        `The ${facts.student.level} balance is ${naira(apparentCredit)} below its ${naira(fee)} tuition fee, ` +
+        "matching registration-fee payments. Registration fees are separate and must not count toward tuition.",
+      evidence: [
+        { label: "Tuition fee", value: naira(fee) },
+        { label: "Current-level balance", value: naira(outstanding) },
+        { label: "Registration-fee payments", value: naira(registrationCredit) },
+      ],
+      offers: [],
     };
   },
 };
@@ -806,6 +897,8 @@ export const RULES: Rule[] = [
   ruleStaleScreen,
   ruleMissingLevelCharge,
   ruleCurrentEnrolmentMismatch,
+  ruleCurrentTuitionUnderpricedByRegistrationFee,
+  ruleRegistrationFeeCountedTowardTuition,
   ruleMissingCode,
   rulePortalLocked,
 ];

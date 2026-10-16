@@ -36,7 +36,14 @@ import { guardedFetch, isCircuitOpen } from "@/lib/guarded-fetch";
 import { LIVE_STALE_AFTER_MS } from "@/lib/live-presence";
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
-import { isTravelPackagePathway } from "@/lib/payment";
+import {
+  isReceivedPayment,
+  isRegistrationFeePayment,
+  RECEIVED_PAYMENT_STATUSES,
+  REGISTRATION_PAYMENT_DESCRIPTION_PREFIX,
+  isTravelPackagePathway,
+  tuitionFeeFor,
+} from "@/lib/payment";
 import { portalVerdict } from "@/lib/portal-verdict";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
@@ -44,7 +51,7 @@ import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
 import { batchFromAdmission, resolveBatchWindow } from "@/lib/batch";
 import { assignStudentCode } from "@/lib/student-code";
 import { openEnrolment } from "@/lib/student-enrolment";
-import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { ensureChargeForLevel, reconcileCurrentLevelChargeForPathway } from "@/lib/tuition-charges";
 
 // ---------------------------------------------------------------------------
 // Finding the student
@@ -190,13 +197,13 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   });
   if (!student || !student.user) return null;
 
-  const [plan, payments, snapshot, privateClasses] = await Promise.all([
+  const [plan, payments, snapshot, privateClasses, registrationFeePayments] = await Promise.all([
     planStatusForStudent(studentId),
     prisma.payment.findMany({
       where: { studentId },
       orderBy: { createdAt: "desc" },
       take: 200,
-      select: { id: true, amount: true, status: true, method: true, stripeSessionId: true, paymentIntentId: true, createdAt: true },
+      select: { id: true, amount: true, status: true, method: true, description: true, stripeSessionId: true, paymentIntentId: true, createdAt: true },
     }),
     prisma.accessSnapshot.findUnique({
       where: { studentId },
@@ -210,6 +217,15 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
           select: { id: true, lecturerId: true, scheduledAt: true, durationMinutes: true, deliveryMode: true },
         })
       : Promise.resolve([]),
+    prisma.payment.findMany({
+      where: {
+        studentId,
+        deletedAt: null,
+        status: { in: [...RECEIVED_PAYMENT_STATUSES] },
+        description: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" },
+      },
+      select: { amount: true, description: true },
+    }),
   ]);
 
   const tutors = [
@@ -260,6 +276,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   // `receivedPaymentFilter()`), matching what `accessFromStudent` fed into the lock.
   const ledger = buildLedger(student.tuitionCharges ?? [], access.totalPaid, new Date(), student.payments ?? []);
   const currentLevelKey = String(student.level ?? "").trim().toUpperCase();
+  const currentLevelLine = ledger.lines.find((line) => line.level.trim().toUpperCase() === currentLevelKey) ?? null;
   const priorLevelArrears = ledger.lines
     .filter(
       (line) =>
@@ -324,6 +341,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       lockReason: access.lockReason,
       totalPaid: access.totalPaid,
       currentLevelPaid: access.currentLevelPaid,
+      currentLevelOutstanding: access.currentLevelOutstanding,
       tuitionFee: access.tuitionFee,
       requiredDeposit: access.requiredDeposit,
       outstanding: access.outstanding,
@@ -336,6 +354,16 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       currentChargeAmount: currentLevelCharge
         ? Math.max(0, currentLevelCharge.amount - (currentLevelCharge.waivedAmount ?? 0))
         : null,
+      currentChargeWaivedAmount: currentLevelCharge?.waivedAmount ?? 0,
+      currentChargeAllocated: currentLevelLine?.allocated ?? 0,
+      expectedCurrentChargeAmount: currentLevelCharge
+        ? tuitionFeeFor({
+            level: student.level,
+            branch: student.branch?.name ?? null,
+            classType: student.classType,
+            pathway: student.pathway,
+          })
+        : null,
       ongoingEnrolment: student.enrolments?.[0] ?? null,
       expectedBatchMonth,
       expectedBatchYear: expectedBatch?.year ?? null,
@@ -343,6 +371,9 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
     hasPhoto,
     verdict: portalVerdict(access, hasPhoto),
     priorLevelArrears,
+    registrationFeePayments: registrationFeePayments
+      .filter((payment) => isRegistrationFeePayment(payment.description))
+      .map((payment) => ({ amount: payment.amount, description: payment.description ?? "" })),
     unreviewedPriorLevels,
     payments: payments.map((p) => ({
       id: p.id,
@@ -585,6 +616,56 @@ const REPAIRS: Record<RepairId, RepairDef> = {
       !diagnosis.findings.some(
         (f) => f.rule === "missing-level-charge" || f.rule === "current-enrolment-mismatch",
       ),
+  },
+
+  reprice_current_tuition: {
+    needs: "payments",
+    needsPaystack: false,
+    stillApplies: (finding) =>
+      finding.rule === "current-tuition-underpriced-by-registration-fee",
+    async act(facts) {
+      const result = await reconcileCurrentLevelChargeForPathway(facts.student.id);
+      if (!result) return { ok: false, message: "Could not read the current tuition charge." };
+      if (result.reason === "already_paid") {
+        return { ok: false, message: "A payment has now been allocated to this charge. No price was changed; review it manually." };
+      }
+      if (!result.repriced) {
+        return { ok: false, message: "The charge no longer needs repricing. Refresh the diagnosis before taking another action." };
+      }
+
+      const alignment = facts.levelAlignment;
+      if (alignment?.ongoingEnrolment) {
+        const updated = await prisma.studentEnrolment.updateMany({
+          where: {
+            id: alignment.ongoingEnrolment.id,
+            studentId: facts.student.id,
+            outcome: "ongoing",
+            deletedAt: null,
+          },
+          data: { feeSnapshot: result.to, tuitionChargeId: alignment.currentChargeId },
+        });
+        if (updated.count !== 1) {
+          return { ok: false, message: "The tuition charge was corrected, but the current enrolment changed during the repair. Refresh and review its fee snapshot." };
+        }
+      }
+
+      await writeAudit(
+        unguardedPrisma,
+        {
+          action: "correctedUnderpricedTuitionCharge",
+          model: "TuitionCharge",
+          recordId: alignment?.currentChargeId ?? undefined,
+          before: { level: result.level, amount: result.from },
+          after: { level: result.level, amount: result.to, studentId: facts.student.id },
+          severity: "high",
+          summary: `Corrected an unpaid ${result.level} charge that was underpriced by the registration fee.`,
+        },
+        { required: true },
+      );
+      return { ok: true, message: `Corrected ${result.level} tuition from ${naira(result.from)} to ${naira(result.to)}. No payment was changed.` };
+    },
+    resolved: (diagnosis) =>
+      !diagnosis.findings.some((finding) => finding.rule === "current-tuition-underpriced-by-registration-fee"),
   },
 
 };

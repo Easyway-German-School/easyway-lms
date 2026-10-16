@@ -196,6 +196,39 @@ describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
       expect(access.hasAccess).toBe(true);
       expect(access.lockReason).toBeNull();
     });
+
+    it("keeps an earlier-level payment off the current-level tuition balance", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 5_000,
+        tuitionFee: 150_000,
+        requiredDeposit: 90_000,
+        level: "A2",
+        charges: [
+          { id: "a1", level: "A1", amount: 150_000, legacyArrears: false, createdAt: daysAgo(90) },
+          { id: "a2", level: "A2", amount: 150_000, legacyArrears: false, createdAt: daysAgo(1) },
+        ],
+        payments: [{ amount: 5_000, level: "A1", description: "A1 tuition", createdAt: daysAgo(90) }],
+        now: NOW,
+      });
+
+      expect(access.currentLevelOutstanding).toBe(150_000);
+      expect(access.previousLevelOutstanding).toBe(145_000);
+    });
+
+    it("uses labelled payment levels when a returning student has no ledger charges yet", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 5_000,
+        tuitionFee: 150_000,
+        requiredDeposit: 90_000,
+        level: "A2",
+        charges: [],
+        payments: [{ amount: 5_000, level: "A1", description: "A1 tuition", createdAt: daysAgo(90) }],
+        now: NOW,
+      });
+
+      expect(access.currentLevelPaid).toBe(0);
+      expect(access.currentLevelOutstanding).toBe(150_000);
+    });
   });
 
   it("opens the portal on the first day for someone who has paid", () => {

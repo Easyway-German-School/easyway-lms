@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { isValidPaymentStatus, PAYMENT_STATUSES } from "@/lib/payment";
+import { buildLedger } from "@/lib/finance/ledger";
+import { LEVELS } from "@/lib/levels";
+import { isValidPaymentStatus, PAYMENT_STATUSES, receivedPaymentFilter } from "@/lib/payment";
 import { resolvePaymentLevel } from "@/lib/payment-level";
 
 export async function GET(request: Request) {
@@ -171,12 +173,72 @@ export async function GET(request: Request) {
     ? unpaidRows.length
     : search ? allRows.length : (await prisma.payment.count({ where })) + unpaidRows.length;
   const pageRows = search ? allRows.slice((page - 1) * pageSize, page * pageSize) : filtered;
+  const studentIds = [...new Set(pageRows.flatMap((row) => (row.student?.id ? [row.student.id] : [])))];
+  const [charges, tuitionPayments] = studentIds.length
+    ? await Promise.all([
+        prisma.tuitionCharge.findMany({
+          where: { studentId: { in: studentIds }, deletedAt: null },
+          select: {
+            id: true,
+            studentId: true,
+            level: true,
+            amount: true,
+            waivedAmount: true,
+            legacyArrears: true,
+            historyStatus: true,
+            historicalPaidAmount: true,
+            createdAt: true,
+          },
+        }),
+        prisma.payment.findMany({
+          where: { studentId: { in: studentIds }, ...receivedPaymentFilter() },
+          select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
+        }),
+      ])
+    : [[], []];
+  const chargesByStudent = new Map<string, typeof charges>();
+  for (const charge of charges) {
+    const group = chargesByStudent.get(charge.studentId) ?? [];
+    group.push(charge);
+    chargesByStudent.set(charge.studentId, group);
+  }
+  const paymentsByStudent = new Map<string, typeof tuitionPayments>();
+  for (const payment of tuitionPayments) {
+    const group = paymentsByStudent.get(payment.studentId) ?? [];
+    group.push(payment);
+    paymentsByStudent.set(payment.studentId, group);
+  }
+  const previousDebtByStudent = new Map<string, number>();
+  for (const row of pageRows) {
+    const studentId = row.student?.id;
+    if (!studentId || previousDebtByStudent.has(studentId)) continue;
+    const currentIndex = (LEVELS as readonly string[]).indexOf(String(row.student.level ?? "").trim().toUpperCase());
+    const studentCharges = chargesByStudent.get(studentId) ?? [];
+    const studentPayments = paymentsByStudent.get(studentId) ?? [];
+    const totalPaid = studentPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    const ledger = buildLedger(studentCharges, totalPaid, new Date(), studentPayments);
+    const previousOutstanding = currentIndex < 0
+      ? 0
+      : ledger.lines
+          .filter((line) => {
+            const levelIndex = (LEVELS as readonly string[]).indexOf(line.level.trim().toUpperCase());
+            return levelIndex >= 0 && levelIndex < currentIndex;
+          })
+          .reduce((sum, line) => sum + line.outstanding, 0);
+    previousDebtByStudent.set(studentId, previousOutstanding);
+  }
   const paymentsForDesk = pageRows.map((row) =>
     row.status === "not_paid"
       ? row
       : {
           ...row,
           level: resolvePaymentLevel({ stamped: row.level, description: row.description }),
+          student: row.student
+            ? {
+                ...row.student,
+                previousLevelOutstanding: previousDebtByStudent.get(row.student.id) ?? 0,
+              }
+            : null,
         },
   );
 
