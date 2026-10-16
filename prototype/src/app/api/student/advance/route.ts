@@ -4,10 +4,11 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { monthsSinceBatchStart } from "@/lib/promotion";
 import { nextLevelAfter, SESSION_MONTHS, WEEKS_OF_TEACHING, sessionDurationMonths, weeksOfTeachingFor } from "@/lib/levels";
-import { isLevelSellable, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { ADVANCE_PERKS, perWeekCost, type LevelAdvanceOffer } from "@/lib/level-advance";
 import { buildCountdown } from "@/lib/germany-journey";
 import { KIND, notify } from "@/lib/notify";
+import { getStudentAccess } from "@/lib/student-access";
 
 export const dynamic = "force-dynamic";
 
@@ -70,17 +71,21 @@ export async function GET() {
     // when the school says it is over.
     const eligible = student.levelCompletedFor === currentLevel && student.levelCompletedAt !== null;
 
-    const totalPaid = student.payments
-      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-      .reduce((sum, payment) => sum + payment.amount, 0);
     // pathway is passed through so an Exam Preparatory (or Travel Package)
     // student is quoted their own ladder here, not the ordinary group/private
     // price — the same fee `ensureChargeForLevel` will actually bill them.
-    const currentFee = tuitionFeeFor({ level: currentLevel, branch: branchName, pathway: student.pathway });
-    const currentLevelOutstanding = Math.max(0, currentFee - totalPaid);
+    const feeLookup = {
+      level: currentLevel,
+      branch: branchName,
+      classType: student.classType,
+      pathway: student.pathway,
+    };
+    const access = await getStudentAccess(student.id);
+    const currentFee = access?.tuitionFee ?? tuitionFeeFor(feeLookup);
+    const currentLevelOutstanding = access?.currentLevelOutstanding ?? currentFee;
 
     const nextFee = nextLevel
-      ? tuitionFeeFor({ level: nextLevel, branch: branchName, pathway: student.pathway })
+      ? tuitionFeeFor({ ...feeLookup, level: nextLevel })
       : 0;
 
     const offer: LevelAdvanceOffer = {
@@ -104,7 +109,7 @@ export async function GET() {
       sessionMonths: sessionDurationMonths(student.sessionSlot),
       weeksOfTeaching: weeksOfTeachingFor(student.sessionSlot),
       tuitionFee: nextFee,
-      requiredDeposit: nextLevel ? requiredDepositFor({ level: nextLevel, branch: branchName }) : 0,
+      requiredDeposit: nextLevel ? requiredDepositFor({ ...feeLookup, level: nextLevel }) : 0,
       perWeek: perWeekCost(nextFee, weeksOfTeachingFor(student.sessionSlot)),
       sellableOnline: nextLevel ? isLevelSellable(nextLevel) : false,
       currentLevelOutstanding,

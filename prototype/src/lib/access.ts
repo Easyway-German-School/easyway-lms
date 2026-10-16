@@ -330,6 +330,13 @@ export function deriveStudentAccess({
         return sum + Math.max(0, Math.round(Number(payment.amount) || 0));
       }, 0)
     : 0;
+  const hasPaymentsFromOtherLevels = currentLevelKey
+    ? (payments ?? []).some((payment) => {
+        const paymentLevel = resolvePaymentLevel(payment);
+        return paymentLevel !== null && paymentLevel !== currentLevelKey;
+      })
+    : false;
+  const currentLevelPaidWithoutLedger = hasPaymentsFromOtherLevels ? currentLevelPayments : paid;
   const missingCurrentCharge = Boolean(ledger && ledger.lines.length > 0 && !currentLine);
   const currentLevelPaid = missingCurrentCharge ? currentLevelPayments : 0;
   const currentLevelPosition = (LEVELS as readonly string[]).indexOf(currentLevelKey);
@@ -366,8 +373,8 @@ export function deriveStudentAccess({
           ? deposit > 0 ? currentLevelPaid >= deposit : currentLevelPaid >= fee
           : deposit > 0 ? paid >= deposit : paid >= fee
       : deposit > 0
-        ? paid >= deposit
-        : paid >= fee;
+          ? currentLevelPaidWithoutLedger >= deposit
+          : currentLevelPaidWithoutLedger >= fee;
 
   // What must be cleared to lift the current-level balance lock.
   const outstandingBalance = paidOtherLevelsOnly
@@ -375,7 +382,7 @@ export function deriveStudentAccess({
     : ledger
       ? ledger.goForwardOutstanding +
         (missingCurrentCharge ? Math.max(0, fee - currentLevelPaid) : 0)
-      : Math.max(0, fee - paid);
+      : Math.max(0, fee - currentLevelPaidWithoutLedger);
   const lifetimeOutstanding = ledger?.lifetimeOutstanding ?? Math.max(0, fee - paid);
   const currentLevelOutstanding = paidOtherLevelsOnly
     ? Math.max(0, fee - currentLevelPaid)
@@ -385,7 +392,7 @@ export function deriveStudentAccess({
         : missingCurrentCharge
           ? Math.max(0, fee - currentLevelPaid)
           : Math.max(0, fee - paid)
-      : Math.max(0, fee - paid);
+        : Math.max(0, fee - currentLevelPaidWithoutLedger);
   const fullPaid = currentLevelOutstanding <= 0;
 
   // Waiting for an intake that has not opened yet.
@@ -462,7 +469,7 @@ export function deriveStudentAccess({
       ? currentLevelPaid
       : paidOtherLevelsOnly
         ? 0
-        : paid;
+        : currentLevelPaidWithoutLedger;
   const outstandingDeposit = Math.max(0, currentLevelDeposit - towardDeposit);
   const progressPercent = currentLevelDeposit > 0
     ? Math.min(100, Math.round((towardDeposit / currentLevelDeposit) * 100))
@@ -475,7 +482,7 @@ export function deriveStudentAccess({
       ? Math.min(100, Math.round((ledger.lifetimeAllocated / ledger.lifetimeCharged) * 100))
       : 100
     : fee > 0
-      ? Math.min(100, Math.round((paid / fee) * 100))
+      ? Math.min(100, Math.round((currentLevelPaidWithoutLedger / fee) * 100))
       : 0;
 
   return {

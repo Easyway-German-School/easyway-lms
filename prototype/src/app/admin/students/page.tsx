@@ -1977,7 +1977,7 @@ function StudentsRoster() {
                 <th className="px-6 py-4">Name</th>
                 <th className="px-6 py-4">Email</th>
                 <th className="px-6 py-4">Branch</th>
-                <th className="px-6 py-4">Starting class</th>
+                <th className="px-6 py-4">Current level</th>
                 <th className="px-6 py-4">Batch</th>
                 {/* What the student said Germany is FOR. It is the single most
                     useful thing about them at a front desk — the conversation
@@ -2196,7 +2196,7 @@ function StudentsRoster() {
                     </td>
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
-                    <td className="px-6 py-4">{student.admission && typeof student.admission === "object" && (student.admission as any).classApplied ? String((student.admission as any).classApplied) : (student.level || "—")}</td>
+                    <td className="px-6 py-4">{student.level || "—"}</td>
                     <td className="px-6 py-4">{typeof student.admission === "object" && student.admission && !Array.isArray(student.admission) && (student.admission as Record<string, unknown>).batch ? String((student.admission as Record<string, unknown>).batch) : "—"}</td>
                     <td className="px-6 py-4">
                       {student.germanyGoal ? (

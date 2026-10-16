@@ -11,6 +11,8 @@ import {
   travelPackagePrice,
   travelPackageMinFirstPayment,
   hasPaidAnyTuition,
+  isRegistrationFeePayment,
+  receivedPaymentFilter,
 } from "./payment";
 
 /**
@@ -338,6 +340,23 @@ suite("resolvePartialPaymentAmount — Travel Package's ₦200k-then-flexible sh
 suite("hasPaidAnyTuition — gate for the enrolment letter", () => {
   it("is false for a student with no payments", () => {
     expect(hasPaidAnyTuition([])).toBe(false);
+  });
+
+  suite("registration fee exclusion", () => {
+    it("recognizes registration-fee descriptions regardless of case or surrounding text", () => {
+      expect(isRegistrationFeePayment("Registration fee for Language training")).toBe(true);
+      expect(isRegistrationFeePayment(" registration FEE for returning student ")).toBe(true);
+      expect(isRegistrationFeePayment("Tuition payment for A2")).toBe(false);
+    });
+
+    it("uses a case-insensitive database predicate so registration never reduces tuition", () => {
+      expect(receivedPaymentFilter()).toMatchObject({
+        OR: [
+          { description: null },
+          { description: { not: { contains: "Registration fee", mode: "insensitive" } } },
+        ],
+      });
+    });
   });
 
   it("is false when only the registration fee has been paid", () => {

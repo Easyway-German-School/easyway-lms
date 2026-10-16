@@ -87,6 +87,35 @@ describe("the rules", () => {
     expect(d.rulesRun).toBe(RULES.length);
   });
 
+  it("detects an unpaid current charge short by exactly the registration fee", () => {
+    const findings = diagnose(base({
+      levelAlignment: {
+        currentLevelChargeExists: true,
+        currentChargeId: "charge-a2",
+        currentChargeAmount: 145_000,
+        currentChargeWaivedAmount: 0,
+        currentChargeAllocated: 0,
+        expectedCurrentChargeAmount: 150_000,
+        ongoingEnrolment: null,
+        expectedBatchMonth: null,
+        expectedBatchYear: null,
+      },
+      access: { ...base().access, tuitionFee: 145_000, currentLevelOutstanding: 145_000 },
+    })).findings;
+
+    expect(findings.find((finding) => finding.rule === "current-tuition-underpriced-by-registration-fee")?.offers[0])
+      .toMatchObject({ id: "reprice_current_tuition", needs: "payments" });
+  });
+
+  it("detects when a registration payment matches the amount missing from current tuition", () => {
+    const findings = diagnose(base({
+      access: { ...base().access, tuitionFee: 150_000, currentLevelOutstanding: 145_000 },
+      registrationFeePayments: [{ amount: 5_000, description: "registration fee for language training" }],
+    })).findings;
+
+    expect(findings.find((finding) => finding.rule === "registration-fee-counted-toward-tuition")?.severity).toBe("problem");
+  });
+
   it("flags a hybrid student without a usable online sitting", () => {
     const d = diagnose(base({
       student: { ...base().student, classType: "group", deliveryMode: "hybrid", sessionSlot: "morning" },

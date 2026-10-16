@@ -49,9 +49,11 @@ type PaymentRecord = {
   description?: string | null;
   level?: string | null;
   student: {
+    id?: string;
     classType?: string;
     level?: string;
     studentCode?: string | null;
+    previousLevelOutstanding?: number;
     user: { name?: string | null; email: string };
     enrolments?: EnrolmentChip[];
   };
@@ -124,6 +126,8 @@ function PaymentsLedger() {
   const [formBusy, setFormBusy] = useState(false);
   const [editPayment, setEditPayment] = useState<PaymentRecord | null>(null);
   const [rowBusy, setRowBusy] = useState("");
+  const [debtBusy, setDebtBusy] = useState("");
+  const [debtNotice, setDebtNotice] = useState("");
   const [expandedRow, setExpandedRow] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
   const [filterMethod, setFilterMethod] = useState<string>(params.get("method") ?? "");
@@ -309,6 +313,39 @@ function PaymentsLedger() {
       await loadPaymentsList();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unable to update payment status");
+    }
+  }
+
+  async function clearPreviousLevelDebt(student: PaymentRecord["student"]) {
+    const studentId = student.id;
+    const outstanding = Math.max(0, Math.round(student.previousLevelOutstanding ?? 0));
+    if (!studentId || outstanding <= 0 || debtBusy) return;
+    const confirmed = window.confirm(
+      `Write off ${naira(outstanding)} of this student's previous-level tuition debt? This records a waiver, not a payment, and will be audited.`,
+    );
+    if (!confirmed) return;
+
+    setDebtBusy(studentId);
+    setDebtNotice("");
+    setFormError("");
+    try {
+      const response = await fetch("/api/admin/payments/clear-previous-level-debt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, expectedOutstanding: outstanding, confirm: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error ?? `Unable to clear previous-level debt (HTTP ${response.status}).`);
+      setDebtNotice(
+        payload.portalUnlocked
+          ? `Wrote off ${naira(payload.amountWrittenOff)} of previous-level debt. The student's portal is now unlocked.`
+          : `Wrote off ${naira(payload.amountWrittenOff)} of previous-level debt. Other access requirements may still apply.`,
+      );
+      await loadPaymentsList();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unable to clear previous-level debt.");
+    } finally {
+      setDebtBusy("");
     }
   }
 
@@ -717,6 +754,16 @@ function PaymentsLedger() {
         ) : null}
 
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+          {debtNotice ? (
+            <p role="status" className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              {debtNotice}
+            </p>
+          ) : null}
+          {formError ? (
+            <p role="alert" className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {formError}
+            </p>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-[var(--border)] text-sm">
               <thead className="bg-[var(--background)] text-left uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -764,6 +811,19 @@ function PaymentsLedger() {
                               >
                                 {payment.student.user.name || payment.student.user.email}
                               </button>
+                              {payment.studentId && (payment.student.previousLevelOutstanding ?? 0) > 0 ? (
+                                <button
+                                  type="button"
+                                  disabled={Boolean(debtBusy)}
+                                  onClick={() => void clearPreviousLevelDebt(payment.student)}
+                                  className="w-fit rounded-lg border border-amber-400 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                                  title="Write off only unpaid tuition on levels below the student's current level; the action is audited."
+                                >
+                                  {debtBusy === payment.studentId
+                                    ? "Writing off…"
+                                    : `Clear previous debt · ${naira(payment.student.previousLevelOutstanding ?? 0)}`}
+                                </button>
+                              ) : null}
                               <div className="flex flex-wrap items-center gap-1">
                                 {currentLevel ? <LevelBadge level={currentLevel} current /> : null}
                                 {payment.student.classType === "private" ? (
