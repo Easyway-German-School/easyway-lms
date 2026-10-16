@@ -50,8 +50,8 @@ export function receivedPaymentFilter() {
     OR: [
       { description: null },
       {
-        description: {
-          not: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" as const },
+        NOT: {
+          description: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" as const },
         },
       },
     ],
@@ -119,8 +119,8 @@ export function excludeRegistrationFeeWhere() {
     OR: [
       { description: null },
       {
-        description: {
-          not: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" as const },
+        NOT: {
+          description: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" as const },
         },
       },
     ],
