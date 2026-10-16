@@ -24,7 +24,7 @@ import {
   FRESH_ENROLMENT_STUDENT_RESET,
   lookupEmailAccount,
 } from "@/lib/deleted-account";
-import { batchFromAdmission, resolveBatchWindow } from "@/lib/batch";
+import { batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
@@ -553,6 +553,16 @@ export async function PATCH(request: Request) {
   // month follows the same rule — both live inside the admission JSON blob.
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
   const batch = typeof body.batch === "string" ? body.batch.trim() : undefined;
+  const batchYear = typeof body.batchYear === "number" ? body.batchYear : undefined;
+  if (
+    body.batchYear !== undefined &&
+    (!Number.isInteger(body.batchYear) || Number(body.batchYear) < 1900 || Number(body.batchYear) > 2200)
+  ) {
+    return NextResponse.json({ error: "Batch year must be a valid year." }, { status: 400 });
+  }
+  if (batch && monthNameToIndex(batch) === null) {
+    return NextResponse.json({ error: "Choose a valid batch month." }, { status: 400 });
+  }
   // Location + photo live in the same admission blob — only touched when their
   // key is present, so an unrelated edit never wipes what signup collected.
   const city = typeof body.city === "string" ? body.city.trim() : undefined;
@@ -588,6 +598,34 @@ export async function PATCH(request: Request) {
     if (!ownedByTenant(student, gate.session.user.tenantId ?? null)) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
+
+    const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
+    const existingBatch =
+      typeof existingAdmission.batch === "string" && existingAdmission.batch.trim()
+        ? existingAdmission.batch.trim()
+        : null;
+    const existingBatchYear =
+      typeof existingAdmission.batchYear === "number"
+        ? existingAdmission.batchYear
+        : existingBatch
+          ? resolveBatchWindow(existingBatch, { registeredAt: student.createdAt })?.year ?? null
+          : null;
+    const effectiveBatch =
+      batch !== undefined
+        ? batch || null
+        : existingBatch;
+    const effectiveBatchYear =
+      batch !== undefined
+        ? batch
+          ? batchYear ??
+            resolveBatchWindow(batch, { registeredAt: student.createdAt })?.year ??
+            null
+          : null
+        : typeof existingAdmission.batchYear === "number"
+          ? existingAdmission.batchYear
+          : effectiveBatch
+            ? resolveBatchWindow(effectiveBatch, { registeredAt: student.createdAt })?.year ?? null
+            : null;
 
     if (email && email !== student.user.email) {
       // Catches a live account AND a soft-deleted tombstone still holding the
@@ -675,7 +713,15 @@ export async function PATCH(request: Request) {
       const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
       const nextAdmission = { ...existingAdmission };
       if (phone !== undefined) nextAdmission.phone = phone || undefined;
-      if (batch !== undefined) nextAdmission.batch = batch || undefined;
+      if (batch !== undefined) {
+        if (batch) {
+          nextAdmission.batch = batch;
+          nextAdmission.batchYear = effectiveBatchYear;
+        } else {
+          delete nextAdmission.batch;
+          delete nextAdmission.batchYear;
+        }
+      }
       if (city !== undefined) nextAdmission.city = city || undefined;
       if (stateRegion !== undefined) nextAdmission.state = stateRegion || undefined;
       if (country !== undefined) nextAdmission.country = country || undefined;
@@ -708,9 +754,15 @@ export async function PATCH(request: Request) {
      * instead of requiring the office to re-toggle the batch dropdown.
      */
     if (batch !== undefined) {
-      const batchChanged = batch !== batchFromAdmission(student.admission);
+      const batchChanged =
+        batch !== batchFromAdmission(student.admission) ||
+        (batch ? effectiveBatchYear !== existingBatchYear : existingBatchYear !== null);
+      const batchAnchor =
+        batch && effectiveBatchYear !== null
+          ? new Date(effectiveBatchYear, monthNameToIndex(batch) ?? 0, 1)
+          : student.createdAt;
       const nowMovedToUpcoming = resolveUpcomingBatch(batch, {
-        registeredAt: student.createdAt,
+        registeredAt: batchAnchor,
         now: new Date(),
       });
       const staleLock =
@@ -802,14 +854,33 @@ export async function PATCH(request: Request) {
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.$transaction(async (tx) => {
       await tx.student.update({ where: { id: studentId }, data: updateStudent });
-      if (batch !== undefined) {
-        const batchYear = batch
-          ? resolveBatchWindow(batch, { registeredAt: student.createdAt })?.year ?? null
-          : null;
-        await tx.studentEnrolment.updateMany({
-          where: { studentId, outcome: "ongoing", deletedAt: null },
-          data: { batchMonth: batch || null, batchYear },
-        });
+      if (batch !== undefined || sessionSlot || classType || requestedDeliveryMode || body.branchId !== undefined || body.tutorId !== undefined) {
+        const activeEnrolmentData: {
+          batchMonth?: string | null;
+          batchYear?: number | null;
+          sessionSlot?: string;
+          classType?: string;
+          deliveryMode?: string;
+          branchId?: string | null;
+          tutorId?: string | null;
+        } = {};
+        if (!(level && level !== student.level)) {
+          if (batch !== undefined) {
+            activeEnrolmentData.batchMonth = batch || null;
+            activeEnrolmentData.batchYear = effectiveBatchYear;
+          }
+          if (sessionSlot) activeEnrolmentData.sessionSlot = sessionSlot;
+          if (classType) activeEnrolmentData.classType = classType;
+          if (updateStudent.deliveryMode) activeEnrolmentData.deliveryMode = updateStudent.deliveryMode;
+          if (body.branchId !== undefined) activeEnrolmentData.branchId = branchId;
+          if (body.tutorId !== undefined) activeEnrolmentData.tutorId = tutorId;
+        }
+        if (Object.keys(activeEnrolmentData).length > 0) {
+          await tx.studentEnrolment.updateMany({
+            where: { studentId, outcome: "ongoing", deletedAt: null },
+            data: activeEnrolmentData,
+          });
+        }
       }
     });
 
@@ -963,6 +1034,7 @@ export async function PATCH(request: Request) {
             classType: classType || student.classType,
             deliveryMode: updateStudent.deliveryMode || student.deliveryMode,
             batch: typeof effectiveAdmission.batch === "string" ? effectiveAdmission.batch : undefined,
+            batchYear: effectiveBatchYear,
             tenantId: gate.session.user.tenantId,
             tuitionChargeId: levelCharge?.chargeId ?? null,
             feeSnapshot: levelCharge?.amount ?? null,

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
 import { LevelUpIcon } from "@/components/icons";
+import { batchFromAdmission } from "@/lib/batch";
 
 /**
  * Finished batches — the one place a batch is moved on.
@@ -101,6 +102,16 @@ type Sweep = {
   total: number;
   counts: Record<string, number>;
   rows: SweepRow[];
+};
+
+type StudentSearchResult = {
+  id: string;
+  level: string;
+  sessionSlot: string;
+  status: string;
+  admission: unknown;
+  user: { name: string | null; email: string };
+  branch: { name: string } | null;
 };
 
 const SWEEP_ORDER = ["on_desk", "moved_up", "no_label_strong", "no_label_weak", "unreadable_label", "other_batch", "still_running", "not_active", "top_level"];
@@ -298,6 +309,11 @@ export default function GraduationPage() {
   const [moveTarget, setMoveTarget] = useState<string>("September");
   const [moving, setMoving] = useState(false);
   const [moved, setMoved] = useState<string>("");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentSearchResults, setStudentSearchResults] = useState<StudentSearchResult[]>([]);
+  const [studentSearchBusy, setStudentSearchBusy] = useState(false);
+  const [studentSearchError, setStudentSearchError] = useState("");
+  const [promotingStudentId, setPromotingStudentId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -393,6 +409,62 @@ export default function GraduationPage() {
       setError(e instanceof Error ? e.message : "Could not sweep");
     } finally {
       setSweeping(false);
+    }
+  }
+
+  async function searchStudent() {
+    const query = studentSearch.trim();
+    if (query.length < 2) {
+      setStudentSearchError("Enter at least two characters of the student's name or email.");
+      setStudentSearchResults([]);
+      return;
+    }
+    setStudentSearchBusy(true);
+    setStudentSearchError("");
+    try {
+      const params = new URLSearchParams({ search: query, status: "active", page: "1", pageSize: "20" });
+      const response = await fetch(`/api/admin/students?${params.toString()}`, { cache: "no-store" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Could not search the student roster.");
+      if (!Array.isArray(json.students)) throw new Error("The student search response was invalid.");
+      setStudentSearchResults(json.students);
+      if (json.students.length === 0) setStudentSearchError("No active students matched that name or email.");
+    } catch (searchError) {
+      setStudentSearchError(searchError instanceof Error ? searchError.message : "Could not search the student roster.");
+      setStudentSearchResults([]);
+    } finally {
+      setStudentSearchBusy(false);
+    }
+  }
+
+  async function promoteStudent(student: StudentSearchResult) {
+    const name = student.user.name || student.user.email;
+    if (
+      !window.confirm(
+        `Move ${name} up one level if they are eligible?\n\nThe graduation desk will recheck their status and fees, sign off the finished level, issue their certificate, update their batch and enrolment history, and send the next-level message. If they are not eligible, they will be left in place with the reason shown.`,
+      )
+    ) {
+      return;
+    }
+    setPromotingStudentId(student.id);
+    setStudentSearchError("");
+    try {
+      const result = await post({ action: "graduate", only: "move", studentIds: [student.id] });
+      const promoted = result.graduated?.find((row: { studentId: string }) => row.studentId === student.id);
+      const skipped = result.skipped?.find((row: { studentId: string }) => row.studentId === student.id);
+      setMoved(
+        promoted
+          ? `${name} was moved up successfully.`
+          : `${name} was not moved: ${skipped?.reason || "the graduation desk did not mark them eligible."}`,
+      );
+      await load();
+      await searchStudent();
+    } catch (promotionError) {
+      setStudentSearchError(
+        promotionError instanceof Error ? promotionError.message : "Could not move this student up.",
+      );
+    } finally {
+      setPromotingStudentId(null);
     }
   }
 
@@ -587,6 +659,68 @@ export default function GraduationPage() {
           >
             {auto.autoPromote ? "Automatic progression is on" : "Turn automatic progression on"}
           </button>
+        </section>
+
+        <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Move one student</p>
+            <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
+              Search by name or email, then open that learner&apos;s editor to change their batch, level, or class session without moving a whole cohort.
+            </p>
+          </div>
+          <form
+            className="flex flex-wrap gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void searchStudent();
+            }}
+          >
+            <input
+              value={studentSearch}
+              onChange={(event) => setStudentSearch(event.target.value)}
+              placeholder="Student name or email"
+              aria-label="Search active students by name or email"
+              className="min-w-56 flex-1 rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={studentSearchBusy}
+              className="rounded-xl bg-[#FF6600] px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {studentSearchBusy ? "Searching…" : "Find student"}
+            </button>
+          </form>
+          {studentSearchError && <p role="status" className="text-sm text-[var(--muted)]">{studentSearchError}</p>}
+          {studentSearchResults.length > 0 && (
+            <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--background)]">
+              {studentSearchResults.map((student) => (
+                <li key={student.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <p className="font-semibold text-[var(--foreground)]">{student.user.name || student.user.email}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {student.user.email} · {student.level} · {batchFromAdmission(student.admission) || "No batch"} · {student.sessionSlot} · {student.branch?.name || "Unassigned"}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void promoteStudent(student)}
+                      disabled={promotingStudentId !== null}
+                      className="rounded-full bg-[#FF6600] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {promotingStudentId === student.id ? "Checking..." : "Promote if eligible"}
+                    </button>
+                    <Link
+                      href={`/admin/students/${student.id}`}
+                      className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] hover:border-[var(--accent)]"
+                    >
+                      Edit batch / level / session
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">

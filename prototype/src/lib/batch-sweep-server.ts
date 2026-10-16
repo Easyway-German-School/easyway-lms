@@ -1,6 +1,6 @@
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
-import { MONTH_NAMES, batchFromAdmission, monthNameToIndex } from "@/lib/batch";
+import { MONTH_NAMES, batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { nextLevelAfter } from "@/lib/levels";
 import { instantToZonedParts } from "@/lib/school-time";
 import { cohortTiming } from "@/lib/graduation";
@@ -279,20 +279,28 @@ export async function moveIntoBatch(
     try {
       const student = await prisma.student.findUnique({
         where: { id: studentId },
-        select: { admission: true, classesStartedAt: true },
+        select: { admission: true, classesStartedAt: true, createdAt: true },
       });
       if (!student) {
         result.skipped.push({ studentId, name: row.name, reason: "Student not found" });
         continue;
       }
       const admission = asRecord(student.admission);
-      await prisma.student.update({
-        where: { id: studentId },
-        data: {
-          admission: { ...admission, batch: toMonth } as never,
-          ...(student.classesStartedAt ? {} : { classesStartedAt: now }),
-        },
-      });
+      const toYear =
+        resolveBatchWindow(toMonth, { registeredAt: student.createdAt, now })?.year ?? sweep.year;
+      await prisma.$transaction([
+        prisma.student.update({
+          where: { id: studentId },
+          data: {
+            admission: { ...admission, batch: toMonth, batchYear: toYear } as never,
+            ...(student.classesStartedAt ? {} : { classesStartedAt: now }),
+          },
+        }),
+        prisma.studentEnrolment.updateMany({
+          where: { studentId, outcome: "ongoing", deletedAt: null },
+          data: { batchMonth: toMonth, batchYear: toYear },
+        }),
+      ]);
       await prisma.journeyEvent
         .create({
           data: {
