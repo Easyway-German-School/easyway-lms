@@ -13,6 +13,7 @@ import {
   hasPaidAnyTuition,
   isRegistrationFeePayment,
   receivedPaymentFilter,
+  excludeRegistrationFeeWhere,
 } from "./payment";
 
 /**
@@ -353,7 +354,13 @@ suite("hasPaidAnyTuition — gate for the enrolment letter", () => {
       expect(receivedPaymentFilter()).toMatchObject({
         OR: [
           { description: null },
-          { description: { not: { contains: "Registration fee", mode: "insensitive" } } },
+          { NOT: { description: { contains: "Registration fee", mode: "insensitive" } } },
+        ],
+      });
+      expect(excludeRegistrationFeeWhere()).toEqual({
+        OR: [
+          { description: null },
+          { NOT: { description: { contains: "Registration fee", mode: "insensitive" } } },
         ],
       });
     });
