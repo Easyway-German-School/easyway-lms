@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
+import SignupCapacityControl from "@/components/SignupCapacityControl";
 import { SlidersIcon } from "@/components/icons";
 import {
   LEVELS,
@@ -406,6 +407,8 @@ export default function SettingsPage() {
             </p>
           )}
         </div>
+
+        <SignupCapacityControl />
 
         {/* Session clock times */}
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">

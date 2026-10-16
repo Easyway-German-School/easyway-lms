@@ -10,6 +10,7 @@ import RecoveryPanel from "./RecoveryPanel";
 import RiskRadarPanel from "./RiskRadarPanel";
 import Sparkline from "./Sparkline";
 import { confirmSession, probeSession } from "@/lib/session-confirm";
+import SignupCapacityControl from "@/components/SignupCapacityControl";
 
 /* ------------------------------------------------------------------------ */
 /* Types                                                                     */
@@ -70,7 +71,7 @@ function whoIsAffected(info: IncidentDetail): DiagnoseTarget {
   return info.userId ? { userId: info.userId } : null;
 }
 
-type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns" | "recovery" | "risk-radar";
+type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns" | "recovery" | "risk-radar" | "signup-capacity";
 
 const SEVERITY = {
   critical: { dot: "bg-red-500", text: "text-red-500", label: "Critical" },
@@ -758,6 +759,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "patterns", label: "Patterns" },
   { id: "recovery", label: "Recovery library" },
   { id: "risk-radar", label: "Risk radar" },
+  { id: "signup-capacity", label: "Signup capacity" },
 ];
 
 export default function MissionControl() {
@@ -840,6 +842,7 @@ export default function MissionControl() {
       {tab === "risk-radar" && (
         <RiskRadarPanel onInvestigate={findSimilar} onOpenIncident={openIncident} />
       )}
+      {tab === "signup-capacity" && <SignupCapacityControl compact />}
     </div>
   );
 }

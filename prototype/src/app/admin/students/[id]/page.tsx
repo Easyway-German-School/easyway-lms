@@ -29,6 +29,8 @@ import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { availableBatchOptions } from "@/lib/intake";
+import { resolveBatchWindow } from "@/lib/batch";
 import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
@@ -675,6 +677,8 @@ export default function StudentDossierPage() {
     name: "",
     email: "",
     phone: "",
+    batch: "",
+    batchYear: new Date().getFullYear(),
     level: "A1",
     sessionSlot: "morning",
     classType: "group",
@@ -770,10 +774,21 @@ export default function StudentDossierPage() {
 
   function openEdit() {
     if (!data) return;
+    const currentEnrolment = data.enrolments.find((row) => row.outcome === "ongoing");
+    const admissionBatch = data.admissionEntries.find((entry) => entry.key === "batch")?.value || currentEnrolment?.batchMonth || "";
+    const admissionYear = Number(data.admissionEntries.find((entry) => entry.key === "batchYear")?.value);
+    const batchYear =
+      Number.isInteger(admissionYear) && admissionYear > 0
+        ? admissionYear
+        : currentEnrolment?.batchYear ??
+          resolveBatchWindow(admissionBatch, { registeredAt: new Date(data.identity.registeredAt) })?.year ??
+          new Date().getFullYear();
     setEditForm({
       name: data.identity.name || "",
       email: data.identity.email || "",
       phone: data.identity.phone || "",
+      batch: admissionBatch,
+      batchYear,
       level: data.identity.level || "A1",
       sessionSlot: data.identity.sessionSlot || "morning",
       classType: data.identity.classType || "group",
@@ -2403,6 +2418,39 @@ export default function StudentDossierPage() {
                   placeholder="e.g. 0812 345 6789"
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Batch</span>
+                <select
+                  value={editForm.batch ? `${editForm.batch}|${editForm.batchYear}` : ""}
+                  onChange={(event) => {
+                    const [month, year] = event.target.value.split("|");
+                    setEditForm((form) => ({
+                      ...form,
+                      batch: month || "",
+                      batchYear: Number(year) || new Date().getFullYear(),
+                    }));
+                  }}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">No batch</option>
+                  {editForm.batch &&
+                    !availableBatchOptions().some(
+                      (option) => option.value === editForm.batch && option.year === editForm.batchYear,
+                    ) && (
+                      <option value={`${editForm.batch}|${editForm.batchYear}`}>
+                        {editForm.batch} {editForm.batchYear} (current)
+                      </option>
+                    )}
+                  {availableBatchOptions().map((option) => (
+                    <option key={`${option.value}|${option.year}`} value={`${option.value}|${option.year}`}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Changing the batch updates this student&apos;s roster and current enrolment only.
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Level</span>

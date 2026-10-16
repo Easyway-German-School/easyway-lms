@@ -35,6 +35,8 @@ export type OpenEnrolmentInput = {
   deliveryMode: string;
   /** Bare month name ("September"), same as the admission blob's `batch`. */
   batch?: string | null;
+  /** The exact year selected by staff or signup, when the intake is explicit. */
+  batchYear?: number | null;
   /**
    * Anchors which calendar year the batch month resolves to — see
    * lib/batch.ts. Pass the student's actual registration date at signup, or
@@ -73,7 +75,7 @@ export async function openEnrolment(input: OpenEnrolmentInput) {
       classType: input.classType,
       deliveryMode: input.deliveryMode,
       batchMonth: input.batch ?? null,
-      batchYear: window?.year ?? null,
+      batchYear: input.batchYear !== undefined ? input.batchYear : window?.year ?? null,
       startedAt: input.startedAt ?? null,
       outcome: "ongoing",
       tuitionChargeId: input.tuitionChargeId ?? null,

@@ -6,7 +6,9 @@
  * at three separate doorways (the public sign-up form, the office's Add-student
  * form, the CSV import). Optional at all three, so a student can land with no
  * batch at all, and then the timetable generator, the promotion engine and any
- * "message the September cohort" send have nothing to work from.
+ * "message the September cohort" send have nothing to work from. The batch is
+ * still stored as a month name; signup also stores its year separately so
+ * closures and future intakes remain unambiguous.
  *
  * This is the fix that costs nothing at the doorways: one value the office
  * sets on /admin/settings — "we are currently taking people into the September
@@ -81,7 +83,7 @@ export function currentIntakeLabel(intake: CurrentIntake): string {
   return `${intake.month} ${intake.year}`;
 }
 
-export type BatchOption = { value: string; label: string };
+export type BatchOption = { value: string; year: number; label: string };
 
 /**
  * The batch months a NEW signup may choose today: this calendar month plus the
@@ -98,7 +100,7 @@ export function availableBatchOptions(now: Date = new Date(), count = 11): Batch
   for (let i = 0; i <= count; i++) {
     const monthIndex = (now.getMonth() + i) % 12;
     const year = now.getFullYear() + Math.floor((now.getMonth() + i) / 12);
-    options.push({ value: MONTH_NAMES[monthIndex], label: `${MONTH_NAMES[monthIndex]} ${year}` });
+    options.push({ value: MONTH_NAMES[monthIndex], year, label: `${MONTH_NAMES[monthIndex]} ${year}` });
   }
   return options;
 }

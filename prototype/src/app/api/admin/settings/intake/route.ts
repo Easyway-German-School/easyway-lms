@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { CURRENT_INTAKE_KEY, parseCurrentIntake, type CurrentIntake } from "@/lib/intake";
+import { resolveSettingsTenantId } from "@/lib/intake-server";
 
 /**
  * The school's current intake month — read and written by /admin/settings.
@@ -19,8 +20,12 @@ export async function GET() {
   if (!gate.ok) return gate.response;
 
   try {
-    const row = await prisma.schoolSetting.findFirst({
-      where: { key: CURRENT_INTAKE_KEY },
+    const tenantId = await resolveSettingsTenantId(gate.session.user.tenantId);
+    if (!tenantId) {
+      return NextResponse.json({ error: "No school is configured for this account" }, { status: 400 });
+    }
+    const row = await prisma.schoolSetting.findUnique({
+      where: { tenantId_key: { tenantId, key: CURRENT_INTAKE_KEY } },
     });
     return NextResponse.json(parseCurrentIntake(row?.value));
   } catch (error) {
@@ -33,12 +38,11 @@ export async function POST(request: Request) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
-  const tenantId = gate.session.user.tenantId;
-  if (!tenantId) {
-    return NextResponse.json({ error: "No school in context" }, { status: 400 });
-  }
-
   try {
+    const tenantId = await resolveSettingsTenantId(gate.session.user.tenantId);
+    if (!tenantId) {
+      return NextResponse.json({ error: "No school is configured for this account" }, { status: 400 });
+    }
     const body = await request.json();
     const intake: CurrentIntake | null = parseCurrentIntake(body, { strict: true });
     if (!intake) {

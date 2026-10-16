@@ -12,9 +12,12 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
-import { defaultBatchMonth } from "@/lib/intake-server";
+import { defaultBatchMonth, readCurrentIntake } from "@/lib/intake-server";
+import { availableBatchOptions } from "@/lib/intake";
 import { readSessionSettings } from "@/lib/school-settings-server";
 import { isCellEnabled, isModeEnabled } from "@/lib/school-settings";
+import { readClosedSignupSlots } from "@/lib/signup-availability-server";
+import { signupSlotIsClosed } from "@/lib/signup-availability";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
@@ -116,6 +119,7 @@ export async function POST(request: NextRequest) {
       level,
       pathway,
       batch,
+      batchYear,
       sessionSlot,
       classType,
       deliveryMode,
@@ -212,10 +216,34 @@ export async function POST(request: NextRequest) {
     // September cohort" send with nothing to match on. Fall back to the
     // school's current intake month (lib/intake.ts) — bare month name, same as
     // a chosen value; the year is implied by their registration date.
+    const currentIntake =
+      typeof batch === "string" && batch.trim() ? null : await readCurrentIntake(currentTenantId());
     const normalizedBatch =
       typeof batch === "string" && batch.trim()
         ? batch.trim()
-        : await defaultBatchMonth(currentTenantId());
+        : currentIntake?.month ?? (await defaultBatchMonth(currentTenantId()));
+    const batchWasSelected = typeof batch === "string" && batch.trim() !== "";
+    const availableBatches = availableBatchOptions();
+    const matchingBatchOption = batchWasSelected
+      ? availableBatches.find((option) => option.value.toLowerCase() === normalizedBatch.toLowerCase())
+      : undefined;
+    const normalizedBatchYear =
+      batchWasSelected
+        ? typeof batchYear === "number" && Number.isInteger(batchYear)
+          ? batchYear
+          : matchingBatchOption?.year ?? NaN
+        : currentIntake?.year ?? NaN;
+    const offeredBatch =
+      !batchWasSelected ||
+      availableBatches.some(
+        (option) => option.value.toLowerCase() === normalizedBatch.toLowerCase() && option.year === normalizedBatchYear,
+      );
+    if (!offeredBatch) {
+      return NextResponse.json(
+        { error: "Choose a valid upcoming batch, including its year." },
+        { status: 400, headers: buildCorsHeaders(request) },
+      );
+    }
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
     // Same story as level: this used to fall back to "morning" for any missing
     // or invalid value, so a student who never opened the session dropdown got
@@ -287,6 +315,34 @@ export async function POST(request: NextRequest) {
       hybridComboWasDefaulted = !combo || combo.id === "other";
     }
 
+    if (normalizedClassType === "group") {
+      const tenantId = currentTenantId();
+      if (!tenantId) {
+        console.error("Signup has no tenant while checking closed slots.");
+        return NextResponse.json(
+          { error: "Unable to verify class availability. Please try again." },
+          { status: 500, headers: buildCorsHeaders(request) },
+        );
+      }
+      const closedSlots = await readClosedSignupSlots(tenantId);
+      if (
+        signupSlotIsClosed(closedSlots, {
+          batch: normalizedBatch,
+          year: normalizedBatchYear,
+          level: normalizedLevel,
+          sessionSlot: normalizedSessionSlot,
+        })
+      ) {
+        return NextResponse.json(
+          {
+            error: `${normalizedBatch} ${normalizedBatchYear} ${normalizedLevel} ${normalizedSessionSlot} is full. Please choose another batch.`,
+            code: "signup_slot_full",
+          },
+          { status: 409, headers: buildCorsHeaders(request) },
+        );
+      }
+    }
+
     // Only present on an online signup. Left undefined for a campus student so
     // their admission record does not gain an empty object.
     const onlineProfile = (body as Record<string, unknown> | null)?.online;
@@ -343,6 +399,7 @@ export async function POST(request: NextRequest) {
       transportRoute: typeof transportRoute === "string" ? transportRoute : undefined,
       heardFrom: typeof heardFrom === "string" ? heardFrom : undefined,
       batch: normalizedBatch,
+      batchYear: normalizedBatchYear,
       // Online cohort answers (timezone / device / connection). Nested rather
       // than flattened so `readOnlineProfile` has one place to look and these
       // keys can never collide with an admission field added later.
