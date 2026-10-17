@@ -266,6 +266,7 @@ model Tenant {
   studentProfiles         StudentProfile[]
   studentEnrolments       StudentEnrolment[]
   studyGroups             StudyGroup[]
+  studyGroupMemberships   StudyGroupMember[]
   journeyEvents           JourneyEvent[]
   examRegistrations       ExamRegistration[]
   pathways                Pathway[]
@@ -7080,8 +7081,12 @@ model StudyGroupMember {
   role     String     @default("member")
   joinedAt DateTime   @default(now())
 
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@unique([groupId, userId])
   @@index([userId, joinedAt])
+  @@index([tenantId])
 }
 
 /**

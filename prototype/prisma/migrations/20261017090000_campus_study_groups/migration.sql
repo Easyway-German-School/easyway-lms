@@ -25,9 +25,11 @@ CREATE TABLE IF NOT EXISTS "StudyGroupMember" (
   "userId" TEXT NOT NULL,
   "role" TEXT NOT NULL DEFAULT 'member',
   "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "tenantId" TEXT,
   CONSTRAINT "StudyGroupMember_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "StudyGroupMember_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "StudyGroup"("id") ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT "StudyGroupMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT "StudyGroupMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "StudyGroupMember_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS "StudyGroup_tenantId_branchId_level_sessionSlot_batch_band_expiresAt_idx"
@@ -38,3 +40,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS "StudyGroupMember_groupId_userId_key"
   ON "StudyGroupMember"("groupId", "userId");
 CREATE INDEX IF NOT EXISTS "StudyGroupMember_userId_joinedAt_idx"
   ON "StudyGroupMember"("userId", "joinedAt");
+CREATE INDEX IF NOT EXISTS "StudyGroupMember_tenantId_idx"
+  ON "StudyGroupMember"("tenantId");
+
+ALTER TABLE "StudyGroup" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "StudyGroup" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "StudyGroup"
+  USING ("tenantId" = current_setting('app.tenant_id', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true));
+
+ALTER TABLE "StudyGroupMember" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "StudyGroupMember" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "StudyGroupMember"
+  USING ("tenantId" = current_setting('app.tenant_id', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true));
