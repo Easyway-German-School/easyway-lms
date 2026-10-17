@@ -39,6 +39,7 @@ export const DETECT_TYPES = [
   "scene",
 ] as const;
 export type DetectType = (typeof DETECT_TYPES)[number];
+const GENERATED_DETECT_TYPES = DETECT_TYPES.filter((type) => type !== "attendance");
 
 export type Mission = {
   title: string;
@@ -89,15 +90,37 @@ function buildPrompt(level: string, band: Band, materialTitles: string[]): strin
     "",
     "Write exactly 3 missions. Each finishable in under 15 minutes, on a phone.",
     "Be concrete: name the words, the tense, or the situation. Never 'practise your German'.",
+    "These missions are shared by students whose exact timetables are not available here.",
+    "Never invent a class date, weekday, clock time, or morning/afternoon/evening class slot.",
+    "Do not ask students to attend a scheduled class; choose a self-paced activity instead.",
     "",
-    `Each mission's "type" must be exactly one of: ${DETECT_TYPES.join(", ")} — `,
+    `Each mission's "type" must be exactly one of: ${GENERATED_DETECT_TYPES.join(", ")} — `,
     "lesson = finish a lesson, assignment = hand in set work, quiz = play a live quiz game,",
-    "attendance = show up to a class, voice = a speaking/pronunciation task, essay = a writing task,",
+    "voice = a speaking/pronunciation task, essay = a writing task,",
     "generic = anything else that can't be checked automatically. Pick the one that actually matches",
     "what the mission asks the student to do — this is how their progress gets verified.",
+    "Never use attendance: students' class schedules are individual and not available to this cohort generator.",
     "",
     'Reply with ONLY a JSON array: [{"title":"…","description":"…","reward":"+20 XP","type":"lesson"}]',
   ].join("\n");
+}
+
+const SCHEDULE_WORDS = "class|lesson|session|cohort";
+const DAY_PARTS = "morning|afternoon|evening|weekend";
+const WEEKDAYS = "monday|tuesday|wednesday|thursday|friday|saturday|sunday";
+const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+
+/** True when a cohort-wide mission claims a specific class time or date. */
+export function hasUnverifiedScheduleClaim(title: string, description: string): boolean {
+  const text = `${title} ${description}`;
+  return (
+    new RegExp(`\\b(?:${DAY_PARTS})\\b.{0,40}\\b(?:${SCHEDULE_WORDS})\\b`, "i").test(text) ||
+    new RegExp(`\\b(?:${SCHEDULE_WORDS})\\b.{0,40}\\b(?:${DAY_PARTS})\\b`, "i").test(text) ||
+    new RegExp(`\\b(?:${WEEKDAYS})\\b.{0,40}\\b(?:${SCHEDULE_WORDS})\\b`, "i").test(text) ||
+    new RegExp(`\\b(?:${SCHEDULE_WORDS})\\b.{0,40}\\b(?:${WEEKDAYS})\\b`, "i").test(text) ||
+    new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTHS})\\b`, "i").test(text) ||
+    /\b\d{1,2}(?::\d{2})?\s?(?:a\.?m\.?|p\.?m\.?)\b/i.test(text)
+  );
 }
 
 function coerce(raw: unknown): Mission[] | null {
@@ -108,7 +131,10 @@ function coerce(raw: unknown): Mission[] | null {
       const value = entry as Record<string, unknown>;
       const title = String(value.title ?? "").trim();
       if (!title) return null;
+      const description = String(value.description ?? "").trim();
+      if (hasUnverifiedScheduleClaim(title, description)) return null;
       const rawType = String(value.type ?? "").trim().toLowerCase();
+      if (rawType === "attendance") return null;
       // A model that ignores the instruction (or invents a type outside the
       // list) falls back to "generic" rather than dropping the mission — an
       // unverifiable mission is still a real mission, just one whose "done"
@@ -118,7 +144,7 @@ function coerce(raw: unknown): Mission[] | null {
         : "generic";
       return {
         title,
-        description: String(value.description ?? "").trim(),
+        description,
         reward: String(value.reward ?? "+20 XP").trim(),
         detectType,
       } satisfies Mission;

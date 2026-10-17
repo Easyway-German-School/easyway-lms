@@ -140,6 +140,13 @@ export const TENANT_OWNED_MODELS = [
   "CampusDuel",
   "CoinTransaction",
   /**
+   * Student-created sessions and their member lists. The session stores
+   * tenantId directly, and every read is additionally scoped to the exact
+   * cohort and Campus age band.
+   */
+  "StudyGroup",
+  "StudyGroupMember",
+  /**
    * The live quiz game. A game carries a PIN that admits somebody to it, a
    * frozen copy of one school's question paper, and a leaderboard of one
    * school's students by name. All three are the same category of leak as a
