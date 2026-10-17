@@ -29,7 +29,7 @@ import type { RequestCard } from "@/lib/campus-server";
 
 export type BeatState = {
   ok: boolean;
-  reason?: "not_student" | "locked" | "off";
+  reason?: "not_student" | "locked" | "off" | "impersonation";
   incoming?: number;
   balance?: number | null;
   /** Whether this student is currently set to appear offline. */
@@ -48,7 +48,13 @@ async function post(room: PresenceRoom, full: boolean, hidden?: boolean): Promis
     body: JSON.stringify({ room, full, ...(hidden === undefined ? {} : { hidden }) }),
     cache: "no-store",
   });
-  if (response.status === 403) return { ok: false, reason: "not_student" };
+  if (response.status === 403) {
+    const data = (await response.json().catch(() => ({}))) as { reason?: string };
+    return {
+      ok: false,
+      reason: data.reason === "impersonation" ? "impersonation" : "not_student",
+    };
+  }
   if (!response.ok) throw new Error("Campus is unavailable");
   return response.json();
 }

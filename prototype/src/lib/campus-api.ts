@@ -19,7 +19,10 @@ export async function campusSession(): Promise<
   if (session.user.impersonatedBy) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "You are viewing as this student, so Campus is read-only." }, { status: 403 }),
+      response: NextResponse.json({
+        error: "You are viewing as this student, so Campus is read-only.",
+        reason: "impersonation",
+      }, { status: 403 }),
     };
   }
   return { ok: true, userId: session.user.id as string };

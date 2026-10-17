@@ -157,6 +157,8 @@ model User {
   supportReplies        SupportTicketMessage[]
   supportTypingPings    SupportTypingPing[]
   gameMatches           GameMatch[]
+  ownedStudyGroups      StudyGroup[]          @relation("StudyGroupOwner")
+  studyGroupMemberships StudyGroupMember[]
   gameTurnsAssigned     GameTurn[]               @relation("GameTurnAssignee")
   gameTurnsWritten      GameTurn[]               @relation("GameTurnAuthor")
   constraintDecks       ConstraintDeck[]
@@ -263,6 +265,7 @@ model Tenant {
   students                Student[]
   studentProfiles         StudentProfile[]
   studentEnrolments       StudentEnrolment[]
+  studyGroups             StudyGroup[]
   journeyEvents           JourneyEvent[]
   examRegistrations       ExamRegistration[]
   pathways                Pathway[]
@@ -1323,6 +1326,7 @@ model Branch {
   students       Student[]
   notifications  Notification[]
   spaces         Space[]
+  studyGroups    StudyGroup[]
   classSessions  ClassSession[]
   assignments    Assignment[]
   exams          Exam[]
@@ -7034,6 +7038,50 @@ model CampusRequest {
   @@index([toUserId, status, expiresAt])
   @@index([tenantId, band, kind, status, expiresAt])
   @@index([fromUserId, createdAt])
+}
+
+/**
+ * A short, student-started study session. It is visible only to the creator's
+ * exact class cohort and Campus age band; it expires automatically after the
+ * session so the list stays about people who can meet now.
+ */
+model StudyGroup {
+  id          String   @id @default(cuid())
+  name        String
+  focus       String
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  level       String
+  sessionSlot String
+  batch       String   @default("")
+  band        String
+  startsAt    DateTime
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerUserId String
+  ownerUser   User     @relation("StudyGroupOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  members     StudyGroupMember[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, level, sessionSlot, batch, band, expiresAt])
+  @@index([ownerUserId, expiresAt])
+}
+
+model StudyGroupMember {
+  id       String     @id @default(cuid())
+  groupId  String
+  group    StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     String     @default("member")
+  joinedAt DateTime   @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId, joinedAt])
 }
 
 /**

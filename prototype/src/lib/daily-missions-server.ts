@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { missionsForCohort, bandFor, personalise, type Mission } from "@/lib/cohort-missions";
+import { missionsForCohort, bandFor, personalise, hasUnverifiedScheduleClaim, type Mission } from "@/lib/cohort-missions";
 import { calculateStreak } from "@/lib/gamification";
 import { detectionFor, ctxSince } from "@/lib/mission-detection";
 import { goalFor } from "@/lib/germany-goals";
@@ -146,6 +146,32 @@ export async function ensureTodayMissions(userId: string): Promise<DailyMissionV
   });
 
   let rows = existing;
+  const scheduleClaims = rows.filter(
+    (row) => !row.done && hasUnverifiedScheduleClaim(row.title, row.description),
+  );
+  if (scheduleClaims.length > 0) {
+    const safeLesson = {
+      title: `Complete a ${profile.level || "German"} lesson`,
+      description: "Choose a short lesson at your current level and finish it today.",
+      detectType: "lesson",
+    };
+    const replacements = new Map(
+      await Promise.all(
+        scheduleClaims.map(async (row) => [
+          row.id,
+          await prisma.dailyMission.update({
+            where: { id: row.id },
+            data: {
+              ...safeLesson,
+              reward: row.reward,
+            },
+          }),
+        ] as const),
+      ),
+    );
+    rows = rows.map((row) => replacements.get(row.id) ?? row);
+  }
+
   if (rows.length === 0) {
     const band = bandFor(profile.streak, profile.examReadiness);
     const cohort = await missionsForCohort(profile.level || "A1", band);

@@ -73,6 +73,7 @@ import {
   ProfileIcon,
   QuizIcon,
   ResultsIcon,
+  UsersIcon,
 } from "@/components/icons";
 
 type NavItem = {
@@ -118,6 +119,7 @@ const navGroups: NavGroup[] = [
       { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
       { label: "Live class", href: "/live", icon: <BroadcastIcon /> },
       { label: "Community", href: "/community", icon: <CommunityIcon /> },
+      { label: "Study groups", href: "/campus/groups", icon: <UsersIcon /> },
     ],
   },
   {
@@ -275,7 +277,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const visibleNavGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => showsLiveClass || !isLiveOnlyRoute(item.href)),
+      items: group.items.filter(
+        (item) =>
+          (showsLiveClass || !isLiveOnlyRoute(item.href)) &&
+          (item.href !== "/campus/groups" || access?.classType === "group"),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 

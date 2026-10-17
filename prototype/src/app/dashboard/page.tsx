@@ -144,6 +144,8 @@ type PendingPayment = {
 
 import StudentShell from "@/components/StudentShell";
 import StudentBrief from "@/components/StudentBrief";
+import BeccaCampusCard from "@/components/BeccaCampusCard";
+import CampusHomeCard from "@/components/CampusHomeCard";
 import QuestHistoryCard from "@/components/QuestHistoryCard";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
@@ -1120,6 +1122,11 @@ function DashboardContent() {
               </div>
 
           </section>
+          <BeccaCampusCard
+            userId={session?.user?.id}
+            showStudyGroupLink={!isPrivateStudent}
+          />
+          {paymentUnlocked && <CampusHomeCard showStudyGroups={!isPrivateStudent} />}
 
           <DashboardMoreSection
             summaryHint={
