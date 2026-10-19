@@ -1,3 +1,5 @@
+import { batchFromAdmission } from "@/lib/batch";
+
 export const BULK_GRACE_PAYMENT_STATUSES = [
   "all",
   "unpaid",
@@ -8,6 +10,17 @@ export const BULK_GRACE_PAYMENT_STATUSES = [
 ] as const;
 
 export type BulkGracePaymentStatus = (typeof BULK_GRACE_PAYMENT_STATUSES)[number];
+
+export function bulkGraceBatchLabel(student: {
+  admission: unknown;
+  enrolments: Array<{ batchMonth: string | null; batchYear: number | null; outcome: string }>;
+}): string | null {
+  const current = student.enrolments.find((enrolment) => enrolment.outcome === "ongoing");
+  if (current?.batchMonth) {
+    return current.batchYear ? `${current.batchMonth} ${current.batchYear}` : current.batchMonth;
+  }
+  return batchFromAdmission(student.admission);
+}
 
 export function matchesBulkGracePaymentStatus(
   status: BulkGracePaymentStatus,
