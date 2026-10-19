@@ -5,6 +5,8 @@ import { dayKey } from "@/lib/class-sessions";
 import { liveWhere } from "@/lib/live-presence";
 import { instantToZonedParts } from "@/lib/school-time";
 import { ASSESSMENT_TYPES } from "@/lib/grading";
+import { topUpSeriesForStudent } from "@/lib/private-class-series";
+import { lecturerCan } from "@/lib/lecturer-features";
 import { pickFocusIndex, sittingNote, sittingStateAt, type SittingState } from "@/lib/tutor-today";
 import {
   belongsToLecturer,
@@ -56,6 +58,7 @@ export async function GET() {
         sessionSlots: true,
         assignmentGroups: true,
         batches: true,
+        features: true,
       },
     });
     if (!lecturer) {
@@ -108,11 +111,60 @@ export async function GET() {
       roster,
     );
 
-    if (!roster.length && !isAssigned(assignment)) {
+    const privateClasses = lecturerCan(lecturer.features, "private_classes")
+      ? await (async () => {
+          const seriesStudents = await prisma.privateClassSeries.findMany({
+            where: {
+              status: "active",
+              student: { classType: "private", status: "active" },
+              OR: [
+                { lecturerId: lecturer.id },
+                { lecturerId: null, student: { tutorId: lecturer.id } },
+                { lecturerId: null, student: { coTutors: { some: { lecturerId: lecturer.id } } } },
+              ],
+            },
+            select: { studentId: true },
+            distinct: ["studentId"],
+          });
+          await Promise.all(seriesStudents.map(({ studentId }) => topUpSeriesForStudent(studentId, now)));
+
+          const bookings = await prisma.privateClass.findMany({
+            where: {
+              status: { in: ["scheduled", "postponed"] },
+              scheduledAt: {
+                gte: new Date(now.getTime() - 6 * 60 * 60 * 1000),
+                lt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+              },
+              student: { classType: "private", status: "active" },
+              OR: [
+                { lecturerId: lecturer.id },
+                { lecturerId: null, student: { tutorId: lecturer.id } },
+                { lecturerId: null, student: { coTutors: { some: { lecturerId: lecturer.id } } } },
+              ],
+            },
+            orderBy: { scheduledAt: "asc" },
+            select: {
+              id: true,
+              studentId: true,
+              scheduledAt: true,
+              durationMinutes: true,
+              topic: true,
+              status: true,
+              student: { select: { user: { select: { name: true } } } },
+            },
+          });
+          return bookings.filter(
+            (booking) => booking.scheduledAt.getTime() + booking.durationMinutes * 60_000 > now.getTime(),
+          );
+        })()
+      : [];
+
+    if (!roster.length && !isAssigned(assignment) && !privateClasses.length) {
       return NextResponse.json({
         assigned: false,
         message: "You have not been assigned a class yet. The school office sets this.",
         groups: [],
+        privateClasses: [],
         focusKey: null,
         register: null,
         live: null,
@@ -130,7 +182,15 @@ export async function GET() {
       prisma.liveClassSession.findFirst({
         where: { lecturerId: lecturer.id, ...liveWhere() },
         orderBy: { startedAt: "desc" },
-        select: { id: true, title: true, joinCode: true, roomName: true, startedAt: true },
+        select: {
+          id: true,
+          title: true,
+          joinCode: true,
+          roomName: true,
+          startedAt: true,
+          kind: true,
+          privateClassId: true,
+        },
       }),
     ]);
 
@@ -142,6 +202,15 @@ export async function GET() {
     return NextResponse.json({
       assigned: true,
       today: { dateKey: clock.dateKey, clock: clock.clock },
+      privateClasses: privateClasses.map((privateClass) => ({
+        id: privateClass.id,
+        studentId: privateClass.studentId,
+        studentName: privateClass.student.user.name ?? "Student",
+        scheduledAt: privateClass.scheduledAt,
+        durationMinutes: privateClass.durationMinutes,
+        topic: privateClass.topic,
+        status: privateClass.status,
+      })),
       groups: groups.map((group, index) => ({
         key: group.key,
         label: group.label,
@@ -167,7 +236,14 @@ export async function GET() {
         takenToday: roster.length > 0 && marksToday >= roster.length,
       },
       live: open
-        ? { id: open.id, title: open.title, joinCode: open.joinCode, startedAt: open.startedAt }
+        ? {
+            id: open.id,
+            title: open.title,
+            joinCode: open.joinCode,
+            startedAt: open.startedAt,
+            kind: open.kind,
+            privateClassId: open.privateClassId,
+          }
         : null,
       assessmentTypes: ASSESSMENT_TYPES,
     });
