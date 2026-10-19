@@ -498,6 +498,8 @@ function PaymentsLedger() {
           </div>
         ) : null}
 
+        <BulkGracePanel />
+
         <div className="filter-grid">
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
             <label htmlFor="search" className="block text-sm font-semibold text-[var(--muted)]">Search</label>
@@ -1040,6 +1042,229 @@ function PaymentsLedger() {
         />
       )}
     </AdminShell>
+  );
+}
+
+type BulkGraceFilters = {
+  batch: string;
+  level: string;
+  branchId: string;
+  classType: string;
+  paymentStatus: string;
+  graceStatus: string;
+};
+
+type BulkGracePreview = {
+  count: number;
+  activeGraceCount: number;
+  graceRecordCount: number;
+  depositClearedCount: number;
+  batchOptions: string[];
+  branchOptions: Array<{ id: string; name: string }>;
+  sample: Array<{
+    id: string;
+    name: string;
+    level: string;
+    batch: string | null;
+    branch: string;
+    paid: number;
+    owed: number;
+    depositPaid: boolean;
+    graceUntil: string | null;
+  }>;
+};
+
+const EMPTY_BULK_GRACE_FILTERS: BulkGraceFilters = {
+  batch: "",
+  level: "",
+  branchId: "",
+  classType: "",
+  paymentStatus: "all",
+  graceStatus: "any",
+};
+
+function BulkGracePanel() {
+  const [filters, setFilters] = useState(EMPTY_BULK_GRACE_FILTERS);
+  const [preview, setPreview] = useState<BulkGracePreview | null>(null);
+  const [graceDate, setGraceDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [previewFilters, setPreviewFilters] = useState("");
+
+  const loadPreview = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const url = new URL("/api/admin/payments/bulk-grace", window.location.origin);
+      for (const [key, value] of Object.entries(filters)) {
+        if (value) url.searchParams.set(key, value);
+      }
+      const response = await fetch(url.toString(), { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not preview this group.");
+      setPreview(data);
+      setPreviewFilters(JSON.stringify(filters));
+    } catch (previewError) {
+      setPreview(null);
+      setError(previewError instanceof Error ? previewError.message : "Could not preview this group.");
+    } finally {
+      setBusy(false);
+    }
+  }, [filters]);
+
+  const previewIsCurrent = Boolean(preview && previewFilters === JSON.stringify(filters));
+
+  function updateFilter<K extends keyof BulkGraceFilters>(key: K, value: BulkGraceFilters[K]) {
+    setNotice("");
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  async function applyGrace(action: "grant" | "clear") {
+    if (!preview?.count) return;
+    if (action === "grant" && !graceDate) {
+      setError("Choose the date grace should end.");
+      return;
+    }
+    const actionLabel = action === "grant" ? `grant grace through ${graceDate}` : "clear existing grace";
+    if (!window.confirm(`Are you sure you want to ${actionLabel} for ${preview.count} matching students?`)) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      let graceUntil: string | null = null;
+      if (action === "grant") {
+        const [year, month, day] = graceDate.split("-").map(Number);
+        graceUntil = new Date(year, month - 1, day, 23, 59, 59, 999).toISOString();
+      }
+      const response = await fetch("/api/admin/payments/bulk-grace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...filters, action, graceUntil }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not update grace for this group.");
+      setNotice(
+        action === "grant"
+          ? `Grace through ${graceDate} was recorded on ${data.updated} student profiles. Their portals now use the updated grace date.`
+          : `Grace was cleared on ${data.updated} student profiles.`,
+      );
+      await loadPreview();
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Could not update grace for this group.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-xl font-bold">Batch grace periods</h2>
+        <p className="text-sm text-[var(--muted)]">
+          Set or clear payment grace for a filtered group instead of opening each student profile. The action updates every matching active student and their portal reads the same grace date as the admin profile.
+        </p>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Batch</span>
+          <select value={filters.batch} onChange={(event) => updateFilter("batch", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+            <option value="">All batches</option>
+            {(preview?.batchOptions ?? []).map((batch) => <option key={batch} value={batch}>{batch}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Current level</span>
+          <select value={filters.level} onChange={(event) => updateFilter("level", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+            <option value="">All levels</option>
+            {LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Branch</span>
+          <select value={filters.branchId} onChange={(event) => updateFilter("branchId", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+            <option value="">All branches</option>
+            {(preview?.branchOptions ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Membership</span>
+          <select value={filters.classType} onChange={(event) => updateFilter("classType", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+            <option value="">All memberships</option>
+            <option value="group">Group class</option>
+            <option value="private">Private membership</option>
+          </select>
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Payment position</span>
+          <select value={filters.paymentStatus} onChange={(event) => updateFilter("paymentStatus", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+            <option value="all">All payment positions</option>
+            <option value="unpaid">No tuition paid</option>
+            <option value="outstanding">Any outstanding balance</option>
+            <option value="part_paid">Some paid, balance remains</option>
+            <option value="deposit_paid">Deposit paid, current balance remains</option>
+            <option value="paid">Paid in full</option>
+          </select>
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Existing grace</span>
+          <select value={filters.graceStatus} onChange={(event) => updateFilter("graceStatus", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+            <option value="any">Any grace status</option>
+            <option value="none">No grace recorded</option>
+            <option value="active">Grace currently active</option>
+            <option value="expired">Grace expired</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-4 rounded-2xl bg-[var(--background)] p-4">
+        <p aria-live="polite" className="text-sm font-semibold">
+          {busy
+            ? "Updating preview…"
+            : previewIsCurrent
+              ? `${preview?.count ?? 0} active students match these filters.`
+              : preview
+                ? "Filters changed. Preview again before making changes."
+                : "Preview the matching students before making changes."}
+          {previewIsCurrent && preview && preview.activeGraceCount > 0 ? ` ${preview.activeGraceCount} already have active grace.` : ""}
+        </p>
+        {previewIsCurrent && preview?.sample.length ? (
+          <ul className="mt-2 grid gap-1 text-xs text-[var(--muted)] sm:grid-cols-2">
+            {preview.sample.slice(0, 6).map((student) => (
+              <li key={student.id}>
+                {student.name} · {student.level} · {student.batch ?? "No batch"} · {student.branch} · owes ₦{Math.round(student.owed).toLocaleString("en-NG")}
+              </li>
+            ))}
+            {preview.count > preview.sample.length ? <li>And {preview.count - preview.sample.length} more…</li> : null}
+          </ul>
+        ) : null}
+        {previewIsCurrent && preview && preview.count > 0 ? (
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            {preview.depositClearedCount} have cleared the current-level deposit. Grace delays the payment balance lock; it does not count as a payment, unlock students who have not met the deposit, or bypass a future-batch start date.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        <button type="button" disabled={busy} onClick={() => void loadPreview()} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
+          {busy ? "Loading…" : "Preview matching students"}
+        </button>
+        <label className="space-y-1 text-sm">
+          <span className="font-semibold text-[var(--muted)]">Grace ends on</span>
+          <input type="date" value={graceDate} onChange={(event) => setGraceDate(event.target.value)} className="block rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2" />
+        </label>
+        <button type="button" disabled={busy || !previewIsCurrent || !preview?.count || !graceDate} onClick={() => void applyGrace("grant")} className="rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+          Grant grace to matching students
+        </button>
+        <button type="button" disabled={busy || !previewIsCurrent || !preview?.graceRecordCount} onClick={() => void applyGrace("clear")} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
+          Clear grace for matching students
+        </button>
+      </div>
+      {error ? <p role="alert" className="mt-3 text-sm text-red-600">{error}</p> : null}
+      {notice ? <p role="status" className="mt-3 text-sm font-semibold text-emerald-700">{notice}</p> : null}
+    </section>
   );
 }
 
