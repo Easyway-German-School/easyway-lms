@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { batchFromAdmission } from "@/lib/batch";
-import { BULK_GRACE_PAYMENT_STATUSES, matchesBulkGracePaymentStatus, type BulkGracePaymentStatus } from "@/lib/bulk-grace";
+import { bulkGraceBatchLabel, BULK_GRACE_PAYMENT_STATUSES, matchesBulkGracePaymentStatus, type BulkGracePaymentStatus } from "@/lib/bulk-grace";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT } from "@/lib/finance/receivables";
 import { LEVELS } from "@/lib/levels";
 import { prisma } from "@/lib/prisma";
@@ -59,17 +58,6 @@ function rosterWhere(tenantId: string | null | undefined, branchIds: string[] | 
   return { AND: and };
 }
 
-function studentBatchLabel(student: {
-  admission: unknown;
-  enrolments: Array<{ batchMonth: string | null; batchYear: number | null; outcome: string }>;
-}): string | null {
-  const current = student.enrolments.find((enrolment) => enrolment.outcome === "ongoing");
-  if (current?.batchMonth) {
-    return current.batchYear ? `${current.batchMonth} ${current.batchYear}` : current.batchMonth;
-  }
-  return batchFromAdmission(student.admission);
-}
-
 async function findTargets(
   baseWhere: Prisma.StudentWhereInput,
   filters: BulkGraceFilters,
@@ -109,7 +97,7 @@ async function findTargets(
   }> = [];
 
   for (const student of students) {
-    const batch = studentBatchLabel(student);
+    const batch = bulkGraceBatchLabel(student);
     const finance = computeStudentFinance(student, now);
     const currentCharge = finance.openCharges.find(
       (charge) => charge.level.toUpperCase() === student.level.toUpperCase(),
@@ -161,6 +149,27 @@ async function findTargets(
   };
 }
 
+async function findBatchOptions(baseWhere: Prisma.StudentWhereInput): Promise<string[]> {
+  const students = await prisma.student.findMany({
+    where: baseWhere,
+    select: {
+      admission: true,
+      enrolments: {
+        where: { deletedAt: null, outcome: "ongoing" },
+        orderBy: { startedAt: "desc" },
+        take: 1,
+        select: { batchMonth: true, batchYear: true, outcome: true },
+      },
+    },
+  });
+  const options = new Set<string>();
+  for (const student of students) {
+    const batch = bulkGraceBatchLabel(student);
+    if (batch) options.add(batch);
+  }
+  return [...options].sort((a, b) => a.localeCompare(b));
+}
+
 function filtersFromUrl(url: URL): BulkGraceFilters | string {
   return parseFilters(Object.fromEntries(url.searchParams.entries()));
 }
@@ -168,12 +177,23 @@ function filtersFromUrl(url: URL): BulkGraceFilters | string {
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
   if (!gate.ok) return gate.response;
-  const filters = filtersFromUrl(new URL(request.url));
+  const url = new URL(request.url);
+  const baseWhere = rosterWhere(gate.session.user.tenantId, scopedBranchIds(gate.admin));
+  if (url.searchParams.get("optionsOnly") === "true") {
+    try {
+      return NextResponse.json({ batchOptions: await findBatchOptions(baseWhere) });
+    } catch (error) {
+      console.error("Bulk payment grace batch options failed", error);
+      return NextResponse.json({ error: "Could not load available batches." }, { status: 500 });
+    }
+  }
+
+  const filters = filtersFromUrl(url);
   if (typeof filters === "string") return NextResponse.json({ error: filters }, { status: 400 });
 
   try {
     const result = await findTargets(
-      rosterWhere(gate.session.user.tenantId, scopedBranchIds(gate.admin)),
+      baseWhere,
       filters,
       new Date(),
     );

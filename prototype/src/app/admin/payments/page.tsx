@@ -1086,11 +1086,36 @@ const EMPTY_BULK_GRACE_FILTERS: BulkGraceFilters = {
 function BulkGracePanel() {
   const [filters, setFilters] = useState(EMPTY_BULK_GRACE_FILTERS);
   const [preview, setPreview] = useState<BulkGracePreview | null>(null);
+  const [batchOptions, setBatchOptions] = useState<string[]>([]);
+  const [batchOptionsLoading, setBatchOptionsLoading] = useState(true);
+  const [batchOptionsError, setBatchOptionsError] = useState("");
   const [graceDate, setGraceDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [previewFilters, setPreviewFilters] = useState("");
+
+  const loadBatchOptions = useCallback(async () => {
+    setBatchOptionsLoading(true);
+    setBatchOptionsError("");
+    try {
+      const url = new URL("/api/admin/payments/bulk-grace", window.location.origin);
+      url.searchParams.set("optionsOnly", "true");
+      const response = await fetch(url.toString(), { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not load available batches.");
+      if (!Array.isArray(data.batchOptions)) throw new Error("The batch list response was invalid.");
+      setBatchOptions(data.batchOptions);
+    } catch (optionsError) {
+      setBatchOptionsError(optionsError instanceof Error ? optionsError.message : "Could not load available batches.");
+    } finally {
+      setBatchOptionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBatchOptions();
+  }, [loadBatchOptions]);
 
   const loadPreview = useCallback(async () => {
     setBusy(true);
@@ -1170,10 +1195,16 @@ function BulkGracePanel() {
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-1 text-sm">
           <span className="font-semibold text-[var(--muted)]">Batch</span>
-          <select value={filters.batch} onChange={(event) => updateFilter("batch", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
-            <option value="">All batches</option>
-            {(preview?.batchOptions ?? []).map((batch) => <option key={batch} value={batch}>{batch}</option>)}
+          <select value={filters.batch} onChange={(event) => updateFilter("batch", event.target.value)} disabled={batchOptionsLoading || Boolean(batchOptionsError)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 disabled:opacity-60">
+            <option value="">{batchOptionsLoading ? "Loading batches…" : batchOptions.length ? "All batches" : "No active batches"}</option>
+            {batchOptions.map((batch) => <option key={batch} value={batch}>{batch}</option>)}
           </select>
+          {batchOptionsError ? (
+            <span className="flex items-center gap-2 text-xs text-red-600">
+              {batchOptionsError}
+              <button type="button" onClick={() => void loadBatchOptions()} className="font-semibold underline">Retry</button>
+            </span>
+          ) : null}
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-semibold text-[var(--muted)]">Current level</span>
