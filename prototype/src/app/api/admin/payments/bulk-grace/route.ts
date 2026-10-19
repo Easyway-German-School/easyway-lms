@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { bulkGraceBatchLabel, BULK_GRACE_PAYMENT_STATUSES, matchesBulkGracePaymentStatus, type BulkGracePaymentStatus } from "@/lib/bulk-grace";
+import { bulkGraceBatchLabel, BULK_GRACE_PAYMENT_STATUSES, compareBulkGraceBatchLabels, matchesBulkGraceBatch, matchesBulkGracePaymentStatus, type BulkGracePaymentStatus } from "@/lib/bulk-grace";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT } from "@/lib/finance/receivables";
 import { LEVELS } from "@/lib/levels";
 import { prisma } from "@/lib/prisma";
@@ -106,7 +106,7 @@ async function findTargets(
     if (batch) batchOptions.add(batch);
     if (finance.branchId) branchOptions.set(finance.branchId, finance.branch);
 
-    if (filters.batch && batch !== filters.batch) continue;
+    if (!matchesBulkGraceBatch(filters.batch, batch)) continue;
     if (filters.level && student.level.toUpperCase() !== filters.level) continue;
     if (filters.branchId && finance.branchId !== filters.branchId) continue;
     if (filters.classType && student.classType !== filters.classType) continue;
@@ -144,16 +144,18 @@ async function findTargets(
 
   return {
     targets,
-    batchOptions: [...batchOptions].sort((a, b) => a.localeCompare(b)),
+    batchOptions: [...batchOptions].sort(compareBulkGraceBatchLabels),
     branchOptions: Array.from(branchOptions, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
 
-async function findBatchOptions(baseWhere: Prisma.StudentWhereInput): Promise<string[]> {
+async function findFilterOptions(baseWhere: Prisma.StudentWhereInput) {
   const students = await prisma.student.findMany({
     where: baseWhere,
     select: {
       admission: true,
+      createdAt: true,
+      branch: { select: { id: true, name: true } },
       enrolments: {
         where: { deletedAt: null, outcome: "ongoing" },
         orderBy: { startedAt: "desc" },
@@ -162,12 +164,17 @@ async function findBatchOptions(baseWhere: Prisma.StudentWhereInput): Promise<st
       },
     },
   });
-  const options = new Set<string>();
+  const batches = new Set<string>();
+  const branches = new Map<string, string>();
   for (const student of students) {
     const batch = bulkGraceBatchLabel(student);
-    if (batch) options.add(batch);
+    if (batch) batches.add(batch);
+    if (student.branch) branches.set(student.branch.id, student.branch.name);
   }
-  return [...options].sort((a, b) => a.localeCompare(b));
+  return {
+    batchOptions: [...batches].sort(compareBulkGraceBatchLabels),
+    branchOptions: Array.from(branches, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+  };
 }
 
 function filtersFromUrl(url: URL): BulkGraceFilters | string {
@@ -181,10 +188,10 @@ export async function GET(request: Request) {
   const baseWhere = rosterWhere(gate.session.user.tenantId, scopedBranchIds(gate.admin));
   if (url.searchParams.get("optionsOnly") === "true") {
     try {
-      return NextResponse.json({ batchOptions: await findBatchOptions(baseWhere) });
+      return NextResponse.json(await findFilterOptions(baseWhere));
     } catch (error) {
-      console.error("Bulk payment grace batch options failed", error);
-      return NextResponse.json({ error: "Could not load available batches." }, { status: 500 });
+      console.error("Bulk payment grace filter options failed", error);
+      return NextResponse.json({ error: "Could not load payment filters." }, { status: 500 });
     }
   }
 

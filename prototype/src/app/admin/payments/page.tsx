@@ -1059,7 +1059,6 @@ type BulkGracePreview = {
   activeGraceCount: number;
   graceRecordCount: number;
   depositClearedCount: number;
-  batchOptions: string[];
   branchOptions: Array<{ id: string; name: string }>;
   sample: Array<{
     id: string;
@@ -1087,6 +1086,7 @@ function BulkGracePanel() {
   const [filters, setFilters] = useState(EMPTY_BULK_GRACE_FILTERS);
   const [preview, setPreview] = useState<BulkGracePreview | null>(null);
   const [batchOptions, setBatchOptions] = useState<string[]>([]);
+  const [branchOptions, setBranchOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [batchOptionsLoading, setBatchOptionsLoading] = useState(true);
   const [batchOptionsError, setBatchOptionsError] = useState("");
   const [graceDate, setGraceDate] = useState("");
@@ -1104,8 +1104,11 @@ function BulkGracePanel() {
       const response = await fetch(url.toString(), { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load available batches.");
-      if (!Array.isArray(data.batchOptions)) throw new Error("The batch list response was invalid.");
+      if (!Array.isArray(data.batchOptions) || !Array.isArray(data.branchOptions)) {
+        throw new Error("The payment filter list response was invalid.");
+      }
       setBatchOptions(data.batchOptions);
+      setBranchOptions(data.branchOptions);
     } catch (optionsError) {
       setBatchOptionsError(optionsError instanceof Error ? optionsError.message : "Could not load available batches.");
     } finally {
@@ -1151,8 +1154,16 @@ function BulkGracePanel() {
       setError("Choose the date grace should end.");
       return;
     }
+    const selectedFilters = [
+      filters.batch ? `batch ${filters.batch}` : "all batches",
+      filters.level ? `level ${filters.level}` : "all levels",
+      filters.branchId ? branchOptions.find((branch) => branch.id === filters.branchId)?.name ?? "selected branch" : "all branches",
+      filters.classType === "group" ? "group classes" : filters.classType === "private" ? "private students" : "all memberships",
+      filters.paymentStatus === "all" ? "all payment positions" : filters.paymentStatus.replaceAll("_", " "),
+      filters.graceStatus === "any" ? "any grace status" : `${filters.graceStatus} grace`,
+    ].join(", ");
     const actionLabel = action === "grant" ? `grant grace through ${graceDate}` : "clear existing grace";
-    if (!window.confirm(`Are you sure you want to ${actionLabel} for ${preview.count} matching students?`)) return;
+    if (!window.confirm(`This will ${actionLabel} for ${preview.count} active students matching: ${selectedFilters}. Continue?`)) return;
 
     setBusy(true);
     setError("");
@@ -1184,15 +1195,17 @@ function BulkGracePanel() {
   }
 
   return (
-    <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-6">
       <div className="flex flex-col gap-2">
         <h2 className="text-xl font-bold">Batch grace periods</h2>
         <p className="text-sm text-[var(--muted)]">
-          Set or clear payment grace for a filtered group instead of opening each student profile. The action updates every matching active student and their portal reads the same grace date as the admin profile.
+          Select a batch and payment filters, preview the matching students, then grant or clear grace for that exact group.
         </p>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <fieldset className="mt-5">
+        <legend className="mb-3 text-sm font-bold">Choose students</legend>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-1 text-sm">
           <span className="font-semibold text-[var(--muted)]">Batch</span>
           <select value={filters.batch} onChange={(event) => updateFilter("batch", event.target.value)} disabled={batchOptionsLoading || Boolean(batchOptionsError)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 disabled:opacity-60">
@@ -1202,7 +1215,7 @@ function BulkGracePanel() {
           {batchOptionsError ? (
             <span className="flex items-center gap-2 text-xs text-red-600">
               {batchOptionsError}
-              <button type="button" onClick={() => void loadBatchOptions()} className="font-semibold underline">Retry</button>
+              <button type="button" onClick={() => void loadBatchOptions()} className="font-semibold underline">Retry loading filters</button>
             </span>
           ) : null}
         </label>
@@ -1217,7 +1230,7 @@ function BulkGracePanel() {
           <span className="font-semibold text-[var(--muted)]">Branch</span>
           <select value={filters.branchId} onChange={(event) => updateFilter("branchId", event.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2">
             <option value="">All branches</option>
-            {(preview?.branchOptions ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+            {branchOptions.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
           </select>
         </label>
         <label className="space-y-1 text-sm">
@@ -1248,17 +1261,26 @@ function BulkGracePanel() {
             <option value="expired">Grace expired</option>
           </select>
         </label>
+        </div>
+      </fieldset>
+
+      <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-[var(--muted)]">Preview refreshes the student list using every filter above. Changes stay disabled until the current filters have been previewed.</p>
+        <button type="button" disabled={busy || batchOptionsLoading || Boolean(batchOptionsError)} onClick={() => void loadPreview()} className="w-full shrink-0 rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50 sm:w-auto">
+          {busy ? "Loading preview…" : "Preview students"}
+        </button>
       </div>
 
-      <div className="mt-4 rounded-2xl bg-[var(--background)] p-4">
+      <div className="mt-3 rounded-2xl bg-[var(--background)] p-4">
+        <h3 className="font-bold">Preview</h3>
         <p aria-live="polite" className="text-sm font-semibold">
           {busy
-            ? "Updating preview…"
+            ? "Finding students matching these filters…"
             : previewIsCurrent
               ? `${preview?.count ?? 0} active students match these filters.`
               : preview
-                ? "Filters changed. Preview again before making changes."
-                : "Preview the matching students before making changes."}
+                ? "Filters changed. Preview again before applying grace."
+                : "Select your filters, then preview the students before applying grace."}
           {previewIsCurrent && preview && preview.activeGraceCount > 0 ? ` ${preview.activeGraceCount} already have active grace.` : ""}
         </p>
         {previewIsCurrent && preview?.sample.length ? (
@@ -1268,7 +1290,7 @@ function BulkGracePanel() {
                 {student.name} · {student.level} · {student.batch ?? "No batch"} · {student.branch} · owes ₦{Math.round(student.owed).toLocaleString("en-NG")}
               </li>
             ))}
-            {preview.count > preview.sample.length ? <li>And {preview.count - preview.sample.length} more…</li> : null}
+            {preview.count > preview.sample.length ? <li>And {preview.count - preview.sample.length} more.</li> : null}
           </ul>
         ) : null}
         {previewIsCurrent && preview && preview.count > 0 ? (
@@ -1278,21 +1300,21 @@ function BulkGracePanel() {
         ) : null}
       </div>
 
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-        <button type="button" disabled={busy} onClick={() => void loadPreview()} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
-          {busy ? "Loading…" : "Preview matching students"}
-        </button>
+      <fieldset className="mt-5">
+        <legend className="mb-3 text-sm font-bold">Apply grace</legend>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-1 text-sm">
           <span className="font-semibold text-[var(--muted)]">Grace ends on</span>
-          <input type="date" value={graceDate} onChange={(event) => setGraceDate(event.target.value)} className="block rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2" />
+          <input type="date" value={graceDate} onChange={(event) => setGraceDate(event.target.value)} className="block w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2" />
         </label>
-        <button type="button" disabled={busy || !previewIsCurrent || !preview?.count || !graceDate} onClick={() => void applyGrace("grant")} className="rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="button" disabled={busy || !previewIsCurrent || !preview?.count || !graceDate} onClick={() => void applyGrace("grant")} className="w-full self-end rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
           Grant grace to matching students
         </button>
-        <button type="button" disabled={busy || !previewIsCurrent || !preview?.graceRecordCount} onClick={() => void applyGrace("clear")} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
+        <button type="button" disabled={busy || !previewIsCurrent || !preview?.graceRecordCount} onClick={() => void applyGrace("clear")} className="w-full self-end rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
           Clear grace for matching students
         </button>
-      </div>
+        </div>
+      </fieldset>
       {error ? <p role="alert" className="mt-3 text-sm text-red-600">{error}</p> : null}
       {notice ? <p role="status" className="mt-3 text-sm font-semibold text-emerald-700">{notice}</p> : null}
     </section>
