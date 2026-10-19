@@ -163,7 +163,7 @@ export async function GET() {
       // exactly that kind of interruption if it pops up over whatever the
       // student opened the dashboard to do.
       try {
-        const { daysLeft } = buildCountdown(currentLevel, student.classesStartedAt, {
+        const { daysLeft, phase } = buildCountdown(currentLevel, student.classesStartedAt, {
           now: new Date(),
           months: sessionDurationMonths(student.sessionSlot),
         });
@@ -172,8 +172,10 @@ export async function GET() {
         // the idempotency mechanism (see lib/notify.ts), so no new Student
         // column is needed to track which nudge already fired.
         let dedupeKey: string | null = null;
-        if (daysLeft <= 7) {
-          dedupeKey = `level-nudge:${student.id}:${currentLevel}:daily:${new Date().toISOString().slice(0, 10)}`;
+        if (phase === "overdue") {
+          dedupeKey = null;
+        } else if (daysLeft <= 7) {
+          dedupeKey = `level-nudge:${student.id}:${currentLevel}:final-week`;
         } else if (daysLeft <= 14) {
           dedupeKey = `level-nudge:${student.id}:${currentLevel}:3d:${Math.floor(daysLeft / 3)}`;
         } else if (daysLeft <= 21) {
@@ -185,11 +187,15 @@ export async function GET() {
             to: { studentIds: [student.id] },
             kind: KIND.levelAdvance,
             severity: "info",
-            title: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left on ${currentLevel}`,
+            title: daysLeft === 0
+              ? `${currentLevel} teaching period ends today`
+              : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left in ${currentLevel}`,
             message:
-              daysLeft <= 1
-                ? `${currentLevel} wraps up today. Ask your branch about ${nextLevel} so there is no gap before you continue.`
-                : `${daysLeft} days left on ${currentLevel}. Worth thinking about ${nextLevel} now, before the batch fills without you.`,
+              daysLeft === 0
+                ? `Your scheduled ${currentLevel} teaching period ends today. This is a calendar reminder only: it does not confirm a pass or move you to ${nextLevel}. Your school will confirm completion and next steps.`
+                : daysLeft === 1
+                  ? `Your scheduled ${currentLevel} teaching period ends tomorrow. This reminder does not confirm a pass or move you to ${nextLevel}; your school will confirm completion and next steps.`
+                  : `${daysLeft} days remain in your scheduled ${currentLevel} teaching period. This reminder does not change your level; your school will confirm completion and next steps.`,
             link: "/dashboard",
             dedupeKey,
           });

@@ -912,6 +912,7 @@ export async function runAutoLevelProgression(
         select: {
           id: true,
           level: true,
+          sessionSlot: true,
           admission: true,
           classesStartedAt: true,
           startConfirmedVia: true,
@@ -968,7 +969,12 @@ export async function runAutoLevelProgression(
           });
         }
 
-        const decision = autoProgressionDecision({ startedAt: start, confirmedVia: source, now });
+        const decision = autoProgressionDecision({
+          startedAt: start,
+          confirmedVia: source,
+          sessionSlot: student.sessionSlot,
+          now,
+        });
         if (!decision.eligible) {
           if (decision.reason === "unconfirmed_start" || decision.reason === "invalid_start") total.review += 1;
           continue;
@@ -996,13 +1002,13 @@ export async function runAutoLevelProgression(
             expectedLevel: student.level,
             override: {
               by: "system",
-              reason: "Eight weeks elapsed from a confirmed first class; prior tuition remains payable.",
+              reason: "The course window ended from a confirmed first class; prior tuition remains payable.",
             },
           });
           if (promotion.promoted.includes(student.id)) total.promoted += 1;
           else total.review += 1;
         } catch (error) {
-          console.error("Automatic eight-week progression failed", { studentId: student.id, error });
+          console.error("Automatic course-window progression failed", { studentId: student.id, error });
           total.review += 1;
         }
       }

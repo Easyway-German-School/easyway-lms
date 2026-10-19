@@ -640,9 +640,9 @@ export default function GraduationPage() {
 
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
           <div className="space-y-1">
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-800">Eight-week progression</p>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-800">Course-window progression</p>
             <p className="font-semibold text-amber-950">
-              {auto.autoPromote ? "On — eligible learners move up after 56 days" : "Off — staff move learners up manually"}
+              {auto.autoPromote ? "On — eligible learners move up when their course window ends" : "Off — staff move learners up manually"}
             </p>
             <p className="max-w-xl text-sm text-amber-900">
               Only confirmed class starts count. Learners with uncertain start records stay for staff review. Previous-level tuition remains due and blocks access until paid.
