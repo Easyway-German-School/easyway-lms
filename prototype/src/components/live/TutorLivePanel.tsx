@@ -40,6 +40,7 @@ type LiveState = {
   kind: string;
   startedAt: string;
   roomName: string;
+  privateClassId: string | null;
   /** The teaching group this open room belongs to, when it maps to one. */
   groupKey: string | null;
   groupLabel: string | null;
@@ -111,6 +112,11 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
 
   const waiting = invites.filter((invite) => invite.status === "invited");
   const joined = invites.filter((invite) => invite.status === "joined");
+  const roomHref = live.privateClassId
+    ? `/live?privateClassId=${encodeURIComponent(live.privateClassId)}`
+    : live.groupKey
+      ? `/live?group=${encodeURIComponent(live.groupKey)}`
+      : "/live";
 
   return (
     <motion.div
@@ -131,7 +137,11 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
           </span>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/75">
-              {groups.length > 1 && live.groupLabel ? `You are live · ${live.groupLabel}` : "You are live"}
+              {live.kind === "private"
+                ? "One-to-one class · You are live"
+                : groups.length > 1 && live.groupLabel
+                  ? `You are live · ${live.groupLabel}`
+                  : "You are live"}
             </p>
             <p className="truncate text-base font-semibold">{live.title}</p>
           </div>
@@ -142,7 +152,7 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
             {live.joinCode}
           </span>
           <Link
-            href={live.groupKey ? `/live?group=${encodeURIComponent(live.groupKey)}` : "/live"}
+            href={roomHref}
             className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-[#0D7C7E] transition hover:brightness-95"
           >
             <VideoIcon className="h-3.5 w-3.5" />
@@ -172,8 +182,9 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
 
       {invites.length === 0 ? (
         <p className="px-5 py-5 text-sm text-[var(--muted)]">
-          Your whole class{live.groupLabel && groups.length > 1 ? ` (${live.groupLabel})` : ""} has been buzzed — nobody
-          was rung by name, so there is no guest list to track here. Anyone on the roster can walk in.
+          {live.kind === "private"
+            ? "The booked student has been invited to this private room."
+            : `Your whole class${live.groupLabel && groups.length > 1 ? ` (${live.groupLabel})` : ""} has been buzzed — nobody was rung by name, so there is no guest list to track here. Anyone on the roster can walk in.`}
         </p>
       ) : (
         <div className="p-5">

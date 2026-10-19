@@ -566,11 +566,28 @@ export async function mayJoinPrivateRoom(args: {
 
   const booking = await prisma.privateClass.findUnique({
     where: { id: args.privateClassId },
-    select: { studentId: true, lecturerId: true },
+    select: {
+      studentId: true,
+      lecturerId: true,
+      student: {
+        select: {
+          tutorId: true,
+          coTutors: { select: { lecturerId: true } },
+        },
+      },
+    },
   });
   if (!booking) return false;
 
   if (args.lecturerId && booking.lecturerId === args.lecturerId) return true;
+  if (
+    args.lecturerId &&
+    !booking.lecturerId &&
+    (booking.student.tutorId === args.lecturerId ||
+      booking.student.coTutors.some((link) => link.lecturerId === args.lecturerId))
+  ) {
+    return true;
+  }
   if (args.studentId && booking.studentId === args.studentId) return true;
 
   // A tutor may also have been added to the room by whoever opened it, and a

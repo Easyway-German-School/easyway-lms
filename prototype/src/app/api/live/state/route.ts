@@ -142,6 +142,7 @@ export async function GET() {
           level: open.level,
           sessionSlot: open.sessionSlot,
           batch: open.batch,
+          privateClassId: open.privateClassId,
           groupKey: liveGroup?.key ?? null,
           groupLabel: liveGroup?.label ?? null,
         },

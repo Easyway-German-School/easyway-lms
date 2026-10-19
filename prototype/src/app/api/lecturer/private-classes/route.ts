@@ -76,13 +76,34 @@ export async function GET(req: NextRequest) {
     // across all their students. No per-student messaging payload — that stays
     // on the studentId path.
     if (!studentId && from && to) {
+      const privateStudentScope = { classType: "private", status: "active" };
       const scoped =
         auth.role === "lecturer" && auth.lecturerId
-          ? { student: { tutorId: auth.lecturerId, classType: "private", status: "active" } }
-          : { student: { classType: "private", status: "active" } };
+          ? {
+              student: privateStudentScope,
+              OR: [
+                { lecturerId: auth.lecturerId },
+                { lecturerId: null, student: { tutorId: auth.lecturerId } },
+                { lecturerId: null, student: { coTutors: { some: { lecturerId: auth.lecturerId } } } },
+              ],
+            }
+          : { student: privateStudentScope };
 
       const seriesStudents = await prisma.privateClassSeries.findMany({
-        where: { status: "active", student: scoped.student },
+        where: {
+          status: "active",
+          student:
+            auth.role === "lecturer" && auth.lecturerId
+              ? {
+                  ...privateStudentScope,
+                  OR: [
+                    { tutorId: auth.lecturerId },
+                    { coTutors: { some: { lecturerId: auth.lecturerId } } },
+                    { privateClasses: { some: { lecturerId: auth.lecturerId } } },
+                  ],
+                }
+              : privateStudentScope,
+        },
         select: { studentId: true },
         distinct: ["studentId"],
       });
@@ -120,7 +141,15 @@ export async function GET(req: NextRequest) {
       where: {
         classType: "private",
         status: "active",
-        ...(auth.role === "lecturer" && auth.lecturerId ? { tutorId: auth.lecturerId } : {}),
+        ...(auth.role === "lecturer" && auth.lecturerId
+          ? {
+              OR: [
+                { tutorId: auth.lecturerId },
+                { coTutors: { some: { lecturerId: auth.lecturerId } } },
+                { privateClasses: { some: { lecturerId: auth.lecturerId } } },
+              ],
+            }
+          : {}),
       },
       include: { user: { select: { name: true, email: true } }, branch: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
@@ -136,7 +165,18 @@ export async function GET(req: NextRequest) {
       ? await prisma.privateClass.findMany({
           where: {
             studentId,
-            ...(auth.role === "lecturer" && auth.lecturerId ? { lecturerId: auth.lecturerId } : {}),
+            ...(auth.role === "lecturer" && auth.lecturerId
+              ? {
+                  OR: [
+                    { lecturerId: auth.lecturerId },
+                    { lecturerId: null, student: { tutorId: auth.lecturerId } },
+                    {
+                      lecturerId: null,
+                      student: { coTutors: { some: { lecturerId: auth.lecturerId } } },
+                    },
+                  ],
+                }
+              : {}),
           },
           include: {
             lecturer: { select: { user: { select: { name: true } } } },
@@ -232,7 +272,14 @@ export async function POST(req: NextRequest) {
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, classType: true, tutorId: true, userId: true, user: { select: { name: true } } },
+      select: {
+        id: true,
+        classType: true,
+        tutorId: true,
+        coTutors: { select: { lecturerId: true } },
+        userId: true,
+        user: { select: { name: true } },
+      },
     });
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
@@ -243,7 +290,11 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if (auth.role === "lecturer" && student.tutorId !== auth.lecturerId) {
+    if (
+      auth.role === "lecturer" &&
+      student.tutorId !== auth.lecturerId &&
+      !student.coTutors.some((link) => link.lecturerId === auth.lecturerId)
+    ) {
       return NextResponse.json({ error: "That student is not assigned to you" }, { status: 403 });
     }
 
@@ -324,10 +375,26 @@ export async function PUT(req: NextRequest) {
 
     const existing = await prisma.privateClass.findUnique({
       where: { id: String(id) },
-      include: { student: { select: { id: true, userId: true, tutorId: true } }, lecturer: { select: { userId: true } } },
+      include: {
+        student: {
+          select: {
+            id: true,
+            userId: true,
+            tutorId: true,
+            coTutors: { select: { lecturerId: true } },
+          },
+        },
+        lecturer: { select: { userId: true } },
+      },
     });
     if (!existing) return NextResponse.json({ error: "Class not found" }, { status: 404 });
-    if (auth.role === "lecturer" && existing.lecturerId !== auth.lecturerId && existing.student.tutorId !== auth.lecturerId) {
+    if (
+      auth.role === "lecturer" &&
+      existing.lecturerId !== auth.lecturerId &&
+      (existing.lecturerId !== null ||
+        (existing.student.tutorId !== auth.lecturerId &&
+          !existing.student.coTutors.some((link) => link.lecturerId === auth.lecturerId)))
+    ) {
       return NextResponse.json({ error: "That class is not assigned to you" }, { status: 403 });
     }
     if (auth.role === "lecturer" && typeof lecturerId === "string" && lecturerId !== auth.lecturerId) {
@@ -454,10 +521,24 @@ export async function DELETE(req: NextRequest) {
 
     const existing = await prisma.privateClass.findUnique({
       where: { id },
-      include: { student: { select: { userId: true, tutorId: true } } },
+      include: {
+        student: {
+          select: {
+            userId: true,
+            tutorId: true,
+            coTutors: { select: { lecturerId: true } },
+          },
+        },
+      },
     });
     if (!existing) return NextResponse.json({ error: "Class not found" }, { status: 404 });
-    if (auth.role === "lecturer" && existing.lecturerId !== auth.lecturerId && existing.student.tutorId !== auth.lecturerId) {
+    if (
+      auth.role === "lecturer" &&
+      existing.lecturerId !== auth.lecturerId &&
+      (existing.lecturerId !== null ||
+        (existing.student.tutorId !== auth.lecturerId &&
+          !existing.student.coTutors.some((link) => link.lecturerId === auth.lecturerId)))
+    ) {
       return NextResponse.json({ error: "That class is not assigned to you" }, { status: 403 });
     }
 

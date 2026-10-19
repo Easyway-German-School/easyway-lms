@@ -86,30 +86,6 @@ export async function GET(request: Request) {
     const isAdmin = String(session.user.role ?? "").toLowerCase() === "admin";
 
     /**
-     * NOT EVERY TUTOR TAKES THE VIDEO CALL.
-     *
-     * The school decides who does, per tutor, and this is where that decision
-     * is enforced rather than merely displayed. Hiding the sidebar entry stops
-     * the honest route in; a token is a key to a live room with students in it,
-     * so it has to be refused here too — an old bookmark or a shared link is
-     * otherwise enough to walk into somebody else's lesson with tutor
-     * permissions, which include muting the room.
-     *
-     * Checked before the private-class branch below deliberately: a tutor
-     * without `live_classes` should not reach a private room either, and that
-     * check is about membership rather than about whether they run calls at all.
-     */
-    if (lecturer && !lecturerCan(lecturer.features, "live_classes")) {
-      return NextResponse.json(
-        {
-          error: "Not your area",
-          message: "The school has not given you live classes. Ask the office if this is wrong.",
-        },
-        { status: 403 },
-      );
-    }
-
-    /**
      * A join code is a SHORTCUT, NOT A KEY.
      *
      * It resolves which room the person meant — the whole point is the student
@@ -150,6 +126,23 @@ export async function GET(request: Request) {
           {
             error: "Not your class",
             message: "This is a private class you have not been invited to.",
+          },
+          { status: 403 },
+        );
+      }
+    }
+
+    if (lecturer) {
+      const featureAllowed = privateClassId
+        ? lecturerCan(lecturer.features, "private_classes")
+        : lecturerCan(lecturer.features, "live_classes");
+      if (!featureAllowed) {
+        return NextResponse.json(
+          {
+            error: "Not your area",
+            message: privateClassId
+              ? "The school has not given you private classes. Ask the office if this is wrong."
+              : "The school has not given you live classes. Ask the office if this is wrong.",
           },
           { status: 403 },
         );
