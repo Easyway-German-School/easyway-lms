@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bulkGraceBatchLabel, matchesBulkGracePaymentStatus } from "./bulk-grace";
+import { bulkGraceBatchLabel, compareBulkGraceBatchLabels, matchesBulkGraceBatch, matchesBulkGracePaymentStatus } from "./bulk-grace";
 
 const unpaid = { paid: 0, owed: 150_000, currentLevelOutstanding: 150_000, depositPaid: false };
 const partPaid = { paid: 80_000, owed: 70_000, currentLevelOutstanding: 70_000, depositPaid: false };
@@ -11,14 +11,37 @@ describe("bulk payment grace filters", () => {
     expect(bulkGraceBatchLabel({
       admission: { batch: "August" },
       enrolments: [
-        { batchMonth: "October", batchYear: 2026, outcome: "ongoing" },
+        { batchMonth: "October 2026", batchYear: 2026, outcome: "ongoing" },
         { batchMonth: "August", batchYear: 2026, outcome: "passed" },
       ],
     })).toBe("October 2026");
     expect(bulkGraceBatchLabel({
-      admission: { batch: "October" },
+      admission: null,
+      enrolments: [
+        { batchMonth: "August 2026", batchYear: 2027, outcome: "ongoing" },
+      ],
+    })).toBe("August 2027");
+    expect(bulkGraceBatchLabel({
+      admission: { batch: "October 2026 2026", batchYear: 2026 },
       enrolments: [],
-    })).toBe("October");
+    })).toBe("October 2026");
+  });
+
+  it("sorts batch options by intake date, newest first", () => {
+    const batches = ["October 2026", "April 2027", "August 2026"];
+    expect(batches.sort(compareBulkGraceBatchLabels)).toEqual([
+      "April 2027",
+      "October 2026",
+      "August 2026",
+    ]);
+  });
+
+  it("includes only students in the exactly selected batch and year", () => {
+    expect(matchesBulkGraceBatch("October 2026", "October 2026")).toBe(true);
+    expect(matchesBulkGraceBatch("October 2026", "October 2027")).toBe(false);
+    expect(matchesBulkGraceBatch("October 2026", "September 2026")).toBe(false);
+    expect(matchesBulkGraceBatch("October 2026", null)).toBe(false);
+    expect(matchesBulkGraceBatch("", null)).toBe(true);
   });
 
   it("separates unpaid, partial, deposit-paid, outstanding and fully paid students", () => {
