@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { awardFor, hasPassed, weightedCourseworkAverage, type Award } from "@/lib/grading";
 import { SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
-import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isTravelPackagePathway, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { resolveBatchWindow } from "@/lib/batch";
 
@@ -215,7 +215,9 @@ export async function issueCertificateForStudent(
 
   const feeLookup = { level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now, student.payments);
+  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now, student.payments, {
+    ignorePaymentLevels: isTravelPackagePathway(student.pathway),
+  });
 
   const eligibility = certificateEligibility({
     batch,

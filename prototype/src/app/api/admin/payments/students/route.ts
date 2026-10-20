@@ -5,7 +5,7 @@ import { batchFromAdmission } from "@/lib/batch";
 import { buildLedger } from "@/lib/finance/ledger";
 import { defaultCurrentIntake } from "@/lib/intake";
 import { nextLevelAfter } from "@/lib/levels";
-import { receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
+import { isTravelPackagePathway, receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * Student lookup for the payments desk.
@@ -178,7 +178,9 @@ export async function GET(request: Request) {
   const students: PaymentStudentCard[] = rows.map((row) => {
     const studentPayments = paymentsByStudent.get(row.id) ?? [];
     const paid = studentPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    const ledger = buildLedger(chargesByStudent.get(row.id) ?? [], paid, undefined, studentPayments);
+    const ledger = buildLedger(chargesByStudent.get(row.id) ?? [], paid, undefined, studentPayments, {
+      ignorePaymentLevels: isTravelPackagePathway(row.pathway),
+    });
     const currentBatchMonth =
       row.enrolments.find((enrolment) => enrolment.outcome === "ongoing")?.batchMonth ??
       batchFromAdmission(row.admission);

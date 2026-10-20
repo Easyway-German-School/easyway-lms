@@ -32,6 +32,7 @@ import {
   type RepairId,
 } from "@/lib/diagnose";
 import { buildLedger } from "@/lib/finance/ledger";
+import { isTravelPackagePathway } from "@/lib/payment";
 import { guardedFetch, isCircuitOpen } from "@/lib/guarded-fetch";
 import { LIVE_STALE_AFTER_MS } from "@/lib/live-presence";
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
@@ -274,7 +275,9 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   // the summary `access` object does not expose per-charge lines. `student.payments`
   // is already the received, non-registration set (STUDENT_ACCESS_SELECT applies
   // `receivedPaymentFilter()`), matching what `accessFromStudent` fed into the lock.
-  const ledger = buildLedger(student.tuitionCharges ?? [], access.totalPaid, new Date(), student.payments ?? []);
+  const ledger = buildLedger(student.tuitionCharges ?? [], access.totalPaid, new Date(), student.payments ?? [], {
+    ignorePaymentLevels: isTravelPackagePathway(student.pathway),
+  });
   const currentLevelKey = String(student.level ?? "").trim().toUpperCase();
   const currentLevelLine = ledger.lines.find((line) => line.level.trim().toUpperCase() === currentLevelKey) ?? null;
   const priorLevelArrears = ledger.lines

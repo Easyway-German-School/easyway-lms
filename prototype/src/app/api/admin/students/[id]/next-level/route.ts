@@ -60,9 +60,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const body = await request.json().catch(() => ({}));
   const mode = body?.mode === "move" ? "move" : body?.mode === "invite" ? "invite" : null;
   if (!mode) return NextResponse.json({ error: "Choose invite or move" }, { status: 400 });
+  const travelPackageApproval =
+    typeof body?.travelPackageApproval === "string" ? body.travelPackageApproval.trim() : "";
+  if (mode === "move" && travelPackageApproval) {
+    const financeGate = await requireCapability("payments");
+    if (!financeGate.ok) return financeGate.response;
+  }
 
   try {
-    const result = await applyMoveUp(id, { mode, details: body?.details, notify: body?.notify !== false });
+    const result = await applyMoveUp(id, {
+      mode,
+      details: body?.details,
+      byUserId: gate.session.user.id as string,
+      travelPackageApproval:
+        typeof body?.travelPackageApproval === "string" ? body.travelPackageApproval : undefined,
+      notify: body?.notify !== false,
+    });
     if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
 
     await writeAudit(unguardedPrisma, {
@@ -72,7 +85,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       severity: "notice",
       summary:
         mode === "move"
-          ? `Moved up to ${result.targetLevel} by hand from the Students table`
+          ? `Moved up to ${result.targetLevel} by hand from the Students table${
+              result.travelPackageBalanceApproved ? ` — Travel Package coverage approved: ${travelPackageApproval}` : ""
+            }`
           : `Invited to ${result.targetLevel} by hand from the Students table`,
     }).catch((error) => console.error("next-level audit write failed", error));
 
