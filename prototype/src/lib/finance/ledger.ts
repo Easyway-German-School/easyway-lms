@@ -136,14 +136,17 @@ export type Ledger = {
  * out by the caller's `where`; this sorts what it is given by `createdAt` (then
  * ladder position). Unlabelled payments are applied oldest-charge-first.
  * Payments stamped for a level are applied to that level first, then any
- * remainder flows FIFO. This preserves the customer's stated payment intent
- * without changing the treatment of historical, unlabelled transactions.
+ * remainder flows FIFO when its charge exists. If the charge is missing, the
+ * amount stays as a credit instead of silently paying a different level. This
+ * preserves the customer's stated payment intent without changing the
+ * treatment of historical, unlabelled transactions.
  */
 export function buildLedger(
   charges: LedgerChargeInput[],
   totalPaid: number,
   now: Date = new Date(),
   paymentDetails?: LedgerPaymentInput[],
+  options: { ignorePaymentLevels?: boolean } = {},
 ): Ledger {
   const nowMs = now.getTime();
 
@@ -222,17 +225,27 @@ export function buildLedger(
       if (remaining <= 0) break;
       const amount = Math.min(remaining, toWholeNaira(payment.amount));
       remaining -= amount;
-      const level = resolvePaymentLevel({
-        stamped: payment.level,
-        description: payment.description,
-      });
+      const level = options.ignorePaymentLevels
+        ? null
+        : resolvePaymentLevel({
+            stamped: payment.level,
+            description: payment.description,
+          });
       const matchingIndices = level
         ? lines.flatMap((line, index) =>
             line.historyStatus !== "unreviewed" && line.level.toUpperCase() === level ? [index] : [],
           )
         : [];
+      const hasChargeAtLevel = level
+        ? lines.some((line) => line.level.toUpperCase() === level)
+        : false;
       const afterLevel = allocate(matchingIndices, amount);
-      allocate(fifoIndices, afterLevel);
+      // A level-tagged payment cannot be reconciled against a different level
+      // just because its charge row is missing (common on older returning
+      // student records). Keep that amount as credit until the intended charge
+      // exists. If only an unreviewed row matches, route the payment to a
+      // recognized charge rather than allocating it to that unreviewed row.
+      if (!level || matchingIndices.length > 0 || hasChargeAtLevel) allocate(fifoIndices, afterLevel);
     }
   }
   remaining = allocate(fifoIndices, remaining);
@@ -262,7 +275,7 @@ export function buildLedger(
     lifetimeCharged,
     lifetimePaid: paid,
     lifetimeAllocated,
-    creditBalance: remaining,
+    creditBalance: Math.max(0, paid - lifetimeAllocated),
     lifetimeOutstanding,
     goForwardOutstanding,
     legacyOutstanding,

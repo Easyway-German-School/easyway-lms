@@ -56,7 +56,7 @@ describe("buildLedger — FIFO allocation", () => {
     expect(ledger.lifetimeOutstanding).toBe(180_000);
   });
 
-  it("credits a recorded previous-level payment when the old charge is archived", () => {
+  it("does not apply a level-tagged payment to another level when its charge is missing", () => {
     const ledger = buildLedger(
       [charge({ id: "new-a1", level: "A1", amount: 150_000 })],
       150_000,
@@ -65,9 +65,24 @@ describe("buildLedger — FIFO allocation", () => {
     );
 
     expect(ledger.lines.map((line) => [line.level, line.allocated, line.outstanding])).toEqual([
-      ["A1", 150_000, 0],
+      ["A1", 0, 150_000],
     ]);
     expect(ledger.lifetimePaid).toBe(150_000);
+    expect(ledger.creditBalance).toBe(150_000);
+  });
+
+  it("allocates Travel Package payments across level changes when level stamps are ignored", () => {
+    const ledger = buildLedger(
+      [charge({ id: "package", level: "A2", amount: 980_000 })],
+      500_000,
+      NOW,
+      [{ amount: 500_000, level: "A1", description: "Travel Package payment", createdAt: NOW }],
+      { ignorePaymentLevels: true },
+    );
+
+    expect(ledger.lines[0].allocated).toBe(500_000);
+    expect(ledger.lines[0].outstanding).toBe(480_000);
+    expect(ledger.creditBalance).toBe(0);
   });
 
   it("keeps unlabelled payments on the existing oldest-charge-first rule", () => {

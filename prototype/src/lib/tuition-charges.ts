@@ -304,7 +304,8 @@ export async function reconcileCurrentLevelChargeForPathway(studentId: string, n
  * by the promotion gate and the next-level checkout.
  */
 export async function loadStudentLedger(studentId: string, now: Date = new Date()): Promise<Ledger> {
-  const [charges, payments] = await Promise.all([
+  const [student, charges, payments] = await Promise.all([
+    prisma.student.findUnique({ where: { id: studentId }, select: { pathway: true } }),
     prisma.tuitionCharge.findMany({
       where: { studentId, deletedAt: null },
       select: {
@@ -324,5 +325,7 @@ export async function loadStudentLedger(studentId: string, now: Date = new Date(
   ]);
 
   const paid = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-  return buildLedger(charges, paid, now, payments);
+  return buildLedger(charges, paid, now, payments, {
+    ignorePaymentLevels: isTravelPackagePathway(student?.pathway),
+  });
 }

@@ -8,7 +8,7 @@ import {
   issueCertificateForStudent,
   toCertificateView,
 } from "@/lib/certificates";
-import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { isTravelPackagePathway, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { parseCertificateTemplate } from "@/lib/certificate-template";
 
@@ -69,7 +69,9 @@ export async function GET() {
   // the student holds — not just the one for their current level. Across the
   // whole ledger: a student who finished B1 still owing on A1 holds a
   // provisional B1 certificate until the A1 balance is cleared.
-  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, undefined, student.payments);
+  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, undefined, student.payments, {
+    ignorePaymentLevels: isTravelPackagePathway(student.pathway),
+  });
   const outstanding = ledgerIsPopulated(ledger)
     ? ledger.lifetimeOutstanding
     : Math.max(0, tuitionFeeFor(feeLookup) - totalPaid);

@@ -42,7 +42,13 @@
 
 import { prisma } from "@/lib/prisma";
 import type { AdminContext, Capability } from "@/lib/admin-roles";
-import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import {
+  derivePaymentStatus,
+  isTravelPackagePathway,
+  receivedPaymentFilter,
+  requiredDepositFor,
+  tuitionFeeFor,
+} from "@/lib/payment";
 import { goalFor } from "@/lib/germany-goals";
 import { LEVELS } from "@/lib/levels";
 import { EMPLOYMENT_TYPE_LABELS, lecturerStatusLabel } from "@/lib/lecturer-status";
@@ -1740,6 +1746,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
           ...(branch ? { branch: { name: { equals: branch, mode: "insensitive" } } } : {}),
         },
         select: {
+          pathway: true,
           tuitionCharges: {
             select: {
               id: true,
@@ -1765,7 +1772,9 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       let totalOutstanding = 0;
       for (const student of students) {
         const paid = student.payments.reduce((t, p) => t + (p.amount ?? 0), 0);
-        const ledger = buildLedger(student.tuitionCharges, paid, undefined, student.payments);
+        const ledger = buildLedger(student.tuitionCharges, paid, undefined, student.payments, {
+          ignorePaymentLevels: isTravelPackagePathway(student.pathway),
+        });
         for (const line of ledger.lines) {
           const bucket = (byLevel[line.level] ??= { charged: 0, outstanding: 0, legacyOutstanding: 0 });
           bucket.charged += line.net;

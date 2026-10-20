@@ -306,7 +306,10 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
    * `ensureChargeForLevel` runs) keeps the old behaviour: `owed` stays
    * `tuitionFee - paid` and the ageing clock stays on the enrolment date.
    */
-  const ledger = buildLedger(student.tuitionCharges ?? [], paid, now, received);
+  const travelPackage = isTravelPackagePathway(student.pathway);
+  const ledger = buildLedger(student.tuitionCharges ?? [], paid, now, received, {
+    ignorePaymentLevels: travelPackage,
+  });
   const ledgerPopulated = ledgerIsPopulated(ledger);
   const currentLine = ledger.lines.find(
     (line) => line.level.toUpperCase() === String(student.level ?? "").trim().toUpperCase(),

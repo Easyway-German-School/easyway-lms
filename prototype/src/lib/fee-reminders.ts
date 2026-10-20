@@ -17,7 +17,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { feeReminderEmailTemplate } from "@/lib/email-templates";
-import { receivedPaymentFilter } from "@/lib/payment";
+import { isTravelPackagePathway, receivedPaymentFilter } from "@/lib/payment";
 import { batchFromAdmission } from "@/lib/batch";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { batchLockFloor, withBatchFloor } from "@/lib/batch-reservation";
@@ -133,7 +133,9 @@ export async function sendDueFeeReminders(options: {
       // onto the oldest still-open GO-FORWARD charge and reports what is owed
       // across every level rather than just this invoice.
       const studentPaid = (student.payments || []).reduce((sum, p) => sum + p.amount, 0);
-      const ledger = buildLedger(student.tuitionCharges ?? [], studentPaid, new Date(now), student.payments);
+      const ledger = buildLedger(student.tuitionCharges ?? [], studentPaid, new Date(now), student.payments, {
+        ignorePaymentLevels: isTravelPackagePathway(student.pathway),
+      });
       const hasLedger = ledgerIsPopulated(ledger);
 
       // The date portal access pauses for an unsettled balance — 30 days after

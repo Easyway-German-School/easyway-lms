@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, isTravelPackagePathway, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { onTrackPlanStudentIds } from "@/lib/payment-plans";
@@ -171,7 +171,9 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     // The per-level ledger. When populated it decides both what is owed and
     // which clock the lock runs on; legacy arrears (levels passed before the
     // ledger existed) are chased on a gentle track, never with a lock threat.
-    const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now, student.payments);
+    const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now, student.payments, {
+      ignorePaymentLevels: isTravelPackagePathway(student.pathway),
+    });
     const hasLedger = ledgerIsPopulated(ledger);
     const goForwardOwed = hasLedger ? ledger.goForwardOutstanding : Math.max(0, tuitionFee - totalPaid);
 

@@ -11,7 +11,11 @@ import {
   renderEmailBlocks,
   type EmailBlock,
 } from "@/lib/email-blocks";
-import { receivedPaymentFilter } from "@/lib/payment";
+import {
+  allReceivedPaymentFilter,
+  receivedPaymentFilter,
+  REGISTRATION_PAYMENT_DESCRIPTION_PREFIX,
+} from "@/lib/payment";
 import { accessFromStudent } from "@/lib/student-access";
 import { readAssignment } from "@/lib/lecturer-assignment";
 import { batchFromAdmission } from "@/lib/batch";
@@ -55,7 +59,7 @@ type Audience = {
    * to run on until this existed.
    */
   segment?: "active" | "alumni" | null;
-  /** all | unpaid | paid — students only; a tutor has no tuition. */
+  /** all | unpaid | paid | registration-only — students only; a tutor has no tuition. */
   paymentStatus?: string | null;
   /** students | tutors | both */
   group?: string | null;
@@ -192,10 +196,27 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
   const wantBatch = audience.batch?.trim().toLowerCase() || null;
 
   const status = audience.segment === "alumni" ? "graduated" : "active";
+  const registrationOnly =
+    audience.paymentStatus === "registration-only"
+      ? {
+          AND: [
+            {
+              payments: {
+                some: {
+                  ...allReceivedPaymentFilter(),
+                  description: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX },
+                },
+              },
+            },
+            { payments: { none: receivedPaymentFilter() } },
+          ],
+        }
+      : {};
 
   const students = await prisma.student.findMany({
     where: {
       status,
+      ...registrationOnly,
       ...(audience.branchId ? { branchId: audience.branchId } : {}),
       ...(audience.level ? { level: audience.level } : {}),
       ...(audience.deliveryMode ? { deliveryMode: audience.deliveryMode } : {}),
@@ -233,7 +254,7 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
       return batchFromAdmission(s.admission)?.toLowerCase() === wantBatch;
     })
     .filter((s) => {
-      if (wanted === "all") return true;
+      if (wanted === "all" || wanted === "registration-only") return true;
       // Same ledger-aware computation the portal itself uses — a raw
       // `totalPaid >= tuitionFee` here miscategorised a promoted/waived
       // student into the wrong side of a bulk-send audience.

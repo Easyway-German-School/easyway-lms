@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
-import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway } from "@/lib/payment";
 import { isReturningLevelStudent, sumPaidTowardLevel } from "@/lib/payment-level";
 import { buildLedger } from "@/lib/finance/ledger";
 import { BEHIND_TUITION_MIN_DAYS } from "@/lib/finance/receivables";
@@ -321,7 +321,8 @@ export async function GET(
   const currentCharge = student.tuitionCharges.find(
     (charge) => String(charge.level ?? "").trim().toUpperCase() === currentLevel,
   );
-  const returningStudent = isReturningLevelStudent({
+  const travelPackage = isTravelPackagePathway(student.pathway);
+  const returningStudent = !travelPackage && isReturningLevelStudent({
     currentLevel,
     chargeLevels: student.tuitionCharges.map((charge) => charge.level),
     enrolmentLevels: enrolments.map((row) => row.level),
@@ -344,7 +345,9 @@ export async function GET(
    * reading to keep the balance lock shut. Unreviewed backfill estimates are
    * excluded here and surfaced in the history review below.
    */
-  const priorLevelLedger = buildLedger(student.tuitionCharges, access.totalPaid, now, receivedTuitionPayments);
+  const priorLevelLedger = buildLedger(student.tuitionCharges, access.totalPaid, now, receivedTuitionPayments, {
+    ignorePaymentLevels: travelPackage,
+  });
   const priorLevelArrears = priorLevelLedger.lines.filter(
     (line) =>
       line.outstanding > 0 &&
