@@ -96,6 +96,34 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   },
 
   {
+    id: "registration-deposit",
+    name: "Registration fee — next deposit",
+    purpose: "Follow up manually with students who paid only the ₦5,000 registration fee.",
+    subject: "Registration fee received — your next step",
+    blocks: [
+      { type: "heading", text: "Your registration fee is received, {{name}}" },
+      {
+        type: "text",
+        text: "We have received your ₦5,000 registration fee. Your account is active, and you can now continue with your German course.",
+      },
+      {
+        type: "callout",
+        text: "Next step: pay your tuition deposit to unlock your course materials and the full program library.",
+      },
+      {
+        type: "text",
+        text: "The registration fee is separate from tuition and does not count toward your deposit. Sign in to your portal to see the amount due for your level and branch.",
+      },
+      { type: "button", label: "Pay my tuition deposit", href: "/payments" },
+      { type: "divider" },
+      {
+        type: "text",
+        text: "If you have already paid your deposit, please reply to this email with your payment reference so our office can check your account. If you are unsure what to pay, reply and we will help before you make another payment.",
+      },
+    ],
+  },
+
+  {
     id: "schedule-change",
     name: "Class moved or cancelled",
     purpose: "A session has changed. Short, unmissable, and sent immediately.",

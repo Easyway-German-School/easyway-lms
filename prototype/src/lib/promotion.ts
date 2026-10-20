@@ -1,8 +1,9 @@
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { resolveBatchAbsolute } from "@/lib/batch";
 import { nextLevelAfter, SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
-import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { writeAudit } from "@/lib/prisma-guard";
 import { naira } from "@/lib/finance/receivables";
 import { closeOpenEnrolment, openEnrolment } from "@/lib/student-enrolment";
@@ -159,17 +160,18 @@ export async function findPromotionCandidates(opts: {
 export type PromotionResult = {
   promoted: string[];
   skipped: Array<{ studentId: string; reason: string }>;
-  /** Students promoted only because a super-admin overrode an open fee balance. */
+  /** Students promoted only because an authorized admin overrode an open fee balance. */
   overridden?: string[];
 };
 
 export type PromotionOptions = {
   now?: Date;
   /**
-   * Supplied only when a super-admin has chosen to move a student up DESPITE an
-   * unsettled go-forward tuition balance. Without it, such a student is skipped.
-   * Every override is written to the audit trail. Legacy arrears never block a
-   * promotion and never need an override.
+   * Supplied only when an authorized admin has chosen to move a student up
+   * DESPITE an unsettled go-forward tuition balance. The calling route decides
+   * who may use it. Without it, such a student is skipped. Every override is
+   * written to the audit trail. Legacy arrears never block a promotion and
+   * never need an override.
    */
   override?: { by: string; reason: string };
   /**
@@ -190,6 +192,8 @@ export type PromotionOptions = {
    * `admission.classesStartedAtBeforePromotion` so the move can be undone.
    */
   placement?: "next-intake";
+  /** Atomic compare-and-set for a scheduled transition; prevents duplicate cron moves. */
+  expectedLevel?: string;
 };
 
 /** The bare month the student chose on the next-level journey for `level`, or null. */
@@ -232,6 +236,7 @@ export async function promoteStudents(
       select: {
         id: true,
         level: true,
+        pathway: true,
         admission: true,
         branchId: true,
         tutorId: true,
@@ -253,6 +258,16 @@ export async function promoteStudents(
     if (!next) {
       result.skipped.push({ studentId, reason: `Already at ${student.level}, the top of the ladder` });
       continue;
+    }
+
+    if (isTravelPackagePathway(student.pathway)) {
+      try {
+        await reconcileTravelPackageStudent({ studentId });
+      } catch (error) {
+        result.skipped.push({ studentId, reason: "Could not reconcile the Travel Package balance before promotion" });
+        console.error("Travel Package reconciliation failed before promotion", { studentId, error });
+        continue;
+      }
     }
 
     // The fee gate. Blocks on money owed for a level the student has ALREADY
@@ -320,9 +335,7 @@ export async function promoteStudents(
     }
     const landingMonth = place?.month ?? monthName;
 
-    await prisma.student.update({
-      where: { id: studentId },
-      data: {
+    const studentUpdate = {
         level: next,
         admission: {
           ...admission,
@@ -339,17 +352,60 @@ export async function promoteStudents(
               startPromptSnoozedUntil: null,
             }
           : {}),
-      },
-    });
+      };
+    if (options.expectedLevel) {
+      const moved = await prisma.student.updateMany({
+        where: { id: studentId, level: options.expectedLevel },
+        data: studentUpdate,
+      });
+      if (moved.count !== 1) {
+        result.skipped.push({ studentId, reason: "Level changed while promotion was being processed" });
+        continue;
+      }
+    } else {
+      await prisma.student.update({ where: { id: studentId }, data: studentUpdate });
+    }
 
-    // Raise the tuition charge for the level they just moved into, so what they
-    // owe follows them up the ladder instead of the old level's shortfall
-    // dropping out of the maths. Idempotent — a next-level payment may have
-    // created it already. Best-effort: a missing charge is repaired by the
-    // backfill and receivables falls back to the per-level figure meanwhile.
+    // Raise the ordinary tuition charge for the level they just moved into.
+    // Travel Package keeps one whole-program charge and moves that charge to
+    // the new current level instead. Best-effort: a missing charge is repaired
+    // by the backfill and receivables falls back to the per-level figure meanwhile.
     let charge: { chargeId: string; amount: number } | null = null;
     try {
       charge = await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
+      if (isTravelPackagePathway(student.pathway) && charge) {
+        const currentCharge = await prisma.tuitionCharge.findFirst({
+          where: { id: charge.chargeId, studentId, deletedAt: null },
+          select: { note: true, amount: true, waivedAmount: true, waivedReason: true },
+        });
+        const note = `${currentCharge?.note ? `${currentCharge.note} · ` : ""}Travel Package balance follows current level as of ${now.toISOString().slice(0, 10)}`;
+        const targetCharge = await unguardedPrisma.tuitionCharge.findUnique({
+          where: { studentId_level: { studentId, level: next } },
+          select: { id: true },
+        });
+        if (targetCharge && targetCharge.id !== charge.chargeId) {
+          const movedCharge = await prisma.tuitionCharge.update({
+            where: { id: targetCharge.id },
+            data: {
+              amount: currentCharge?.amount ?? charge.amount,
+              waivedAmount: currentCharge?.waivedAmount ?? 0,
+              waivedReason: currentCharge?.waivedReason ?? null,
+              settledAt: null,
+              legacyArrears: false,
+              deletedAt: null,
+              note,
+            },
+            select: { id: true, amount: true },
+          });
+          await prisma.tuitionCharge.delete({ where: { id: charge.chargeId } });
+          charge = { chargeId: movedCharge.id, amount: movedCharge.amount };
+        } else {
+          await prisma.tuitionCharge.update({
+            where: { id: charge.chargeId },
+            data: { level: next, note },
+          });
+        }
+      }
     } catch (chargeError) {
       console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
     }

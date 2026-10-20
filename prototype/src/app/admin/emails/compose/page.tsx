@@ -310,6 +310,7 @@ export default function AdminEmailComposePage() {
               <option value="all">Everyone</option>
               <option value="unpaid">Outstanding balance</option>
               <option value="paid">Fully paid</option>
+              <option value="registration-only">Registration fee only — no tuition</option>
             </select>
             <select value={deliveryMode} onChange={(e) => { setDeliveryMode(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">Any attendance</option>
