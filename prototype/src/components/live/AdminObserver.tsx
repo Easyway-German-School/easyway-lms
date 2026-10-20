@@ -36,9 +36,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Room, RoomEvent, Track, type Participant, type RemoteParticipant } from "livekit-client";
+import {
+  LocalParticipant,
+  Room,
+  RoomEvent,
+  Track,
+  type Participant,
+  type RemoteParticipant,
+  type RemoteTrackPublication,
+} from "livekit-client";
 import { createPortal } from "react-dom";
 import BrandLoader from "@/components/BrandLoader";
+import { CINEMA } from "@/components/live/LiveKitClassroom";
 import {
   BroadcastMessageIcon,
   CameraIcon,
@@ -263,20 +272,29 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
   }, []);
 
   const overlay = (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-slate-950 text-white">
+    <div
+      className="fixed inset-0 z-[60] flex flex-col text-white"
+      // Same multi-layer dark gradient the cinema redesign uses for the
+      // classroom's own immersive ground (see LiveKitClassroom.tsx) — this
+      // overlay is always full-screen, so it is always "immersive".
+      style={{
+        background:
+          "radial-gradient(1100px 620px at 6% -10%, rgba(63,195,198,0.16), transparent 55%), radial-gradient(900px 560px at 98% -4%, rgba(255,122,26,0.12), transparent 55%), linear-gradient(180deg, #030607 0%, #050b0c 45%, #04090a 100%)",
+      }}
+    >
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span
             className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
-              mode === "speak" ? "bg-amber-500/20 text-amber-300" : "bg-amber-500/15 text-amber-300"
+              mode === "speak" ? "bg-[#D9A64E]/20 text-[#D9A64E]" : "bg-[#D9A64E]/15 text-[#D9A64E]"
             }`}
           >
             {mode === "speak" ? <BroadcastMessageIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{title}</p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[#9A9690]">
               Room {roomName} ·{" "}
               {phase === "watching"
                 ? `${remotes.length} in the class`
@@ -295,7 +313,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
             mode === "watch" ? (
               <button
                 onClick={startSpeaking}
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                className={`inline-flex items-center gap-2 rounded-xl ${CINEMA.ctaBg} px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:brightness-110`}
               >
                 <BroadcastMessageIcon className="h-4 w-4" />
                 Speak to the class
@@ -320,9 +338,11 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
         </div>
       </div>
 
-      {/* Mode banner — always on, never dismissible. What it says is the whole point. */}
+      {/* Mode banner — always on, never dismissible. What it says is the whole point.
+          Amber here is the palette's "being handled" tone, same as a device
+          notice in the classroom itself — this is an ongoing state, not a problem. */}
       {mode === "watch" ? (
-        <div className="flex items-center gap-2.5 bg-amber-500/15 px-5 py-2 text-xs font-medium text-amber-200">
+        <div className="flex items-center gap-2.5 bg-[#D9A64E]/15 px-5 py-2 text-xs font-medium text-[#E8C988]">
           <EyeIcon className="h-4 w-4 shrink-0" />
           <span>
             You are watching silently. The tutor and students have <span className="font-bold">not</span> been told
@@ -331,7 +351,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           </span>
         </div>
       ) : (
-        <div className="flex items-center gap-2.5 bg-amber-500 px-5 py-2 text-xs font-medium text-white">
+        <div className="flex items-center gap-2.5 bg-[#D9A64E] px-5 py-2 text-xs font-medium text-white">
           <BroadcastMessageIcon className="h-4 w-4 shrink-0" />
           <span>
             You are visible now, connected as <span className="font-bold">&ldquo;The Office&rdquo;</span> — the class
@@ -342,11 +362,11 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
       )}
 
       {phase === "watching" && mode === "speak" ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-slate-900 px-5 py-3">
+        <div className={`flex flex-wrap items-center gap-2 border-b border-white/[0.08] ${CINEMA.tileBg} px-5 py-3`}>
           <button
             onClick={toggleMic}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              micOn ? "bg-emerald-500 text-white hover:brightness-110" : "bg-white/10 text-white hover:bg-white/20"
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition hover:brightness-110 ${
+              micOn ? `${CINEMA.ctaBg} text-white` : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             {micOn ? <MicIcon className="h-4 w-4" /> : <MicOffIcon className="h-4 w-4" />}
@@ -354,8 +374,8 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           </button>
           <button
             onClick={toggleCam}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              camOn ? "bg-emerald-500 text-white hover:brightness-110" : "bg-white/10 text-white hover:bg-white/20"
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition hover:brightness-110 ${
+              camOn ? `${CINEMA.ctaBg} text-white` : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <CameraIcon className="h-4 w-4" />
@@ -374,7 +394,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
       {audioBlocked && phase === "watching" ? (
         <button
           onClick={enableAudio}
-          className="flex w-full items-center justify-center gap-3 bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+          className={`flex w-full items-center justify-center gap-3 ${CINEMA.ctaBg} px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110`}
         >
           <SpeakerOffIcon className="h-5 w-5" />
           Tap to turn on the sound
@@ -402,7 +422,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           </div>
         ) : phase === "ended" ? (
           <div className="grid h-full place-items-center p-6">
-            <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-sm text-slate-300">
+            <div className={`max-w-md rounded-2xl border border-white/[0.08] ${CINEMA.tileBg} p-6 text-center text-sm text-[#9A9690]`}>
               <p className="font-semibold text-white">This class has ended</p>
               <p className="mt-2">There is nothing more to watch here.</p>
               <button
@@ -417,9 +437,9 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
           <div className="flex h-full flex-col gap-3 p-4">
             <div className="relative min-h-0 flex-1">
               {mainTile ? (
-                <VideoTile participant={mainTile.participant} source={mainTile.source} revision={topology} full />
+                <VideoTile participant={mainTile.participant} source={mainTile.source} full />
               ) : (
-                <div className="grid h-full place-items-center rounded-2xl bg-slate-900 text-sm text-slate-400">
+                <div className={`grid h-full place-items-center rounded-2xl ${CINEMA.tileBg} text-sm text-[#9A9690]`}>
                   Nobody has their camera on yet — the audio is still live.
                 </div>
               )}
@@ -429,7 +449,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
               <div className="flex shrink-0 gap-3 overflow-x-auto pb-1">
                 {stripTiles.map((tile) => (
                   <div key={tile.participant.identity} className="h-28 w-44 shrink-0">
-                    <VideoTile participant={tile.participant} source={tile.source} revision={topology} />
+                    <VideoTile participant={tile.participant} source={tile.source} />
                   </div>
                 ))}
               </div>
@@ -442,8 +462,8 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
               own view exactly.
             */}
             {mode === "speak" && camOn && room ? (
-              <div className="pointer-events-none absolute bottom-4 right-4 h-28 w-44 overflow-hidden rounded-2xl ring-2 ring-amber-400">
-                <VideoTile participant={room.localParticipant} source={Track.Source.Camera} revision={topology} />
+              <div className="pointer-events-none absolute bottom-4 right-4 h-28 w-44 overflow-hidden rounded-2xl ring-2 ring-[#D9A64E]">
+                <VideoTile participant={room.localParticipant} source={Track.Source.Camera} />
               </div>
             ) : null}
           </div>
@@ -453,7 +473,7 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
             supervisor is here for the audio first. */}
         {phase === "watching"
           ? remotes.map((participant) => (
-              <ParticipantAudio key={`audio-${participant.identity}`} participant={participant} revision={topology} />
+              <ParticipantAudio key={`audio-${participant.identity}`} participant={participant} />
             ))
           : null}
       </div>
@@ -469,39 +489,96 @@ export default function AdminObserver({ roomName, title, onClose }: Props) {
 function VideoTile({
   participant,
   source,
-  revision,
   full = false,
 }: {
   participant: Participant;
   source: Track.Source;
-  revision: number;
   full?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
+  const [videoWaiting, setVideoWaiting] = useState(false);
+  const [retryingVideo, setRetryingVideo] = useState(false);
+  const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
+  const cameraPub = participant.getTrackPublication(Track.Source.Camera);
+  const videoPub = source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub;
+  const videoTrack = videoPub?.track ?? null;
+  const publication = participant instanceof LocalParticipant
+    ? undefined
+    : (videoPub as RemoteTrackPublication | undefined);
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    let waitTimer: number | null = null;
+
+    function clearWaitTimer() {
+      if (waitTimer !== null) {
+        window.clearTimeout(waitTimer);
+        waitTimer = null;
+      }
+    }
+
+    function markPlaying() {
+      clearWaitTimer();
+      setVideoWaiting(false);
+    }
+
+    function markWaiting() {
+      clearWaitTimer();
+      waitTimer = window.setTimeout(() => setVideoWaiting(true), 1_500);
+    }
+
+    setVideoWaiting(false);
+    waitTimer = window.setTimeout(() => setVideoWaiting(true), 4_000);
+    el.addEventListener("loadeddata", markPlaying);
+    el.addEventListener("playing", markPlaying);
+    el.addEventListener("waiting", markWaiting);
+    el.addEventListener("stalled", markWaiting);
+    return () => {
+      clearWaitTimer();
+      el.removeEventListener("loadeddata", markPlaying);
+      el.removeEventListener("playing", markPlaying);
+      el.removeEventListener("waiting", markWaiting);
+      el.removeEventListener("stalled", markWaiting);
+    };
+  }, [videoTrack]);
+  
 
   useEffect(() => {
     const el = videoRef.current;
-    const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
-    const cameraPub = participant.getTrackPublication(Track.Source.Camera);
-    const pub = source === Track.Source.ScreenShare ? screenPub : screenPub?.track ? screenPub : cameraPub;
-    if (el && pub?.track) {
-      pub.track.attach(el);
+    if (el && videoTrack) {
+      videoTrack.attach(el);
       setHasVideo(true);
       return () => {
-        pub.track?.detach(el);
+        videoTrack.detach(el);
       };
     }
     setHasVideo(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [participant, source, revision]);
+  }, [videoTrack]);
+
+
+  async function retryVideo() {
+    if (!publication || retryingVideo) return;
+    setRetryingVideo(true);
+    setVideoWaiting(false);
+    try {
+      await publication.setEnabled(false);
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+      await publication.setEnabled(true);
+    } catch (retryError) {
+      console.error("Admin observer video resubscribe failed", retryError);
+      setVideoWaiting(true);
+    } finally {
+      setRetryingVideo(false);
+    }
+  }
 
   const name = participant.name || participant.identity;
   const isScreen = source === Track.Source.ScreenShare;
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-slate-900 ring-1 ring-white/10 ${
+      className={`relative overflow-hidden rounded-2xl ${CINEMA.tileBg} ring-1 ring-white/10 ${
         full ? "h-full w-full" : "h-full w-full"
       }`}
     >
@@ -513,7 +590,7 @@ function VideoTile({
         className={`h-full w-full ${isScreen ? "object-contain" : "object-cover"} ${hasVideo ? "" : "hidden"}`}
       />
       {!hasVideo ? (
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900">
+        <div className={`flex h-full w-full items-center justify-center ${CINEMA.tileBg}`}>
           <div
             className={`grid place-items-center rounded-full bg-white/10 font-semibold text-white ${
               full ? "h-20 w-20 text-2xl" : "h-9 w-9 text-xs"
@@ -523,8 +600,27 @@ function VideoTile({
           </div>
         </div>
       ) : null}
+      {hasVideo && videoWaiting ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 p-4 text-center">
+          <div>
+            <p className="text-sm font-medium text-white">Video isn&apos;t arriving yet</p>
+            <p className="mt-1 text-xs text-slate-300">
+              Audio may still work. This can happen if the sender&apos;s connection is weak.
+            </p>
+            {publication ? (
+              <button
+                onClick={retryVideo}
+                disabled={retryingVideo || publication.isMuted}
+                className="mt-3 rounded-lg bg-white/15 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retryingVideo ? "Reconnecting video…" : "Try video again"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
-        {isScreen ? <ScreenShareIcon className="h-3 w-3 shrink-0 text-slate-300" /> : null}
+        {isScreen ? <ScreenShareIcon className="h-3 w-3 shrink-0 text-[#9A9690]" /> : null}
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-white">
           {name}
           {isScreen ? " — screen" : ""}
@@ -540,20 +636,19 @@ function VideoTile({
 }
 
 /** Hidden playback for one participant's microphone. */
-function ParticipantAudio({ participant, revision }: { participant: RemoteParticipant; revision: number }) {
+function ParticipantAudio({ participant }: { participant: RemoteParticipant }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const audioTrack = participant.getTrackPublication(Track.Source.Microphone)?.track ?? null;
 
   useEffect(() => {
-    const pub = participant.getTrackPublication(Track.Source.Microphone);
     const el = audioRef.current;
-    if (el && pub?.track) {
-      pub.track.attach(el);
+    if (el && audioTrack) {
+      audioTrack.attach(el);
       return () => {
-        pub.track?.detach(el);
+        audioTrack.detach(el);
       };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [participant, revision]);
+  }, [audioTrack]);
 
   return <audio ref={audioRef} autoPlay />;
 }

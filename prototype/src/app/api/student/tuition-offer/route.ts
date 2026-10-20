@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isLevelSellable, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 import {
   deriveFullPaymentOffer,
   isSocialProofPublishable,
@@ -52,12 +53,37 @@ export async function GET() {
   }
 
   const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-  const tuitionFee = tuitionFeeFor(feeLookup);
-  const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
+
+  /**
+   * THE FIX FOR THE "PAID IN FULL, CERTIFICATE CLEAN" LIE.
+   *
+   * This used to compare the student's LIFETIME total (every payment, every
+   * level, via the raw `student.payments` sum below) against only the CURRENT
+   * level's fee. For a returning student with an older, unsettled level on
+   * file, lifetime money easily clears one level's fee while the ledger
+   * (src/lib/finance/ledger.ts, FIFO oldest-charge-first) has actually
+   * allocated that money to the old debt first — so this screen said
+   * "Tuition paid in full — certificate issued clean" while the SAME
+   * student's community/dashboard, reading the ledger correctly via
+   * access.ts, kept them locked out for unpaid tuition. Two screens, two
+   * different answers to "have they paid?", because this one re-implemented
+   * the question instead of asking the one place that owns it.
+   *
+   * `access.currentLevelPaid` is that one place's answer: what the ledger
+   * actually credits to THIS level, FIFO-reconciled. Using it here means this
+   * screen can never again claim "paid in full" while the portal disagrees.
+   */
+  const access = await getStudentAccess(student.id);
+  const tuitionFee = access?.tuitionFee ?? tuitionFeeFor(feeLookup);
+  const totalPaidForLevel = access?.currentLevelPaid ?? student.payments.reduce((sum, payment) => sum + payment.amount, 0);
 
   // When the running total first crossed the full fee. Judging the bonus on
   // this rather than on "now" means a student who paid in full on day two keeps
   // the bundle forever, instead of losing it the moment the window lapses.
+  // (This walk is still over the raw lifetime payments — the bonus window is a
+  // low-stakes perk, not a lock gate, and only matters in the first 14 days of
+  // a FRESH enrolment, where lifetime and current-level money are the same
+  // thing anyway.)
   let running = 0;
   let fullPaidAt: Date | null = null;
   for (const payment of student.payments) {
@@ -71,7 +97,7 @@ export async function GET() {
   const offer = deriveFullPaymentOffer({
     enrolledAt: student.createdAt,
     tuitionFee,
-    totalPaid,
+    totalPaid: totalPaidForLevel,
     fullPaidAt,
     sessionSlot: student.sessionSlot,
   });
@@ -81,7 +107,8 @@ export async function GET() {
     branchName: student.branch?.name ?? null,
     /** False for C1/C2, which the branch office still quotes by hand. */
     sellable: isLevelSellable(student.level),
-    requiredDeposit: requiredDepositFor(feeLookup),
+    requiredDeposit: access?.requiredDeposit ?? requiredDepositFor(feeLookup),
+    previousLevelOutstanding: access?.previousLevelOutstanding ?? 0,
     offer,
     options: paymentOptionsFor(offer),
     socialProof: await branchFullPaymentRate(student.branchId),

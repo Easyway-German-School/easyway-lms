@@ -107,6 +107,8 @@ export function nextPlacement(input: {
    * default, so nobody is placed in a batch that has already closed.
    */
   preferredMonth?: string | null;
+  /** Earliest permitted arrival date, used for late automatic promotions. */
+  notBefore?: Date | null;
 }): NextPlacement | null {
   const now = input.now ?? new Date();
   const window = resolveBatchWindow(input.batch, {
@@ -119,6 +121,10 @@ export function nextPlacement(input: {
   const today = instantToZonedParts(now);
   const currentAbsolute = today.year * 12 + (today.month - 1);
   let absolute = Math.max(window.absolute + sessionDurationMonths(input.sessionSlot), currentAbsolute);
+  if (input.notBefore) {
+    const earliest = instantToZonedParts(input.notBefore);
+    absolute = Math.max(absolute, earliest.year * 12 + (earliest.month - 1));
+  }
   const preferred = monthNameToIndex(input.preferredMonth);
   // Only the three intakes the journey offers (default month + the next two): a
   // choice gone stale because the move happened late must fall back to the
@@ -132,12 +138,22 @@ export function nextPlacement(input: {
   const monthIndex = absolute % 12;
   const monthKey = intakeMonthKey(year, monthIndex);
   const day = startDayFor(input.startDayOverrides, monthKey, input.level);
-  const startsOn = zonedTimeToInstant(`${monthKey}-${String(day).padStart(2, "0")}`, "00:00");
+  let startsOn = zonedTimeToInstant(`${monthKey}-${String(day).padStart(2, "0")}`, "00:00");
+  while (input.notBefore && startsOn.getTime() < input.notBefore.getTime()) {
+    absolute += 1;
+    const nextYear = Math.floor(absolute / 12);
+    const nextMonthIndex = absolute % 12;
+    const nextMonthKey = intakeMonthKey(nextYear, nextMonthIndex);
+    const nextDay = startDayFor(input.startDayOverrides, nextMonthKey, input.level);
+    startsOn = zonedTimeToInstant(`${nextMonthKey}-${String(nextDay).padStart(2, "0")}`, "00:00");
+  }
+  const placementYear = Math.floor(absolute / 12);
+  const placementMonthIndex = absolute % 12;
 
   return {
-    month: MONTH_NAMES[monthIndex],
-    year,
-    label: `${MONTH_NAMES[monthIndex]} ${year}`,
+    month: MONTH_NAMES[placementMonthIndex],
+    year: placementYear,
+    label: `${MONTH_NAMES[placementMonthIndex]} ${placementYear}`,
     startsOn,
     hasStarted: startsOn.getTime() <= now.getTime(),
   };

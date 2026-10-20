@@ -111,7 +111,7 @@ export async function setStudentTutor(input: {
         student.classType === "private"
           ? `${tutorName} will be taking your private classes. They will be in touch to agree your times, and your sessions will appear on your calendar once booked.`
           : `${tutorName} is now your tutor. They can see your progress and will be marking your work.`,
-      link: student.classType === "private" ? "/calendar" : "/classes",
+      link: "/calendar",
       push: true,
     }).catch((error) => console.error("Tutor pairing notification failed", error));
 
@@ -375,7 +375,7 @@ export async function setStudentCoTutors(input: {
           finalNames.length === 1
             ? `${finalNames[0]} is now also teaching you.`
             : `You now have ${finalNames.length + 1} tutors: ${finalNames.join(", ")} alongside your main tutor. They can all see your progress and mark your work.`,
-        link: "/classes",
+        link: "/calendar",
         push: true,
       }).catch((error) => console.error("Co-tutor pairing notification failed", error));
     }

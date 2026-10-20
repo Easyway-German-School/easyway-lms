@@ -40,6 +40,17 @@ model User {
    */
   adminRole         String?
   /**
+   * Which job inside the Growth Desk, when adminRole is "growth": bdm |
+   * sales_lead | rep. Null for everyone else, and null is read as "rep" —
+   * see src/lib/growth/titles.ts. A second field rather than more adminRole
+   * values for the same reason platformRole is separate: every one of them
+   * holds the identical `growth` capability, so the office's own
+   * admin-role picker and GRANTS table do not need to know this exists.
+   * It only changes which dashboard a person lands on and what the daily
+   * task engine generates for them — see src/lib/growth/tasks.ts.
+   */
+  growthTitle       String?
+  /**
    * Platform operator, above every tenant rather than inside one.
    * `super` on adminRole means "runs this school". This means "runs the
    * platform the schools are on" — creates tenants, issues API keys, reads the
@@ -146,6 +157,8 @@ model User {
   supportReplies        SupportTicketMessage[]
   supportTypingPings    SupportTypingPing[]
   gameMatches           GameMatch[]
+  ownedStudyGroups      StudyGroup[]          @relation("StudyGroupOwner")
+  studyGroupMemberships StudyGroupMember[]
   gameTurnsAssigned     GameTurn[]               @relation("GameTurnAssignee")
   gameTurnsWritten      GameTurn[]               @relation("GameTurnAuthor")
   constraintDecks       ConstraintDeck[]
@@ -158,6 +171,21 @@ model User {
   refundRequests        RefundRequest[]          @relation("RefundRequestStudent")
   refundsDecided        RefundRequest[]          @relation("RefundRequestDecider")
   examCampaignResponses ExamCampaignResponse[]
+  assignedLeads         Lead[]                   @relation("LeadAssignee")
+  leadActivities        LeadActivity[]
+  assignedSalesTasks    SalesTask[]              @relation("SalesTaskAssignee")
+  commissionEntries     CommissionEntry[]        @relation("CommissionRep")
+  commissionApprovals   CommissionEntry[]        @relation("CommissionApprover")
+  ownedPartners         Partner[]                @relation("PartnerOwner")
+  fundRequests          FundRequest[]            @relation("FundRequester")
+  fundRequestsApproved  FundRequest[]            @relation("FundApprover")
+  promoCodesOwned       PromoCode[]              @relation("PromoCodeOwnerUser")
+  promoCodesCreated     PromoCode[]              @relation("PromoCodeCreatedBy")
+  promoPayoutsApproved  PromoPayout[]            @relation("PromoPayoutApprover")
+  promoPayoutsCredited  PromoPayout[]            @relation("PromoPayoutCreditor")
+  dailyReports          DailyReport[]
+  staffChannelsCreated  StaffChannel[]           @relation("StaffChannelCreator")
+  staffChannelMessages  StaffChannelMessage[]    @relation("StaffChannelAuthor")
   analyticsConsentAt    DateTime?
   /**
    * Set only when the person has ASKED to be left out of learning analytics.
@@ -237,6 +265,8 @@ model Tenant {
   students                Student[]
   studentProfiles         StudentProfile[]
   studentEnrolments       StudentEnrolment[]
+  studyGroups             StudyGroup[]
+  studyGroupMemberships   StudyGroupMember[]
   journeyEvents           JourneyEvent[]
   examRegistrations       ExamRegistration[]
   pathways                Pathway[]
@@ -301,6 +331,16 @@ model Tenant {
   gameTurns               GameTurn[]
   constraintDecks         ConstraintDeck[]
   leads                   Lead[]
+  leadActivities          LeadActivity[]
+  salesTasks              SalesTask[]
+  commissionEntries       CommissionEntry[]
+  partners                Partner[]
+  fundRequests            FundRequest[]
+  promoCodes              PromoCode[]
+  promoPayouts            PromoPayout[]
+  dailyReports            DailyReport[]
+  staffChannels           StaffChannel[]
+  staffChannelMessages    StaffChannelMessage[]
   supportTickets          SupportTicket[]
   supportTicketMessages   SupportTicketMessage[]
   certificates            Certificate[]
@@ -442,6 +482,41 @@ model ApiKey {
   @@index([tenantId, revokedAt])
 }
 
+/// A self-issued credential for calling the ADMIN api (/api/admin/*) without a
+/// browser session — the opposite direction from ApiKey above, which is a
+/// third party calling in. This one borrows a real admin account's identity:
+/// requireCapability() (src/lib/admin-roles.ts) resolves it to that user's
+/// tenant and capabilities, then narrows to whatever `capabilities` this key
+/// was issued with. Only ever checked when ADMIN_API_KEYS_ENABLED=true, which
+/// is set in .env.local and deliberately never in a deployed environment.
+model AdminApiKey {
+  id       String  @id @default(cuid())
+  userId   String
+  tenantId String?
+
+  /// What the admin who created it calls it. Shown in the UI, never used for auth.
+  name String
+
+  /// The non-secret half — `eak_a1b2c3d4`. Safe to log and to show in the list.
+  prefix String @unique
+
+  /// sha256 of the whole key. The secret half exists once, in the response
+  /// that created it, exactly like ApiKey.keyHash above.
+  tokenHash String @unique
+
+  /// Comma-separated Capability values (see admin-roles.ts), capped at
+  /// whatever the underlying user already has at request time.
+  capabilities String
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tenantId])
+}
+
 /// The answer we already gave to a request the partner is repeating.
 ///
 /// Networks time out after the work is done. Without this, a partner's retry
@@ -501,6 +576,7 @@ model Student {
   // students created before the scheme existed are backfilled by
   // scripts/backfill-student-codes.mjs rather than blocked at read time.
   studentCode String? @unique
+  referralCode String? @unique
 
   status        String @default("active")
   level         String @default("A1") // A1, A2, B1, B2, C1, C2
@@ -808,6 +884,8 @@ model Student {
    * Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private.
    */
   tutorMessages         TutorMessage[]
+  promoCodesOwned       PromoCode[]            @relation("PromoCodeOwnerStudent")
+  promoRedemption       PromoRedemption?       @relation("PromoRedeemedBy")
   /**
    * What the tutor wrote up after each private session.
    */
@@ -1249,6 +1327,7 @@ model Branch {
   students       Student[]
   notifications  Notification[]
   spaces         Space[]
+  studyGroups    StudyGroup[]
   classSessions  ClassSession[]
   assignments    Assignment[]
   exams          Exam[]
@@ -1625,6 +1704,19 @@ model ClassRecording {
    * Which tutor's join started it, for the audit trail.
    */
   startedByUserId String?
+
+  /**
+   * The Lecturer behind `startedByUserId`, denormalised the same way
+   * branchId/level/sessionSlot are above. This is what lets a student named
+   * onto this tutor (`Student.tutorId` / co-tutors) see the recording on
+   * their shelf even when their own branch/level/sitting never lined up with
+   * the room the class ran in — the same by-name escape hatch
+   * `liveSessionForStudent` uses for live join, mirrored here for recordings.
+   * Null on rows captured before this existed; those keep resolving on
+   * level/branch/slot alone, same as always.
+   */
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
 
   /**
    * Set only for a private one-to-one capture — see class-recorder.ts and
@@ -2272,11 +2364,28 @@ model Payment {
   status             String    @default("pending")
   method             String
   description        String?
+  /**
+   * Which CEFR level this payment was recorded against, e.g. "A2".
+   * Null on older rows and on the ₦5,000 registration fee. `Student.level`
+   * is the CURRENT pointer and moves on promotion; this stamp is the
+   * historical record so an August A1 payment still reads as A1 after
+   * they sit A2 in October.
+   */
+  level              String?
   stripeSessionId    String?
   paymentIntentId    String?
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+
+  /// Set once this payment has generated a rep's commission. See
+  /// CommissionEntry — unique on paymentId, so at most one of these exists.
+  commissionEntry CommissionEntry?
+
+  /// Promo-code payouts (commission / referral credit) this payment accrued.
+  /// Not unique — a payout can also be recorded with no payment at all (a
+  /// manual admin adjustment).
+  promoPayouts PromoPayout[]
 
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
@@ -2290,6 +2399,188 @@ model Payment {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
+  @@index([studentId, level])
+}
+
+/// ONE CODE, ONE TYPE — the unified promo-code system. Replaces the
+/// student-only ReferralRedemption/ReferralHold pair (now retired; their
+/// tables stay on disk as untouched history, copied forward into
+/// PromoRedemption/PromoRedemptionHold by the migration) with one shape that
+/// also covers influencer codes. `type` picks which program a code belongs
+/// to; the discount/commission fields are admin-set per row and default to
+/// unset — nothing is hardcoded here, see REFERRAL_REWARD_COPY's retirement.
+model PromoCode {
+  id     String @id @default(cuid())
+  /// UPPERCASE, e.g. EW3F9A2B1C4D5E67 (auto-generated for every student) or
+  /// a hand-picked influencer code like INFLUENCER-JOHN.
+  code   String @unique
+  /// student_referral | influencer
+  type   String
+  /// active | paused | revoked — paused/revoked codes are refused at signup,
+  /// but history (existing PromoRedemption/PromoPayout rows) is untouched.
+  status String @default("active")
+
+  /// Owner for a student_referral code — the existing student who refers.
+  ownerStudentId String?
+  ownerStudent   Student? @relation("PromoCodeOwnerStudent", fields: [ownerStudentId], references: [id], onDelete: Cascade)
+  /// Owner for an influencer code — an admin-console User with adminRole
+  /// "influencer". No self-serve influencer signup in v1.
+  ownerUserId String?
+  ownerUser   User?   @relation("PromoCodeOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  /// Display name, e.g. the influencer's public handle.
+  label String?
+
+  /// influencer | travel_agent | other — only meaningful when type is
+  /// "influencer"; null reads as "influencer" in application code (every
+  /// partner before this field existed). The Influencer Program is the
+  /// umbrella for all three; student_referral codes never set this.
+  partnerType String?
+
+  /// Where to send this partner's commission. Free text, entered by the
+  /// partner themselves from their own dashboard, or by an admin on their
+  /// behalf — this is not a payment rail integration, just what the office
+  /// reads off when they pay out by bank transfer.
+  payoutBankName      String?
+  payoutAccountNumber String?
+  payoutAccountName   String?
+
+  /// Discount given to the NEW student who signs up with this code. Both may
+  /// be set (flat applied after percent); null/0 means no discount — true
+  /// today for every student_referral code, since that program rewards the
+  /// REFERRER, not the new student. Percent is whole points (10 = 10%).
+  discountPercent   Int?
+  discountFlat      Int?
+  discountCapAmount Int?
+
+  /// Reward earned by the code's owner (the referrer, or the influencer).
+  commissionPercent Int?
+  commissionFlat    Int?
+
+  notes String?
+
+  createdById String?
+  createdBy   User?   @relation("PromoCodeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  redemptions PromoRedemption[]
+  payouts     PromoPayout[]
+
+  @@index([type, status])
+  @@index([tenantId])
+}
+
+/// One row per NEW student who signed up using a PromoCode.
+model PromoRedemption {
+  id          String    @id @default(cuid())
+  promoCodeId String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  /// Snapshot of the code string at redemption time — survives a later rename.
+  codeSnapshot String
+  /// Snapshot of PromoCode.type at redemption time.
+  type         String
+
+  redeemedByStudentId String  @unique
+  redeemedByStudent   Student @relation("PromoRedeemedBy", fields: [redeemedByStudentId], references: [id], onDelete: Cascade)
+
+  /// The discount actually frozen for this student, whole naira. Computed
+  /// once at signup (see src/lib/promo-pricing.ts) and never recomputed off
+  /// a later price-book edit.
+  discountAmount            Int       @default(0)
+  discountAppliedToChargeId String?
+  discountAppliedAt         DateTime?
+
+  /// registered (just signed up) | activated (first qualifying payment
+  /// landed, reward accrual ran) | reversed (admin voided — e.g. fraud)
+  status String @default("registered")
+
+  tenantId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  holds   PromoRedemptionHold[]
+  payouts PromoPayout[]
+
+  @@index([promoCodeId, createdAt])
+  @@index([status, createdAt])
+  @@index([tenantId])
+}
+
+/// Review-only holds on a redemption — same shape as the retired ReferralHold.
+model PromoRedemptionHold {
+  id           String          @id @default(cuid())
+  redemptionId String
+  redemption   PromoRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
+  reason       String
+  heldAt       DateTime        @default(now())
+  releasedAt   DateTime?
+  resolvedById String?
+  tenantId     String?
+  createdAt    DateTime        @default(now())
+
+  @@index([tenantId])
+  @@index([redemptionId, releasedAt])
+  @@index([heldAt])
+}
+
+/// The money ledger — one row per accrued reward, for EITHER program: `kind`
+/// says which. Modeled on CommissionEntry's pending/approved lifecycle, with
+/// a third state (`credited`) because there is no automated payout rail —
+/// crediting is an admin-triggered, auditable bookkeeping action (see
+/// src/app/api/admin/promo-payouts/[id]/route.ts).
+model PromoPayout {
+  id String @id @default(cuid())
+
+  promoRedemptionId String
+  promoRedemption   PromoRedemption @relation(fields: [promoRedemptionId], references: [id], onDelete: Cascade)
+  promoCodeId       String
+  promoCode         PromoCode       @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+
+  /// The Payment that sized/triggered this payout. Nullable — a manual
+  /// admin-created adjustment has none.
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  /// Whole naira, same convention as CommissionEntry.amount.
+  amount Int
+  /// commission (influencer) | referral_credit (student referrer)
+  kind   String
+  /// Level the referrer's reward is reserved for, captured when it is earned.
+  creditLevel String?
+
+  /// pending | approved | credited
+  status       String    @default("pending")
+  approvedById String?
+  approvedBy   User?     @relation("PromoPayoutApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  /// How an approved amount was actually fulfilled. For a student referrer,
+  /// this is a waiver applied to one of THEIR OWN TuitionCharge rows (reusing
+  /// TuitionCharge.waivedAmount). For an influencer, there is no in-app
+  /// ledger to credit against, so this is a free-text record of the
+  /// off-system payout (bank transfer, etc).
+  creditedViaChargeId String?
+  creditedNote        String?
+  creditedById        String?
+  creditedBy          User?     @relation("PromoPayoutCreditor", fields: [creditedById], references: [id], onDelete: SetNull)
+  creditedAt          DateTime?
+
+  note      String?
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([promoCodeId, status])
+  @@index([promoRedemptionId])
   @@index([tenantId])
 }
 
@@ -2330,11 +2621,15 @@ model TuitionCharge {
   /// admin | import | backfill.
   origin String
 
-  /// True for a lower level a student had already passed BEFORE the ledger
-  /// existed, created by the cutover backfill. Legacy arrears are fully visible
-  /// and chased, but they do NOT trip the automatic portal lock and do NOT
-  /// hard-block promotion — the student never agreed to these rules mid-course.
+  /// True for a lower level inferred by the cutover backfill. This is provenance,
+  /// not a debt decision; historyStatus controls collection and access behavior.
   legacyArrears Boolean @default(false)
+
+  /// confirmed | owing | paid | not_taken_here | unreviewed.
+  /// Backfilled prior-level estimates are quarantined until staff verify them.
+  historyStatus String @default("confirmed")
+  /// Non-cash historical tuition credit; never written as a Payment/revenue row.
+  historicalPaidAmount Int @default(0)
 
   /// A scholarship or negotiated write-off. `amount - waivedAmount` is what the
   /// student is actually expected to pay; allocation and every rollup use the
@@ -2594,6 +2889,7 @@ model Lecturer {
   enrolments         StudentEnrolment[]
   payRate            TutorPayRate?
   payrollPayments    PayrollPayment[]
+  classRecordings    ClassRecording[]
   /// Students shared onto this tutor as an EXTRA teacher. See Student.coTutors.
   coTutoredStudents  StudentCoTutor[]
   /**
@@ -4075,10 +4371,27 @@ model Lead {
    */
   source String  @default("website")
   /**
-   * new | invited | converted | dropped
+   * new | invited | converted | dropped, plus the Growth Desk sales-funnel
+   * stages a rep moves a lead through by hand: contacted | qualified |
+   * proposal_sent | lost. Still a plain string, not an enum — it already was
+   * before Growth Desk existed, and the funnel stages are exactly the kind of
+   * vocabulary a sales process keeps tweaking. A rep changes this field only
+   * through the Growth Desk API, which writes a LeadActivity row alongside
+   * the update — see src/lib/growth/leads.ts. It is never the trigger for a
+   * CommissionEntry; only a real Payment is. See the Growth Desk section
+   * below for why that split matters.
    */
   status String  @default("new")
   notes  String?
+
+  /**
+   * The rep who owns this lead for follow-up. Null means unassigned — still
+   * visible to every rep, not yet claimed by one. SetNull rather than
+   * Cascade: removing a rep's account must not delete the leads they were
+   * working, only return them to the unassigned pool.
+   */
+  assignedToId String?
+  assignedTo   User?   @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   /**
    * When the enrolment invite was last emailed, so the office can chase.
@@ -4100,8 +4413,353 @@ model Lead {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  activities        LeadActivity[]
+  tasks             SalesTask[]
+  commissionEntries CommissionEntry[]
+
   @@index([status, createdAt])
   @@index([branchId, interestedLevel])
+  @@index([assignedToId, status])
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Growth Desk: the sales pipeline sitting on top of Lead.
+//
+// Three different jobs, three different models, on purpose:
+//   LeadActivity    what a rep did — a note, a call, a stage change. Append
+//                   only. This is the Google Sheet replacement: nobody edits
+//                   a cell, they add a row, so the history of a lead's
+//                   pipeline survives a rep trying to make yesterday's work
+//                   look different today.
+//   SalesTask       what a rep should do next — today's queue. Auto-assigned
+//                   on lead creation, or hand-assigned by the Sales &
+//                   Marketing Teamlead. An unfinished task simply stays
+//                   pending; there is no separate "carry over" step, because
+//                   leaving it untouched is what carrying it over means.
+//   CommissionEntry what a rep is owed. Never written or edited by a rep —
+//                   one row per real Payment, computed server-side. This is
+//                   the actual fix for a rep inflating their own numbers:
+//                   there is no field connected to money that a rep's
+//                   account is ever allowed to write.
+// ---------------------------------------------------------------------------
+
+/// One thing that happened to a Lead, in the order it happened. Never
+/// updated after it is written — same reasoning as TermsAcceptance below:
+/// the history is the point, not the latest state.
+model LeadActivity {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /**
+   * note | call | stage_change | task_completed | assigned
+   */
+  type String
+
+  /**
+   * Free-form detail for the type — the note text, the call outcome, the
+   * old/new stage on a stage_change. Never the source of a commission figure:
+   * see CommissionEntry, computed from Payment, not from anything logged
+   * here.
+   */
+  payload Json?
+
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([tenantId])
+}
+
+/// A rep's to-do item: one lead, one next action. The daily "queue" a rep
+/// sees on login is just this table filtered to `status = "pending"` and
+/// ranked by `priorityScore` — nothing generates a fresh batch each morning;
+/// yesterday's unfinished rows are exactly what today's queue should lead
+/// with. See src/lib/growth/tasks.ts.
+model SalesTask {
+  id String @id @default(cuid())
+
+  assignedToId String
+  assignedTo   User   @relation("SalesTaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  /**
+   * follow_up | call | webinar | admin
+   */
+  kind  String
+  title String
+
+  dueDate DateTime?
+
+  /**
+   * pending | done | skipped
+   */
+  status String @default("pending")
+
+  /**
+   * Higher sorts first in the queue. Set on assignment, not recomputed live —
+   * see src/lib/growth/tasks.ts for the formula.
+   */
+  priorityScore Float @default(0)
+
+  /**
+   * True when the least-loaded-rep assignment picked this up automatically
+   * rather than a Teamlead assigning it by hand. Kept so the assignment
+   * algorithm can be judged against what a human would have done.
+   */
+  autoAssigned Boolean @default(false)
+
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([assignedToId, status, priorityScore])
+  @@index([leadId])
+  @@index([tenantId])
+}
+
+/// What a rep is owed for one real payment. Exactly one row per Payment — the
+/// unique constraint on `paymentId` is what makes this impossible to
+/// double-write, by accident or on purpose. There is no create or update
+/// route exposed to a rep: see src/lib/growth/commission.ts, the only code
+/// path allowed to write this table, which runs off Payment creation, never
+/// off anything a rep clicked.
+model CommissionEntry {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  repId String
+  rep   User   @relation("CommissionRep", fields: [repId], references: [id], onDelete: Cascade)
+
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  /// Same unit as Payment.amount — whole currency units, not cents.
+  amount      Int
+  rateApplied Float
+
+  /**
+   * pending | approved | paid
+   */
+  status String @default("pending")
+
+  approvedById String?
+  approvedBy   User?     @relation("CommissionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([repId, status])
+  @@index([tenantId])
+}
+
+/// A corporate or organisational relationship — not a prospective student.
+/// The BDM's field work and the Strategic Relations side of Growth Desk.
+/// Deliberately simpler than Lead/LeadActivity: there is no commission tied
+/// to a Partner, so there is nothing here anyone has a reason to falsify,
+/// and a plain `notes` field plus `lastContactedAt` is enough to answer "are
+/// we keeping in touch with this one" without needing an immutable ledger.
+model Partner {
+  id String @id @default(cuid())
+
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+
+  /**
+   * corporate | partner — a corporate client vs. a referral/cooperation
+   * partner. Free-form string, same reasoning as every other status field
+   * in this schema: the vocabulary is a business decision, not a type.
+   */
+  type String @default("partner")
+
+  /**
+   * prospecting | engaged | cooperating | dormant
+   */
+  status String @default("prospecting")
+
+  ownerId String?
+  owner   User?   @relation("PartnerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  notes String?
+
+  /// Bumped every time someone logs a touchpoint — what the "keep partners
+  /// warm" reminder in the Partners tab is based on. A platform-wide
+  /// Webinar model already exists (LiveKit room, registration, landing
+  /// page) but has no creation flow wired up anywhere yet — building that
+  /// tonight is its own project, so "schedule the monthly webinar" stays a
+  /// nudge in the UI for now rather than a half-wired new table.
+  lastContactedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status])
+  @@index([tenantId])
+}
+
+/// A spend request that needs the Chief Operating Officer's sign-off —
+/// modelled on the handbook rule that an unanswered request escalates to
+/// Accounting after an hour. There is no background job doing that
+/// escalation yet (see src/lib/growth/fund-requests.ts for why a computed
+/// "is this overdue" read is the honest version of that rule for now,
+/// rather than a cron job this build does not have time to wire safely);
+/// `status` stays "pending" either way until someone acts on it.
+model FundRequest {
+  id String @id @default(cuid())
+
+  requesterId String
+  requester   User   @relation("FundRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  amount  Int
+  purpose String
+
+  /**
+   * marketing | mobility | other — what the spend is for, straight from the
+   * handbook's own wording.
+   */
+  category String @default("other")
+
+  /**
+   * pending | approved | rejected
+   */
+  status String @default("pending")
+
+  approvedById String?
+  approvedBy   User?     @relation("FundApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+  decisionNote String?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId, status])
+  @@index([tenantId])
+}
+
+/// One person's end-of-day log: what moved, and what problem was solved or
+/// flagged. The handbook asks every teamlead for this; Growth Desk is where
+/// it is built first. At most one per person per day — resubmitting the
+/// same day updates it rather than piling up duplicates, same reasoning as
+/// `captureLead` re-submitting an enquiry.
+model DailyReport {
+  id String @id @default(cuid())
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// Midnight of the day this report is for — the unique key, so "today"
+  /// has exactly one row regardless of time zone drift within the day.
+  reportDate DateTime
+
+  achievement   String
+  problemSolved String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([authorId, reportDate])
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Staff channels — the Digital Communications piece of the handbook.
+//
+// Deliberately separate from the student Community system (Space/Message
+// above): that model is keyed to one branch+level+sitting cohort, which has
+// no meaning for "everyone on the Tutors channel" or "the whole office".
+// This is plain staff-to-staff: who can see a channel is computed from role
+// (see src/lib/staff-channels.ts), not a membership table, the same way
+// capability checks already decide what a person can reach rather than a
+// list somebody has to maintain by hand.
+//
+// In-app only for now — no push, no email. Read src/lib/staff-channels.ts
+// before wiring notifications on top of this: that is a deliberate, separate
+// decision, not an oversight.
+// ---------------------------------------------------------------------------
+
+/// A persistent staff channel. `audience` decides who can open it — see
+/// CHANNEL_AUDIENCES in src/lib/staff-channels.ts.
+model StaffChannel {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+
+  /**
+   * admin | tutors | growth | all_staff
+   */
+  audience String @default("all_staff")
+
+  createdById String?
+  createdBy   User?   @relation("StaffChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  messages StaffChannelMessage[]
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([audience])
+  @@index([tenantId])
+}
+
+/// One post in a channel. Plain text, no edit history — this is a bulletin
+/// board, not a document; see the Community system above for threaded,
+/// reaction-bearing chat if that is ever what a channel needs to become.
+model StaffChannelMessage {
+  id String @id @default(cuid())
+
+  channelId String
+  channel   StaffChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  authorId String?
+  author   User?   @relation("StaffChannelAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  body String
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, createdAt])
   @@index([tenantId])
 }
 
@@ -6284,6 +6942,50 @@ model AccessSnapshot {
   @@index([tenantId])
 }
 
+/**
+ * THE ONE FULLY-AUTOMATIC REPAIR, and the kill switch for it.
+ *
+ * Every repair in diagnose-server.ts needs a human to click, because it can
+ * mutate money or identity. This table gates the one pattern that does not —
+ * see lib/auto-heal.ts for what it actually does and why it is safe. One row
+ * per pattern key; `enabled: false` or `dryRun: true` stops it cold with no
+ * redeploy, which is the whole point of a kill switch living in the database
+ * instead of in code.
+ */
+model AutoHealPattern {
+  key         String   @id
+  enabled     Boolean  @default(true)
+  /// true: decide and log, but never actually act (no push sent). The safe
+  /// way to watch a new pattern run for real before it touches a student.
+  dryRun      Boolean  @default(true)
+  /// A pattern that is somehow matching far more than usual stops itself
+  /// rather than run away — see lib/auto-heal.ts's rate check.
+  maxPerHour  Int      @default(30)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+/**
+ * The record of every decision AutoHealPattern's engine made, acted on or
+ * not. This is what "learns from patterns" means here: not a model, a real
+ * count of what happened, read live by the Patterns tab. Never throws (same
+ * discipline as incidents.ts) and is deliberately NOT keyed to require a
+ * student/tenant relation — a derived record must not block on, or be
+ * cascaded by, anything that happens to the row it is about.
+ */
+model AutoHealLog {
+  id        String   @id @default(cuid())
+  pattern   String
+  /// skipped_fresh | nudged | dry_run_nudge | cooldown | rate_limited | expired
+  action    String
+  studentId String?
+  tenantId  String?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([pattern, createdAt])
+  @@index([pattern, studentId, action, createdAt])
+}
 
 /**
  * CAMPUS — the student-facing "who is here" world. See src/lib/campus.ts for
@@ -6337,6 +7039,54 @@ model CampusRequest {
   @@index([toUserId, status, expiresAt])
   @@index([tenantId, band, kind, status, expiresAt])
   @@index([fromUserId, createdAt])
+}
+
+/**
+ * A short, student-started study session. It is visible only to the creator's
+ * exact class cohort and Campus age band; it expires automatically after the
+ * session so the list stays about people who can meet now.
+ */
+model StudyGroup {
+  id          String   @id @default(cuid())
+  name        String
+  focus       String
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  level       String
+  sessionSlot String
+  batch       String   @default("")
+  band        String
+  startsAt    DateTime
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerUserId String
+  ownerUser   User     @relation("StudyGroupOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  members     StudyGroupMember[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, level, sessionSlot, batch, band, expiresAt])
+  @@index([ownerUserId, expiresAt])
+}
+
+model StudyGroupMember {
+  id       String     @id @default(cuid())
+  groupId  String
+  group    StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     String     @default("member")
+  joinedAt DateTime   @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId, joinedAt])
+  @@index([tenantId])
 }
 
 /**

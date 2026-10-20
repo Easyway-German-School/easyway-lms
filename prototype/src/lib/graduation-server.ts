@@ -9,6 +9,8 @@ import { nextLevelAfter } from "@/lib/levels";
 import { completeLevelForStudents } from "@/lib/germany-journey-server";
 import { issueCertificateForStudent } from "@/lib/certificates";
 import { promoteStudents } from "@/lib/promotion";
+import { autoProgressionDecision } from "@/lib/auto-progression";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import type { IntakeStartDayOverrides } from "@/lib/intake";
 import { resolveJourneyAudience } from "@/lib/next-level-journey";
@@ -104,6 +106,7 @@ export type RunningBatch = {
 
 export type GraduationAuto = {
   enabled: boolean;
+  autoPromote: boolean;
   lastRunAt: string | null;
   lastRunSummary: string | null;
 };
@@ -262,6 +265,8 @@ async function scan(options: {
         amount: true,
         waivedAmount: true,
         legacyArrears: true,
+        historyStatus: true,
+        historicalPaidAmount: true,
         createdAt: true,
         settledAt: true,
       },
@@ -378,6 +383,7 @@ function parseAuto(value: unknown): GraduationAuto {
   const raw = readJson(value);
   return {
     enabled: raw.enabled === true,
+    autoPromote: raw.autoPromote === true,
     lastRunAt: typeof raw.lastRunAt === "string" ? raw.lastRunAt : null,
     lastRunSummary: typeof raw.lastRunSummary === "string" ? raw.lastRunSummary : null,
   };
@@ -780,6 +786,10 @@ export async function setBatchAutomatic(tenantId: string, enabled: boolean): Pro
   return writeGraduationAuto(tenantId, { enabled });
 }
 
+export async function setAutoPromotion(tenantId: string, autoPromote: boolean): Promise<GraduationAuto> {
+  return writeGraduationAuto(tenantId, { autoPromote });
+}
+
 /**
  * The daily check (06:00 UTC). For every school that has the morning summary on,
  * counts per finished batch who is ready to move up, who owes (would be invited),
@@ -871,5 +881,138 @@ export async function runAutoGraduation(
     });
   }
 
+  return total;
+}
+
+export async function runAutoLevelProgression(
+  options: { now?: Date; budgetMs?: number } = {},
+): Promise<{ schools: number; promoted: number; review: number }> {
+  const now = options.now ?? new Date();
+  const started = Date.now();
+  const budgetMs = options.budgetMs ?? 35_000;
+  const total = { schools: 0, promoted: 0, review: 0 };
+  const settings = await prisma.schoolSetting.findMany({
+    where: { key: GRADUATION_AUTO_KEY },
+    select: { tenantId: true, value: true },
+  });
+
+  for (const setting of settings) {
+    if (!parseAuto(setting.value).autoPromote) continue;
+    if (Date.now() - started > budgetMs) break;
+    total.schools += 1;
+
+    await runWithTenant(setting.tenantId, async () => {
+      const students = await prisma.student.findMany({
+        where: {
+          ...tenantWhere(setting.tenantId),
+          status: "active",
+          classesStartedAt: { not: null },
+          startConfirmedVia: { in: ["student", "admin", "attendance", "promotion"] },
+        },
+        select: {
+          id: true,
+          level: true,
+          sessionSlot: true,
+          admission: true,
+          classesStartedAt: true,
+          startConfirmedVia: true,
+          heldBackAt: true,
+        },
+      });
+      const promotedIds = students
+        .filter((student) => student.startConfirmedVia === "promotion")
+        .map((student) => student.id);
+      const enrolments = promotedIds.length
+        ? await prisma.studentEnrolment.findMany({
+            where: { studentId: { in: promotedIds }, outcome: "ongoing", deletedAt: null },
+            select: { studentId: true, level: true, startedAt: true },
+          })
+        : [];
+      const currentStartByStudent = new Map(
+        enrolments.map((row) => [`${row.studentId}|${row.level.toUpperCase()}`, row.startedAt]),
+      );
+      const attendance = promotedIds.length
+        ? await prisma.attendance.findMany({
+            where: { studentId: { in: promotedIds }, status: { in: ["present", "late"] } },
+            orderBy: { date: "asc" },
+            select: { studentId: true, date: true },
+          })
+        : [];
+      const firstAttendance = new Map<string, Date>();
+      const studentById = new Map(students.map((student) => [student.id, student]));
+      for (const row of attendance) {
+        const student = studentById.get(row.studentId);
+        const levelStart = student ? currentStartByStudent.get(`${student.id}|${student.level.toUpperCase()}`) : null;
+        if (levelStart && row.date.getTime() >= levelStart.getTime() && !firstAttendance.has(row.studentId)) {
+          firstAttendance.set(row.studentId, row.date);
+        }
+      }
+
+      for (const student of students) {
+        if (Date.now() - started > budgetMs) break;
+        if (!nextLevelAfter(student.level) || student.heldBackAt) continue;
+
+        let start = student.classesStartedAt;
+        let source = student.startConfirmedVia;
+        const registerDate = firstAttendance.get(student.id);
+        if (registerDate && (!start || (source === "promotion" && registerDate.getTime() >= start.getTime()))) {
+          start = registerDate;
+          source = "attendance";
+          await prisma.student.update({
+            where: { id: student.id },
+            data: {
+              classesStartedAt: registerDate,
+              startConfirmedAt: now,
+              startConfirmedVia: "attendance",
+              startPromptSnoozedUntil: null,
+            },
+          });
+        }
+
+        const decision = autoProgressionDecision({
+          startedAt: start,
+          confirmedVia: source,
+          sessionSlot: student.sessionSlot,
+          now,
+        });
+        if (!decision.eligible) {
+          if (decision.reason === "unconfirmed_start" || decision.reason === "invalid_start") total.review += 1;
+          continue;
+        }
+
+        if (!batchFromAdmission(student.admission)) {
+          total.review += 1;
+          continue;
+        }
+
+        try {
+          const charge = await ensureChargeForLevel({ studentId: student.id, level: student.level, origin: "promotion" });
+          if (!charge) {
+            total.review += 1;
+            continue;
+          }
+          await completeLevelForStudents([student.id], { now: decision.completedAt, announce: false });
+          await issueCertificateForStudent(student.id, { now: decision.completedAt }).catch((error) => {
+            console.error("Automatic progression certificate failed", { studentId: student.id, error });
+          });
+          const promotion = await promoteStudents([student.id], {
+            now,
+            placement: "next-intake",
+            notBefore: decision.completedAt,
+            expectedLevel: student.level,
+            override: {
+              by: "system",
+              reason: "The course window ended from a confirmed first class; prior tuition remains payable.",
+            },
+          });
+          if (promotion.promoted.includes(student.id)) total.promoted += 1;
+          else total.review += 1;
+        } catch (error) {
+          console.error("Automatic course-window progression failed", { studentId: student.id, error });
+          total.review += 1;
+        }
+      }
+    });
+  }
   return total;
 }

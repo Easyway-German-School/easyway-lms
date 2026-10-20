@@ -2,6 +2,7 @@ import {
   DEPOSIT_RATE,
   isReceivedPayment,
   isRegistrationFeePayment,
+  isTravelPackagePathway,
   RECEIVED_PAYMENT_STATUSES,
   requiredDepositFor,
   tuitionFeeFor,
@@ -129,7 +130,7 @@ export const FINANCE_STUDENT_SELECT = {
     // where type. `description` is loaded so `computeStudentFinance` drops it
     // in memory instead (see the `received` filter below).
     where: { status: { in: RECEIVED_PAYMENT_STATUSES }, deletedAt: null },
-    select: { amount: true, createdAt: true, method: true, description: true },
+    select: { amount: true, createdAt: true, method: true, description: true, level: true },
   },
   // The per-level ledger — the debit side. Present for every student once the
   // cutover backfill has run; a student with none yet falls back to the
@@ -142,6 +143,8 @@ export const FINANCE_STUDENT_SELECT = {
       amount: true,
       waivedAmount: true,
       legacyArrears: true,
+      historyStatus: true,
+      historicalPaidAmount: true,
       createdAt: true,
       settledAt: true,
     },
@@ -167,6 +170,7 @@ export type FinanceStudentInput = {
     createdAt?: Date;
     method?: string | null;
     description?: string | null;
+    level?: string | null;
   }>;
   tuitionCharges?: Array<{
     id: string;
@@ -272,8 +276,8 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     classType: student.classType,
     pathway: student.pathway,
   };
-  const tuitionFee = tuitionFeeFor(feeLookup);
-  const requiredDeposit = requiredDepositFor(feeLookup);
+  const quotedTuitionFee = tuitionFeeFor(feeLookup);
+  const quotedRequiredDeposit = requiredDepositFor(feeLookup);
 
   /**
    * Defensive filter. `FINANCE_STUDENT_SELECT` already narrows to received,
@@ -290,11 +294,6 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
   );
   const paid = received.reduce((sum, payment) => sum + (payment.amount || 0), 0);
 
-  const fullPaid = paid >= tuitionFee;
-  const depositPaid = paid >= requiredDeposit;
-
-  const cohort: Cohort = paid <= 0 ? "unpaid" : fullPaid ? "full_paid" : depositPaid ? "deposit_paid" : "registered_only";
-
   const daysEnrolled = Math.max(0, Math.floor((now.getTime() - student.createdAt.getTime()) / DAY_MS));
 
   /**
@@ -307,8 +306,33 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
    * `ensureChargeForLevel` runs) keeps the old behaviour: `owed` stays
    * `tuitionFee - paid` and the ageing clock stays on the enrolment date.
    */
-  const ledger = buildLedger(student.tuitionCharges ?? [], paid, now);
+  const ledger = buildLedger(student.tuitionCharges ?? [], paid, now, received);
   const ledgerPopulated = ledgerIsPopulated(ledger);
+  const currentLine = ledger.lines.find(
+    (line) => line.level.toUpperCase() === String(student.level ?? "").trim().toUpperCase(),
+  );
+  // The charge is frozen when raised. A later price-book edit must not make
+  // the roster quote a different fee from the student's actual current bill.
+  const tuitionFee = currentLine?.net ?? quotedTuitionFee;
+  const requiredDeposit = currentLine
+    ? isTravelPackagePathway(student.pathway)
+      ? Math.min(currentLine.net, quotedRequiredDeposit)
+      : Math.round(currentLine.net * DEPOSIT_RATE)
+    : quotedRequiredDeposit;
+  const paidOtherLevelsOnly = ledgerPopulated && !currentLine;
+  const currentDeposit = currentLine
+    ? isTravelPackagePathway(student.pathway)
+      ? Math.min(currentLine.net, requiredDeposit)
+      : Math.round(currentLine.net * DEPOSIT_RATE)
+    : requiredDeposit;
+  const currentPaid = currentLine?.allocated ?? (paidOtherLevelsOnly ? 0 : paid);
+  const depositPaid = currentPaid >= currentDeposit;
+  const fullPaid = paidOtherLevelsOnly
+    ? false
+    : ledgerPopulated
+      ? ledger.goForwardOutstanding <= 0
+      : paid >= tuitionFee;
+  const cohort: Cohort = paid <= 0 ? "unpaid" : fullPaid ? "full_paid" : depositPaid ? "deposit_paid" : "registered_only";
   const openCharges = ledger.lines.map((line: LedgerLine) => ({
     level: line.level,
     charged: line.net,
@@ -371,8 +395,8 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     requiredDeposit,
     paid,
     owed,
-    owedOnDeposit: Math.max(0, requiredDeposit - paid),
-    progressPercent: tuitionFee > 0 ? Math.min(100, Math.round((paid / tuitionFee) * 100)) : 0,
+    owedOnDeposit: Math.max(0, currentDeposit - currentPaid),
+    progressPercent: tuitionFee > 0 ? Math.min(100, Math.round((currentPaid / tuitionFee) * 100)) : 0,
 
     cohort,
     depositPaid,

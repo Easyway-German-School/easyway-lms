@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { OFFERED_LEVELS } from "@/lib/levels";
-import { readAssignment, spaceWhereForAssignment } from "@/lib/lecturer-assignment";
+import {
+  readAssignment,
+  spaceWhereForAssignment,
+  studentWhereForLecturer,
+  teachingGroups,
+} from "@/lib/lecturer-assignment";
 import { isSessionEnabled } from "@/lib/school-settings";
 import { readSessionSettings } from "@/lib/school-settings-server";
 import { batchOfAdmission, batchTitle, canonicalBatch, compareBatches, studentIsInBatch } from "@/lib/class-batch";
@@ -249,7 +254,7 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
   const branchName =
     cohort.branchName ??
     (await prisma.branch.findUnique({ where: { id: cohort.branchId }, select: { name: true } }))?.name ??
-    "EasyWay";
+    "Easyway";
 
   // Fetch the branch to get tenantId
   const branch = await prisma.branch.findUnique({
@@ -358,6 +363,7 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
     const lecturer = await prisma.lecturer.findUnique({
       where: { userId: viewer.userId },
       select: {
+        id: true,
         branchId: true,
         level: true,
         sessionSlot: true,
@@ -371,9 +377,39 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
       },
     });
 
-    const where = spaceWhereForAssignment(readAssignment(lecturer));
+    const assignment = readAssignment(lecturer);
+    const where = spaceWhereForAssignment(assignment);
     if (!where) {
       return { spaceIds: [], isStaff: true, branchId: null, level: null, sessionSlot: null };
+    }
+
+    /**
+     * Make sure a room exists for every cohort this tutor actually has
+     * students in — the same on-demand creation a student triggers the first
+     * time they open the hub (`ensureSpaceForCohort` above). Without this, the
+     * `findMany` below only ever finds rooms that ALREADY exist: a tutor whose
+     * students have not opened Community yet (or one newly assigned to a
+     * cohort with no room yet) sees "Your class group is being set up"
+     * forever, even though their office-set assignment is completely correct.
+     * Cheap and bounded — `teachingGroups` collapses to one cohort per class
+     * the tutor really teaches, and this only runs when they open the hub.
+     */
+    const rosterWhere = studentWhereForLecturer(assignment, lecturer?.id ?? null);
+    const roster = rosterWhere
+      ? await prisma.student.findMany({
+          where: rosterWhere,
+          select: { branchId: true, level: true, sessionSlot: true, admission: true },
+        })
+      : [];
+    for (const group of teachingGroups(assignment, new Map(), lecturer?.id ?? null, roster)) {
+      await ensureSpaceForCohort({
+        branchId: group.branchId,
+        level: group.level,
+        sessionSlot: group.sessionSlot,
+        batch: group.batch,
+      }).catch((error) =>
+        console.error("ensureSpaceForCohort (tutor) failed:", { lecturerId: lecturer?.id, group: group.key, error }),
+      );
     }
 
     const rooms = await prisma.space.findMany({

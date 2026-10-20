@@ -14,13 +14,17 @@ import { slotTitle } from "@/lib/school-settings";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { defaultBatchMonth, readIntakeStartDayOverrides } from "@/lib/intake-server";
-import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { ensureChargeForLevel, reconcileCurrentLevelChargeForPathway } from "@/lib/tuition-charges";
 import { isTravelPackagePathway } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
-import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
-import { batchFromAdmission } from "@/lib/batch";
+import {
+  archiveDeletedAccountHistory,
+  FRESH_ENROLMENT_STUDENT_RESET,
+  lookupEmailAccount,
+} from "@/lib/deleted-account";
+import { batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
@@ -249,11 +253,9 @@ export async function POST(request: Request) {
   // another admin just added is caught here. The message says what to do about
   // it rather than leaving the office to guess.
   //
-  // A student the office DELETED is the third case, and the one that used to
-  // trap re-adding the same person: the guard soft-deletes the User and its
-  // email stays in the unique index. `lookupEmailAccount` sees that tombstone;
-  // when it is a former student we revive the row below and update it into the
-  // new details instead of creating a second one (see lib/deleted-account.ts).
+  // A deleted student's email stays reserved by its tombstone. Re-adding that
+  // student archives the old active billing/enrolment records before the
+  // tombstone is reused; see lib/deleted-account.ts.
   const emailState = await lookupEmailAccount(email);
   if (emailState.kind === "live") {
     return NextResponse.json(
@@ -265,8 +267,14 @@ export async function POST(request: Request) {
     );
   }
   const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
-  if (revivedUserId) {
-    await reviveDeletedAccount(revivedUserId);
+  if (
+    emailState.kind === "deleted" &&
+    emailState.tenantId !== (gate.session.user.tenantId ?? null)
+  ) {
+    return NextResponse.json(
+      { error: "That email belongs to a deleted student account from another school." },
+      { status: 409 },
+    );
   }
 
   let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
@@ -309,7 +317,9 @@ export async function POST(request: Request) {
   // this form collects lands in both places at once.
   const profileInput = normalizeProfileInput({ ...body, photoUrl });
   const studentFields = {
+    ...(revivedUserId ? FRESH_ENROLMENT_STUDENT_RESET : {}),
     level,
+    tenantId: gate.session.user.tenantId,
     branchId,
     status,
     tutorId,
@@ -321,6 +331,9 @@ export async function POST(request: Request) {
   };
 
   try {
+    if (revivedUserId) {
+      await archiveDeletedAccountHistory(revivedUserId, gate.session.user.tenantId ?? null);
+    }
     // Revived tombstone (see the pre-check above): the row is live again but
     // still carries the deleted student's old details, so update it into the
     // new ones rather than creating a second User against the same email. A
@@ -334,6 +347,7 @@ export async function POST(request: Request) {
             password: hashedPassword,
             role: "STUDENT",
             tenantId: gate.session.user.tenantId,
+            deletedAt: null,
             student: {
               upsert: {
                 create: { ...studentFields, profile: { create: profileInput } },
@@ -462,6 +476,7 @@ export async function POST(request: Request) {
         classType,
         deliveryMode,
         studentCode,
+        reEnrolled: Boolean(revivedUserId),
         // Handed back so the admin screen has it even when it typed nothing
         // and this route generated one — the only place it is ever shown.
         password,
@@ -538,6 +553,16 @@ export async function PATCH(request: Request) {
   // month follows the same rule — both live inside the admission JSON blob.
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
   const batch = typeof body.batch === "string" ? body.batch.trim() : undefined;
+  const batchYear = typeof body.batchYear === "number" ? body.batchYear : undefined;
+  if (
+    body.batchYear !== undefined &&
+    (!Number.isInteger(body.batchYear) || Number(body.batchYear) < 1900 || Number(body.batchYear) > 2200)
+  ) {
+    return NextResponse.json({ error: "Batch year must be a valid year." }, { status: 400 });
+  }
+  if (batch && monthNameToIndex(batch) === null) {
+    return NextResponse.json({ error: "Choose a valid batch month." }, { status: 400 });
+  }
   // Location + photo live in the same admission blob — only touched when their
   // key is present, so an unrelated edit never wipes what signup collected.
   const city = typeof body.city === "string" ? body.city.trim() : undefined;
@@ -573,6 +598,34 @@ export async function PATCH(request: Request) {
     if (!ownedByTenant(student, gate.session.user.tenantId ?? null)) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
+
+    const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
+    const existingBatch =
+      typeof existingAdmission.batch === "string" && existingAdmission.batch.trim()
+        ? existingAdmission.batch.trim()
+        : null;
+    const existingBatchYear =
+      typeof existingAdmission.batchYear === "number"
+        ? existingAdmission.batchYear
+        : existingBatch
+          ? resolveBatchWindow(existingBatch, { registeredAt: student.createdAt })?.year ?? null
+          : null;
+    const effectiveBatch =
+      batch !== undefined
+        ? batch || null
+        : existingBatch;
+    const effectiveBatchYear =
+      batch !== undefined
+        ? batch
+          ? batchYear ??
+            resolveBatchWindow(batch, { registeredAt: student.createdAt })?.year ??
+            null
+          : null
+        : typeof existingAdmission.batchYear === "number"
+          ? existingAdmission.batchYear
+          : effectiveBatch
+            ? resolveBatchWindow(effectiveBatch, { registeredAt: student.createdAt })?.year ?? null
+            : null;
 
     if (email && email !== student.user.email) {
       // Catches a live account AND a soft-deleted tombstone still holding the
@@ -660,7 +713,15 @@ export async function PATCH(request: Request) {
       const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
       const nextAdmission = { ...existingAdmission };
       if (phone !== undefined) nextAdmission.phone = phone || undefined;
-      if (batch !== undefined) nextAdmission.batch = batch || undefined;
+      if (batch !== undefined) {
+        if (batch) {
+          nextAdmission.batch = batch;
+          nextAdmission.batchYear = effectiveBatchYear;
+        } else {
+          delete nextAdmission.batch;
+          delete nextAdmission.batchYear;
+        }
+      }
       if (city !== undefined) nextAdmission.city = city || undefined;
       if (stateRegion !== undefined) nextAdmission.state = stateRegion || undefined;
       if (country !== undefined) nextAdmission.country = country || undefined;
@@ -693,9 +754,15 @@ export async function PATCH(request: Request) {
      * instead of requiring the office to re-toggle the batch dropdown.
      */
     if (batch !== undefined) {
-      const batchChanged = batch !== batchFromAdmission(student.admission);
+      const batchChanged =
+        batch !== batchFromAdmission(student.admission) ||
+        (batch ? effectiveBatchYear !== existingBatchYear : existingBatchYear !== null);
+      const batchAnchor =
+        batch && effectiveBatchYear !== null
+          ? new Date(effectiveBatchYear, monthNameToIndex(batch) ?? 0, 1)
+          : student.createdAt;
       const nowMovedToUpcoming = resolveUpcomingBatch(batch, {
-        registeredAt: student.createdAt,
+        registeredAt: batchAnchor,
         now: new Date(),
       });
       const staleLock =
@@ -785,7 +852,37 @@ export async function PATCH(request: Request) {
     }
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
-    await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+    await prisma.$transaction(async (tx) => {
+      await tx.student.update({ where: { id: studentId }, data: updateStudent });
+      if (batch !== undefined || sessionSlot || classType || requestedDeliveryMode || body.branchId !== undefined || body.tutorId !== undefined) {
+        const activeEnrolmentData: {
+          batchMonth?: string | null;
+          batchYear?: number | null;
+          sessionSlot?: string;
+          classType?: string;
+          deliveryMode?: string;
+          branchId?: string | null;
+          tutorId?: string | null;
+        } = {};
+        if (!(level && level !== student.level)) {
+          if (batch !== undefined) {
+            activeEnrolmentData.batchMonth = batch || null;
+            activeEnrolmentData.batchYear = effectiveBatchYear;
+          }
+          if (sessionSlot) activeEnrolmentData.sessionSlot = sessionSlot;
+          if (classType) activeEnrolmentData.classType = classType;
+          if (updateStudent.deliveryMode) activeEnrolmentData.deliveryMode = updateStudent.deliveryMode;
+          if (body.branchId !== undefined) activeEnrolmentData.branchId = branchId;
+          if (body.tutorId !== undefined) activeEnrolmentData.tutorId = tutorId;
+        }
+        if (Object.keys(activeEnrolmentData).length > 0) {
+          await tx.studentEnrolment.updateMany({
+            where: { studentId, outcome: "ongoing", deletedAt: null },
+            data: activeEnrolmentData,
+          });
+        }
+      }
+    });
 
     if (sessionSlotChanged || deliveryModeChanged || hybridOnlineSlotChanged) {
       await writeAudit(unguardedPrisma, {
@@ -852,6 +949,29 @@ export async function PATCH(request: Request) {
     }
 
     /**
+     * EVERY OTHER PATHWAY CHANGE — the general case Travel Package's own
+     * repair above does not cover. Changing a student's pathway here (fixing
+     * an "Exam Preparatory" picked by mistake, say) silently left the price
+     * exactly where it was: `TuitionCharge.amount` is frozen on purpose, and
+     * only Travel Package had a repair for it, and only going ONTO that
+     * pathway — switching back OFF it, or between any two ordinary pathways,
+     * left the sticker price stuck. `reconcileCurrentLevelChargeForPathway`
+     * fixes the current level's own charge to the new pathway's real price,
+     * but only while nothing has been paid toward it yet — a naira already
+     * allocated against the old price is left for a person to reconcile by
+     * hand, not silently rewritten.
+     */
+    const pathwayChanged = Boolean(pathway && pathway !== student.pathway);
+    let pathwayReprice: Awaited<ReturnType<typeof reconcileCurrentLevelChargeForPathway>> = null;
+    if (pathwayChanged && !movedToTravelPackage) {
+      try {
+        pathwayReprice = await reconcileCurrentLevelChargeForPathway(studentId);
+      } catch (repriceError) {
+        console.error("Pathway re-price failed on admin edit", { studentId, repriceError });
+      }
+    }
+
+    /**
      * Enrolment history — see lib/student-enrolment.ts. Two things can end or
      * start a stint here, independently of the "Promotions" flow in
      * promotion.ts, which already handles the normal level-up case:
@@ -878,6 +998,8 @@ export async function PATCH(request: Request) {
       status === "active" &&
       (student.status === "graduated" || student.status === "withdrawn");
 
+    let levelCharge: Awaited<ReturnType<typeof ensureChargeForLevel>> = null;
+    let levelSyncWarning: string | null = null;
     if (levelChanged || enteringTerminal || leavingTerminal) {
       try {
         if (enteringTerminal) {
@@ -886,6 +1008,19 @@ export async function PATCH(request: Request) {
           });
         } else if (levelChanged) {
           await closeOpenEnrolment(studentId, { outcome: "completed" });
+        }
+
+        if (levelChanged || leavingTerminal) {
+          levelCharge = await ensureChargeForLevel({
+            studentId,
+            level: level || student.level,
+            origin: "admin",
+          });
+          if (!levelCharge) {
+            levelSyncWarning =
+              "The student record changed, but the tuition charge could not be synced. Run Mission Control's current-level tuition repair.";
+            console.error("Tuition charge synchronization failed on admin edit", { studentId, level: level || student.level });
+          }
         }
 
         if (levelChanged || leavingTerminal) {
@@ -899,11 +1034,16 @@ export async function PATCH(request: Request) {
             classType: classType || student.classType,
             deliveryMode: updateStudent.deliveryMode || student.deliveryMode,
             batch: typeof effectiveAdmission.batch === "string" ? effectiveAdmission.batch : undefined,
+            batchYear: effectiveBatchYear,
             tenantId: gate.session.user.tenantId,
+            tuitionChargeId: levelCharge?.chargeId ?? null,
+            feeSnapshot: levelCharge?.amount ?? null,
           });
         }
       } catch (enrolmentError) {
         console.error("Enrolment history update failed on admin edit", { studentId, enrolmentError });
+        levelSyncWarning =
+          "The student record changed, but the current enrolment or tuition snapshot could not be synced. Run Mission Control's current-level tuition repair.";
       }
     }
 
@@ -1020,7 +1160,9 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({
       success: true,
+      ...(levelSyncWarning ? { levelSyncWarning } : {}),
       ...(travelPackageReconcile ? { travelPackage: travelPackageReconcile } : {}),
+      ...(pathwayReprice ? { pathwayReprice } : {}),
     });
   } catch (error) {
     return NextResponse.json({ error: "Unable to update student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });

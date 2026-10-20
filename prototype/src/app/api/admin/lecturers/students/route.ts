@@ -88,7 +88,7 @@ const STUDENT_SHAPE = {
   payments: { select: { amount: true, status: true, description: true } },
   tuitionCharges: {
     where: { deletedAt: null },
-    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
   },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
   coTutors: { select: { lecturerId: true } },

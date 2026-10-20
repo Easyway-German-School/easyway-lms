@@ -100,6 +100,32 @@ export async function GET(req: NextRequest) {
       .filter((student) => belongsToLecturer(assignment, lecturer.id, student))
       .filter((student) => !wantedBatch || batchOfAdmission(student.admission) === wantedBatch);
 
+    const classSessions = roster.length
+      ? await prisma.liveClassSession.findMany({
+          where: {
+            lecturerId: lecturer.id,
+            kind: "cohort",
+            startedAt: { gte: date, lt: new Date(date.getTime() + 24 * 60 * 60_000) },
+          },
+          select: { id: true },
+        })
+      : [];
+    const liveJoins = classSessions.length
+      ? await prisma.liveClassInvite.findMany({
+          where: {
+            sessionId: { in: classSessions.map((classSession) => classSession.id) },
+            studentId: { in: roster.map((student) => student.id) },
+            status: "joined",
+            joinedAt: { not: null },
+          },
+          select: { studentId: true, joinedAt: true, session: { select: { title: true } } },
+          orderBy: { joinedAt: "asc" },
+        })
+      : [];
+    const liveJoinByStudent = new Map(
+      liveJoins.map((join) => [join.studentId, { joinedAt: join.joinedAt, title: join.session.title }]),
+    );
+
     // Attendance is keyed on (studentId, date) — one mark per student per day,
     // whichever class recorded it — so today's state is read that way too.
     const marks = await prisma.attendance.findMany({
@@ -128,6 +154,8 @@ export async function GET(req: NextRequest) {
           present: mark ? mark.present : null,
           status: mark ? mark.status : null,
           alreadyMarked: Boolean(mark),
+          liveJoinedAt: liveJoinByStudent.get(student.id)?.joinedAt?.toISOString() ?? null,
+          liveSessionTitle: liveJoinByStudent.get(student.id)?.title ?? null,
           // Batch hasn't opened yet — nothing to mark.
           notStarted: !classesHaveBegun(student, date, startDayOverrides),
         };

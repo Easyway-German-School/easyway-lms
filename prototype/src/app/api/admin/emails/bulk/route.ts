@@ -47,6 +47,18 @@ export const dynamic = "force-dynamic";
 type Audience = {
   branchId?: string | null;
   level?: string | null;
+  /**
+   * active | alumni — students only, defaults to "active" so every existing
+   * caller keeps today's behaviour untouched. "alumni" is the Growth Desk /
+   * Digital Communications addition: everyone who has finished a batch
+   * (`Student.status === "graduated"`, the same vocabulary
+   * src/lib/student-segments.ts already uses to derive the "alumni"
+   * segment) was previously unreachable from this composer at all, because
+   * resolveStudents hardcoded `status: "active"`. The handbook's "old
+   * students get marketing emails once or twice a month" rule had nothing
+   * to run on until this existed.
+   */
+  segment?: "active" | "alumni" | null;
   /** all | unpaid | paid | registration-only — students only; a tutor has no tuition. */
   paymentStatus?: string | null;
   /** students | tutors | both */
@@ -86,13 +98,39 @@ type Recipient = {
   name: string | null;
   email: string;
   level: string;
-  role: "student" | "tutor";
+  role: "student" | "tutor" | "admin";
   studentCode: string | null;
 };
 
 async function resolveAudience(audience: Audience): Promise<Recipient[]> {
   const group = audience.group ?? "students";
   const out: Recipient[] = [];
+
+  /**
+   * Admin staff — its own group, not foldable into "both", which already
+   * means "students and tutors" and should keep meaning exactly that.
+   * Branch/level/payment filters do not apply to an office account, so this
+   * ignores them entirely, the same way the tutor branch below ignores
+   * payment status.
+   */
+  if (group === "admin") {
+    const admins = await prisma.user.findMany({
+      where: { role: "ADMIN" },
+      select: { id: true, name: true, email: true },
+    });
+    for (const admin of admins) {
+      out.push({
+        userId: admin.id,
+        studentId: null,
+        name: admin.name,
+        email: admin.email,
+        level: "—",
+        role: "admin",
+        studentCode: null,
+      });
+    }
+    return out;
+  }
 
   if (group === "students" || group === "both") {
     out.push(...(await resolveStudents(audience)));
@@ -157,6 +195,7 @@ async function resolveAudience(audience: Audience): Promise<Recipient[]> {
 async function resolveStudents(audience: Audience): Promise<Recipient[]> {
   const wantBatch = audience.batch?.trim().toLowerCase() || null;
 
+  const status = audience.segment === "alumni" ? "graduated" : "active";
   const registrationOnly =
     audience.paymentStatus === "registration-only"
       ? {
@@ -176,7 +215,7 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
 
   const students = await prisma.student.findMany({
     where: {
-      status: "active",
+      status,
       ...registrationOnly,
       ...(audience.branchId ? { branchId: audience.branchId } : {}),
       ...(audience.level ? { level: audience.level } : {}),
@@ -202,7 +241,7 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
     },
   });
@@ -252,6 +291,7 @@ export async function POST(req: NextRequest) {
         count: recipients.length,
         students: recipients.filter((r) => r.role === "student").length,
         tutors: recipients.filter((r) => r.role === "tutor").length,
+        admins: recipients.filter((r) => r.role === "admin").length,
         sample: recipients.slice(0, 25).map((r) => ({
           name: r.name,
           email: r.email,
@@ -319,6 +359,7 @@ export async function POST(req: NextRequest) {
       recipients: recipients.length,
       students: recipients.filter((r) => r.role === "student").length,
       tutors: recipients.filter((r) => r.role === "tutor").length,
+      admins: recipients.filter((r) => r.role === "admin").length,
     });
   } catch (error) {
     console.error("Bulk email failed:", error);

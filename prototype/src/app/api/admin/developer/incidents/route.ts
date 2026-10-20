@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireCapability } from "@/lib/admin-roles";
 import { guardedPrisma } from "@/lib/prisma";
+import { recordIncident } from "@/lib/incidents";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,36 @@ export async function GET(request: Request) {
   const hasMore = rows.length > take;
   const incidents = hasMore ? rows.slice(0, take) : rows;
   return NextResponse.json({ incidents, nextCursor: hasMore ? incidents[incidents.length - 1].id : null });
+}
+
+/**
+ * Logging a problem the office heard about OUTSIDE the app — a student's email, a
+ * WhatsApp message, a call — so it lands in the same register as everything the
+ * system catches on its own, with the same grouping and "did it come back"
+ * tracking. Always `kind: "complaint"`, which is how `recordIncident` keeps it
+ * low-severity-by-default and folds repeats of the same page into one row.
+ */
+export async function POST(request: Request) {
+  const gate = await requireCapability("security");
+  if (!gate.ok) return gate.response;
+
+  const body = (await request.json().catch(() => ({}))) as { route?: unknown; message?: unknown; severity?: unknown };
+  const message = typeof body.message === "string" ? body.message.trim().slice(0, 1500) : "";
+  if (!message) return NextResponse.json({ error: "Describe the problem" }, { status: 400 });
+  const route = typeof body.route === "string" && body.route.trim() ? body.route.trim().slice(0, 120) : null;
+  const severity = pick(typeof body.severity === "string" ? body.severity : null, SEVERITIES);
+
+  await recordIncident({
+    kind: "complaint",
+    source: "feedback",
+    route,
+    message,
+    severity,
+    userId: (gate.session.user.id as string) ?? null,
+    tenantId: gate.session.user.tenantId ?? null,
+    context: { loggedByStaff: true, staffEmail: gate.session.user.email ?? null },
+  });
+  return NextResponse.json({ ok: true });
 }
 
 /**

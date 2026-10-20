@@ -120,7 +120,6 @@ export default function TutorialRuntime() {
       markTutorialCompleted(tutorial.id);
     }
     clearTutorialRun();
-    window.dispatchEvent(new CustomEvent("easyway:tour-drawer", { detail: { open: false } }));
   }, [tutorial]);
 
   const handleExit = useCallback(() => {
@@ -161,23 +160,6 @@ export default function TutorialRuntime() {
     if (!run) return;
     router.push(run.expectedRoute);
   }, [run, router]);
-
-  // The sidebar is a drawer on a phone — ask the shell to open it for a step
-  // whose target lives inside it, the same way WelcomeTour already does.
-  //
-  // Deferred a tick rather than dispatched synchronously: on a step that just
-  // navigated to a new page, StudentShellBody's own "close the drawer on
-  // pathname change" effect fires in the same commit — as the parent, its
-  // passive effect runs AFTER this component's (a child's), so a synchronous
-  // dispatch here would open the drawer only for that reset to immediately
-  // close it again. A macrotask delay lands after that effect has settled.
-  useEffect(() => {
-    if (!active || !step) return;
-    const timer = window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent("easyway:tour-drawer", { detail: { open: Boolean(step.inSidebar) } }));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [active, step]);
 
   useEffect(() => {
     if (!active) return;

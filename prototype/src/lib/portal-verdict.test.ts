@@ -21,6 +21,12 @@ describe("portalVerdict", () => {
     expect(verdict.key).toBe("photo_missing+unsettled_balance");
   });
 
+  it("reports previous-level tuition debt as a payment lock", () => {
+    const verdict = portalVerdict({ hasAccess: false, lockReason: "previous_level_balance" }, true);
+    expect(verdict.key).toBe("previous_level_balance");
+    expect(verdict.locks[0].fix).toMatch(/completed level/i);
+  });
+
   it("falls back to unpaid_deposit when the gate is shut but gave no reason", () => {
     expect(portalVerdict({ hasAccess: false, lockReason: null }, true).key).toBe("unpaid_deposit");
   });

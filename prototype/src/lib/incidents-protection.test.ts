@@ -5,13 +5,18 @@ const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  notify: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   guardedPrisma: { incident: mocks },
 }));
+vi.mock("@/lib/notify", () => ({
+  KIND: { missionControlIncident: "mission_control.incident" },
+  notify: mocks.notify,
+}));
 
-import { _resetThrottle, recordIncident } from "./incidents";
+import { _resetThrottle, recordIncident, shouldEscalateLiveConnect } from "./incidents";
 import { snapshotAll } from "./resilience";
 
 /** Each call gets a different message, so the per-fingerprint throttle cannot be what stops the writes. */
@@ -61,5 +66,44 @@ describe("the incident recorder protects a failing database instead of piling on
   it("never throws into the request that hit the error, however the database behaves", async () => {
     mocks.updateMany.mockRejectedValue(new Error("boom"));
     await expect(distinct(50)).resolves.toBeUndefined();
+  });
+});
+
+
+describe("live connection incident alerting", () => {
+  const liveFailure = {
+    kind: "health" as const,
+    source: "client" as const,
+    route: "/live",
+    message: "student could not connect to the live classroom after direct and relay attempts",
+  };
+
+  it("escalates only when repeated failures reach the alert threshold", () => {
+    expect(shouldEscalateLiveConnect(liveFailure, 4)).toBe(false);
+    expect(shouldEscalateLiveConnect(liveFailure, 5)).toBe(true);
+    expect(shouldEscalateLiveConnect({ ...liveFailure, route: "/api/health" }, 10)).toBe(false);
+  });
+
+  it("flushes the count and notifies when a burst reaches the threshold", async () => {
+    mocks.updateMany.mockResolvedValue({ count: 0 });
+    mocks.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "incident-2", samples: [], occurrences: 1, severity: "medium", reopenedCount: 0 });
+    mocks.create.mockResolvedValue({});
+    mocks.update.mockResolvedValue({});
+    mocks.notify.mockResolvedValue({ sent: 1 });
+
+    const input = {
+      ...liveFailure,
+      severity: "medium" as const,
+      userId: "student-2",
+      context: { liveSessionId: "session-2" },
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) await recordIncident(input);
+
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ occurrences: { increment: 4 }, severity: "high" }),
+    }));
+    expect(mocks.notify).toHaveBeenCalledOnce();
   });
 });

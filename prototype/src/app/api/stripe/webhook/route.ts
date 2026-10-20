@@ -6,6 +6,8 @@ import { sendEmail } from "@/lib/mailer";
 import { withUnscoped } from "@/lib/tenant/context";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
+import { recordCommissionForPayment } from "@/lib/growth/commission";
+import { recordPromoRewardForPayment } from "@/lib/growth/promo-rewards";
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
 
@@ -106,6 +108,23 @@ async function handlePOST(request: NextRequest) {
             stripeSessionId: session.id,
             paymentIntentId,
           },
+        });
+
+        // Growth Desk: credit the rep if this student came through an
+        // assigned Lead. A no-op for every other payment. See the rate
+        // placeholder note in src/lib/growth/commission.ts.
+        await recordCommissionForPayment(recordedPayment.id).catch((error) => {
+          console.error("Stripe webhook: commission recording failed", {
+            paymentId: recordedPayment.id,
+            error,
+          });
+        });
+
+        await recordPromoRewardForPayment(recordedPayment.id).catch((error) => {
+          console.error("Stripe webhook: promo reward recording failed", {
+            paymentId: recordedPayment.id,
+            error,
+          });
         });
 
         const notificationMessage =

@@ -47,7 +47,7 @@ function Lobby({
       <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-6 text-white shadow-xl sm:p-8">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">
-            {session.isPrivate ? "One-to-one class" : session.isOnlineBranch ? "EasyWay Online" : "Live classroom"}
+            {session.isPrivate ? "One-to-one class" : session.isOnlineBranch ? "Easyway Online" : "Live classroom"}
           </p>
           {/* Only shown to a student, and only because it is true: the tutor is
               already in the room by the time a student can be here at all. */}

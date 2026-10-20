@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
@@ -19,10 +19,11 @@ import {
   isOnlineBranch,
 } from "@/lib/online-branch";
 import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
-import { HYBRID_COMBOS, type HybridComboId } from "@/lib/hybrid-combo";
+import { fallbackHybridCombo, HYBRID_COMBOS, type HybridComboId } from "@/lib/hybrid-combo";
 import { defaultSessionTimes, timeFor, type SessionTimes } from "@/lib/session-times";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { availableBatchOptions } from "@/lib/intake";
+import { parseClosedSignupSlots, signupSlotIsClosed, type ClosedSignupSlot } from "@/lib/signup-availability";
 import {
   defaultSessionSettings,
   isCellEnabled,
@@ -94,6 +95,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   const [religion, setReligion] = useState("");
   const [profession, setProfession] = useState("");
   const [batch, setBatch] = useState("");
+  const [batchYear, setBatchYear] = useState(() => new Date().getFullYear());
   const [sessionSlot, setSessionSlot] = useState("");
   /**
    * physical | hybrid — how the student attends. The server always forces
@@ -125,6 +127,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   const [termsAccepted, setTermsAccepted] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const [heardFrom] = useState("");
+  /** A student referral or influencer code — optional, skippable. */
+  const [promoCode, setPromoCode] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
   /**
@@ -152,6 +156,9 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // set on /admin/settings. Until it loads we assume everything runs, so the
   // form never loses its session dropdown to a slow request.
   const [sessionCfg, setSessionCfg] = useState<SessionSettings>(() => defaultSessionSettings());
+  const [closedSignupSlots, setClosedSignupSlots] = useState<ClosedSignupSlot[]>([]);
+  const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
   const [error, setError] = useState("");
   // Set when signup is refused because the email already has an account — shown
   // as a friendly "sign in / reset password" panel, never as an error.
@@ -266,6 +273,43 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // the diaspora, so outside Nigeria the field becomes free text — a student in
   // Berlin was previously stuck picking a state they do not live in.
   const usesNigerianStates = country === "Nigeria";
+  const batchOptions = useMemo(() => availableBatchOptions(), []);
+  const requestedBatchIndex = batchOptions.findIndex(
+    (option) => option.value === batch && option.year === batchYear,
+  );
+  const selectedHybridCombo = HYBRID_COMBOS.find((combo) => combo.id === hybridCombo);
+  const capacitySessionSlot =
+    !isOnline && deliveryMode === "hybrid"
+      ? selectedHybridCombo?.physicalSlot ??
+        fallbackHybridCombo(
+          (slot, mode) => isCellEnabled(sessionCfg, level, slot, mode),
+          level,
+        ).physicalSlot ??
+        sessionSlot
+      : sessionSlot;
+  const selectedBatchIsFull =
+    classType === "group" &&
+    requestedBatchIndex >= 0 &&
+    Boolean(level && capacitySessionSlot) &&
+    signupSlotIsClosed(closedSignupSlots, {
+      batch,
+      year: batchYear,
+      level,
+      sessionSlot: capacitySessionSlot,
+    });
+  const signupBatchOption = selectedBatchIsFull
+    ? batchOptions
+        .slice(requestedBatchIndex + 1)
+        .find(
+          (option) =>
+            !signupSlotIsClosed(closedSignupSlots, {
+              batch: option.value,
+              year: option.year,
+              level,
+              sessionSlot,
+            }),
+        ) ?? null
+    : batchOptions[requestedBatchIndex] ?? null;
 
   const canAdvanceStep =
     step === 1
@@ -275,6 +319,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         branchId !== "" &&
         pathway.trim() !== "" &&
         batch !== "" &&
+        (classType === "private" || (availabilityLoaded && !availabilityError && signupBatchOption !== null)) &&
         level !== "" &&
         // The online branch cannot enrol a level whose online mode is off.
         !onlineClosedForLevel &&
@@ -343,6 +388,38 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       .catch(() => {
         /* keep the permissive default — every option stays offered */
       });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSignupAvailability() {
+      try {
+        const response = await fetch(buildApiUrl("/api/school/signup-availability"), { cache: "no-store" });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error((data as { error?: string } | null)?.error || "Unable to verify signup availability.");
+        }
+        const slots = (data as { closedSlots?: unknown } | null)?.closedSlots;
+        if (!Array.isArray(slots)) throw new Error("The signup availability response was invalid.");
+        if (!cancelled) {
+          setClosedSignupSlots(parseClosedSignupSlots(slots));
+          setAvailabilityError("");
+          setAvailabilityLoaded(true);
+        }
+      } catch (loadError) {
+        console.error("Failed to load signup availability:", loadError);
+        if (!cancelled) {
+          setAvailabilityError(
+            loadError instanceof Error ? loadError.message : "Unable to verify signup availability.",
+          );
+          setAvailabilityLoaded(true);
+        }
+      }
+    }
+    void loadSignupAvailability();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -428,6 +505,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
     prefill("level", applyLevel);
     prefill("branchId", setBranchId);
     prefill("sessionSlot", applySlot);
+    // Deliberately NOT "ref" — that query param is already the Paystack
+    // payment-reference proof read above (paystackRefRef). A promo/referral
+    // code gets its own param so the two can never collide.
+    prefill("promo", (v) => setPromoCode(v.trim().toUpperCase()));
 
     // Server-validated prefill (from the token row or the Paystack charge) wins
     // over whatever the link's query string carried.
@@ -507,6 +588,15 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       setError("Please choose a batch.");
       return;
     }
+    if (classType === "group" && (!availabilityLoaded || availabilityError || !signupBatchOption)) {
+      setError(
+        availabilityError ||
+          (selectedBatchIsFull
+            ? "That class slot is full and there are no later batches currently available. Please choose another level or session."
+            : "Please wait while we verify class availability."),
+      );
+      return;
+    }
 
     if (!pathway.trim()) {
       setError("Please choose a package type.");
@@ -571,7 +661,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         hybridCombo: !isOnline && deliveryMode === "hybrid" ? hybridCombo : undefined,
         classType,
         pathway,
-        batch,
+        batch: signupBatchOption?.value ?? batch,
+        batchYear: signupBatchOption?.year ?? batchYear,
         classApplied: level,
         gender,
         dob: dobForRecord(dob),
@@ -586,6 +677,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         photoFileName,
         termsAccepted,
         heardFrom,
+        promoCode: promoCode.trim().toUpperCase() || undefined,
         emergencyContactName,
         emergencyContactInfo,
         // Access proof — re-validated server-side by /api/auth/signup.
@@ -633,8 +725,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       if (isOnline) {
         setSuccessMessage(
           parentEnabled
-            ? "Welcome to EasyWay Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
-            : "Welcome to EasyWay Online. Taking you to your dashboard…",
+            ? "Welcome to Easyway Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
+            : "Welcome to Easyway Online. Taking you to your dashboard…",
         );
         setShowSuccess(true);
 
@@ -691,7 +783,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         */}
         <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-6 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · EasyWay German</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · Easyway German</p>
             <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Start your German journey"}</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85">
               A few short steps and you are enrolled — your level, your class times, your tutor. Registering for your
@@ -787,13 +879,44 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                 </div>
                 <div>
                   <label htmlFor="batch" className="block text-sm font-semibold text-[var(--muted)]">Batch (which month you start)</label>
-                  <select id="batch" name="batch" value={batch} onChange={(e) => setBatch(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
+                  <select
+                    id="batch"
+                    name="batch"
+                    value={signupBatchOption ? `${signupBatchOption.value}|${signupBatchOption.year}` : batch ? `${batch}|${batchYear}` : ""}
+                    onChange={(event) => {
+                      const option = batchOptions.find((item) => `${item.value}|${item.year}` === event.target.value);
+                      if (option) {
+                        setBatch(option.value);
+                        setBatchYear(option.year);
+                      } else {
+                        setBatch("");
+                      }
+                    }}
+                    className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]"
+                  >
                     <option value="">Select batch</option>
-                    {availableBatchOptions().map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                    {batchOptions.map((option) => (
+                      <option key={`${option.value}|${option.year}`} value={`${option.value}|${option.year}`}>{option.label}</option>
                     ))}
                   </select>
-                  <p className="mt-2 text-xs text-[var(--muted)]">Only the batches open for new sign-ups are listed, with the year shown so there is no mix-up. You can pick one further out — payments for a future batch are recorded and your access activates the moment it begins.</p>
+                  {availabilityError ? (
+                    <p role="alert" className="mt-2 text-sm font-medium text-red-700">
+                      We couldn&apos;t verify signup availability: {availabilityError} Refresh this page or contact the school before continuing.
+                    </p>
+                  ) : selectedBatchIsFull ? (
+                    <p role="status" className="mt-2 text-sm font-medium text-amber-800">
+                      {batch} {batchYear} {level} {capacitySessionSlot} is full.
+                      {signupBatchOption
+                        ? ` We selected ${signupBatchOption.label} instead.`
+                        : " No later batch is open for this class slot yet; choose another level or session."}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs text-[var(--muted)]">
+                      {availabilityLoaded
+                        ? "Only the batches open for new sign-ups are listed, with the year shown so there is no mix-up. Future-batch access activates when class begins."
+                        : "Checking which class slots are open..."}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-1">
@@ -1309,6 +1432,18 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                     </p>
                   </div>
                 ) : null}
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[var(--muted)]">
+                  Referral or promo code <span className="font-normal text-[var(--muted)]">(optional)</span>
+                </label>
+                <input
+                  value={promoCode}
+                  onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+                  placeholder="e.g. EW3F9A2B or an influencer's code"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm uppercase tracking-wide"
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">Have a friend's referral code or an influencer's code? Enter it here — otherwise just leave this blank.</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--muted)]">Your profile photo</label>

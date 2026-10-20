@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
 import TwoFactorCard from "@/components/TwoFactorCard";
-import { AlertIcon, CheckCircleIcon, RefreshIcon, ShieldIcon } from "@/components/icons";
+import { AlertIcon, CheckCircleIcon, PulseIcon, RefreshIcon, ShieldIcon } from "@/components/icons";
 
 type AuditEntry = {
   id: string;
@@ -122,6 +123,26 @@ export default function AdminSecurityPage() {
             does not mean rolling the whole school back to yesterday.
           </p>
         </div>
+
+        {/* ------------------------------------------------------------ */}
+        {/* The self-hosted database's own status board                  */}
+        {/* ------------------------------------------------------------ */}
+        {/* A direct, impossible-to-miss link straight from this page —
+            the sidebar entry for /admin/db-infra sits right below this
+            one, but in case a cached nav list is slow to pick it up for
+            someone, this guarantees a working path there regardless. */}
+        <Link
+          href="/admin/db-infra"
+          className="flex items-center justify-between rounded-3xl border-2 border-amber-300 bg-amber-50 p-5 text-amber-900 transition hover:border-amber-400"
+        >
+          <div className="flex items-center gap-3">
+            <PulseIcon />
+            <div>
+              <div className="font-bold">Database infrastructure</div>
+              <div className="text-sm">Primary/standby health, backups, and real Linode billing — open the dashboard →</div>
+            </div>
+          </div>
+        </Link>
 
         {/* ------------------------------------------------------------ */}
         {/* Your own second factor                                        */}

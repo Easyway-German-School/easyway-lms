@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { isValidPaymentStatus, PAYMENT_STATUSES } from "@/lib/payment";
+import { buildLedger } from "@/lib/finance/ledger";
+import { LEVELS } from "@/lib/levels";
+import { isValidPaymentStatus, PAYMENT_STATUSES, receivedPaymentFilter } from "@/lib/payment";
+import { resolvePaymentLevel } from "@/lib/payment-level";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
@@ -18,30 +21,80 @@ export async function GET(request: Request) {
   const where: any = {};
   if (status && status !== "not_paid") where.status = status;
   if (method) where.method = method;
-  if (classType === "private" || classType === "group") where.student = { classType };
+  const studentFilter: Record<string, unknown> = {};
+  if (classType === "private" || classType === "group") studentFilter.classType = classType;
+  const level = url.searchParams.get("level");
+  if (level) {
+    where.OR = [
+      { level },
+      { AND: [{ level: null }, { student: { level } }] },
+    ];
+  }
   if (search) {
     // No `mode: "insensitive"`: SQLite does not support it and Prisma rejects
     // the whole query, so every payment search returned a 500. SQLite's LIKE is
     // already case-insensitive for ASCII.
-    where.OR = [
+    const searchOr = [
       { student: { user: { name: { contains: search, mode: "insensitive" as const } } } },
       { student: { user: { email: { contains: search, mode: "insensitive" as const } } } },
+      { student: { studentCode: { contains: search, mode: "insensitive" as const } } },
     ];
+    if (where.OR) {
+      where.AND = [{ OR: where.OR }, { OR: searchOr }];
+      delete where.OR;
+    } else {
+      where.OR = searchOr;
+    }
+  }
+  if (Object.keys(studentFilter).length) {
+    where.student = { ...(where.student ?? {}), ...studentFilter };
   }
 
   const payments = status === "not_paid"
     ? []
     : await prisma.payment.findMany({
     where,
-    include: { student: { include: { user: true } }, invoice: true },
+    include: {
+      student: {
+        select: {
+          id: true,
+          level: true,
+          classType: true,
+          studentCode: true,
+          user: { select: { name: true, email: true } },
+          enrolments: {
+            where: { deletedAt: null },
+            orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }],
+            select: {
+              id: true,
+              level: true,
+              batchMonth: true,
+              batchYear: true,
+              outcome: true,
+            },
+          },
+        },
+      },
+      invoice: true,
+    },
     orderBy: { createdAt: "desc" },
     ...(search ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
   });
 
   let unpaidStudents: Array<{
     id: string;
+    level: string;
+    classType: string;
+    studentCode: string | null;
     user: { name: string | null; email: string };
     createdAt: Date;
+    enrolments: Array<{
+      id: string;
+      level: string;
+      batchMonth: string | null;
+      batchYear: number | null;
+      outcome: string;
+    }>;
   }> = [];
 
   if (search) {
@@ -59,6 +112,7 @@ export async function GET(request: Request) {
           OR: [
             { user: { name: { contains: search, mode: "insensitive" as const } } },
             { user: { email: { contains: search, mode: "insensitive" as const } } },
+            { studentCode: { contains: search, mode: "insensitive" as const } },
           ],
         },
         ...(classType === "private" || classType === "group" ? [{ classType }] : []),
@@ -67,7 +121,25 @@ export async function GET(request: Request) {
     };
     unpaidStudents = await prisma.student.findMany({
       where: studentWhere,
-      select: { id: true, createdAt: true, user: { select: { name: true, email: true } } },
+      select: {
+        id: true,
+        level: true,
+        classType: true,
+        studentCode: true,
+        createdAt: true,
+        user: { select: { name: true, email: true } },
+        enrolments: {
+          where: { deletedAt: null },
+          orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            level: true,
+            batchMonth: true,
+            batchYear: true,
+            outcome: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -80,7 +152,15 @@ export async function GET(request: Request) {
     status: "not_paid",
     method: "—",
     description: "No payment recorded",
-    student: { id: student.id, user: student.user },
+    level: student.level,
+    student: {
+      id: student.id,
+      level: student.level,
+      classType: student.classType,
+      studentCode: student.studentCode,
+      user: student.user,
+      enrolments: student.enrolments,
+    },
     invoice: null,
     createdAt: student.createdAt,
   }));
@@ -93,8 +173,76 @@ export async function GET(request: Request) {
     ? unpaidRows.length
     : search ? allRows.length : (await prisma.payment.count({ where })) + unpaidRows.length;
   const pageRows = search ? allRows.slice((page - 1) * pageSize, page * pageSize) : filtered;
+  const studentIds = [...new Set(pageRows.flatMap((row) => (row.student?.id ? [row.student.id] : [])))];
+  const [charges, tuitionPayments] = studentIds.length
+    ? await Promise.all([
+        prisma.tuitionCharge.findMany({
+          where: { studentId: { in: studentIds }, deletedAt: null },
+          select: {
+            id: true,
+            studentId: true,
+            level: true,
+            amount: true,
+            waivedAmount: true,
+            legacyArrears: true,
+            historyStatus: true,
+            historicalPaidAmount: true,
+            createdAt: true,
+          },
+        }),
+        prisma.payment.findMany({
+          where: { studentId: { in: studentIds }, ...receivedPaymentFilter() },
+          select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
+        }),
+      ])
+    : [[], []];
+  const chargesByStudent = new Map<string, typeof charges>();
+  for (const charge of charges) {
+    const group = chargesByStudent.get(charge.studentId) ?? [];
+    group.push(charge);
+    chargesByStudent.set(charge.studentId, group);
+  }
+  const paymentsByStudent = new Map<string, typeof tuitionPayments>();
+  for (const payment of tuitionPayments) {
+    const group = paymentsByStudent.get(payment.studentId) ?? [];
+    group.push(payment);
+    paymentsByStudent.set(payment.studentId, group);
+  }
+  const previousDebtByStudent = new Map<string, number>();
+  for (const row of pageRows) {
+    const studentId = row.student?.id;
+    if (!studentId || previousDebtByStudent.has(studentId)) continue;
+    const currentIndex = (LEVELS as readonly string[]).indexOf(String(row.student.level ?? "").trim().toUpperCase());
+    const studentCharges = chargesByStudent.get(studentId) ?? [];
+    const studentPayments = paymentsByStudent.get(studentId) ?? [];
+    const totalPaid = studentPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    const ledger = buildLedger(studentCharges, totalPaid, new Date(), studentPayments);
+    const previousOutstanding = currentIndex < 0
+      ? 0
+      : ledger.lines
+          .filter((line) => {
+            const levelIndex = (LEVELS as readonly string[]).indexOf(line.level.trim().toUpperCase());
+            return levelIndex >= 0 && levelIndex < currentIndex;
+          })
+          .reduce((sum, line) => sum + line.outstanding, 0);
+    previousDebtByStudent.set(studentId, previousOutstanding);
+  }
+  const paymentsForDesk = pageRows.map((row) =>
+    row.status === "not_paid"
+      ? row
+      : {
+          ...row,
+          level: resolvePaymentLevel({ stamped: row.level, description: row.description }),
+          student: row.student
+            ? {
+                ...row.student,
+                previousLevelOutstanding: previousDebtByStudent.get(row.student.id) ?? 0,
+              }
+            : null,
+        },
+  );
 
-  return NextResponse.json({ payments: pageRows, totalCount });
+  return NextResponse.json({ payments: paymentsForDesk, totalCount });
 }
 
 export async function PATCH(request: Request) {

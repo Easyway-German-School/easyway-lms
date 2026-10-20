@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { CampusRoomCard } from "@/components/campus/CampusParts";
 import { YouthBlobs, YouthFace } from "@/components/youth/YouthMotion";
-import { ROOMS, type Band, type CampusSnapshot, type PresencePerson } from "@/lib/campus";
+import { ROOMS, type Band, type CampusSnapshot, type PresencePerson, type RoomId } from "@/lib/campus";
 
 const BANDS: Array<{ id: Band; label: string; hint: string }> = [
   { id: "minor", label: "Under 18", hint: "Their own street. Adults never appear here." },
@@ -26,6 +26,7 @@ export default function AdminCampusWatch({ immersive = false }: { immersive?: bo
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [band, setBand] = useState<Band>("minor");
+  const [selectedRoom, setSelectedRoom] = useState<RoomId | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -58,6 +59,8 @@ export default function AdminCampusWatch({ immersive = false }: { immersive?: bo
   }
 
   const snap = data.bands[band];
+  const room = ROOMS.find((item) => item.id === selectedRoom);
+  const roomSummary = selectedRoom ? snap.rooms[selectedRoom] : null;
   const everyone: PresencePerson[] = [];
   const seen = new Set<string>();
   for (const room of Object.values(snap.rooms)) {
@@ -107,47 +110,120 @@ export default function AdminCampusWatch({ immersive = false }: { immersive?: bo
             </div>
           </div>
 
-          <div className={`mt-4 grid grid-cols-2 gap-3 ${immersive ? "sm:gap-4 lg:grid-cols-4" : ""}`}>
-            {ROOMS.map((room) => {
-              const summary = snap.rooms[room.id];
-              return (
-                <CampusRoomCard
-                  key={room.id}
-                  room={room}
-                  count={summary?.count ?? 0}
-                  people={summary?.people ?? []}
-                  more={summary?.more ?? 0}
-                  tall={immersive}
-                />
-              );
-            })}
-          </div>
+          {room && roomSummary ? (
+            <section className="mt-4 rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
+              <button
+                type="button"
+                onClick={() => setSelectedRoom(null)}
+                className="mb-4 inline-flex rounded-full bg-[var(--surface-alt)] px-3.5 py-2 text-xs font-bold text-[var(--foreground)]"
+              >
+                ← All rooms
+              </button>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-2xl font-extrabold tracking-tight">{room.name}</h3>
+                  <p className="mt-1 text-sm text-[var(--muted)]">{room.blurb}</p>
+                </div>
+                <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                  room.open ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"
+                }`}>
+                  {room.open ? "Student room · observe only" : "Admin preview · not open to students"}
+                </span>
+              </div>
 
-          <section className="mt-7">
-            <h3 className="px-1 text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Who&apos;s around</h3>
-            {everyone.length === 0 ? (
-              <p className="mt-3 rounded-3xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
-                Nobody in this group is on Campus right now.
-              </p>
-            ) : (
-              <ul className={`mt-3 ${immersive ? "grid gap-2 sm:grid-cols-2" : "space-y-2"}`}>
-                {everyone.map((person) => (
-                  <li
-                    key={person.userId}
-                    className="youth-pop flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5"
-                  >
-                    <YouthFace config={person.avatar} seed={person.name} size={immersive ? 48 : 40} live />
-                    <div className="min-w-0">
-                      <p className="truncate font-bold">{person.name}</p>
-                      <p className="text-xs text-[var(--muted)]">
-                        {person.level} · {person.room === "lobby" ? "wandering" : person.room}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+              {room.open ? (
+                <div className="mt-5 rounded-2xl bg-[var(--surface-alt)] p-4">
+                  <h4 className="text-sm font-extrabold">What students can do here</h4>
+                  <p className="mt-1 text-sm text-[var(--foreground-soft)]">
+                    {room.id === "library"
+                      ? "Study alongside classmates on the shared focus-and-break timer."
+                      : "Start or accept a short German article challenge with another student."}
+                  </p>
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    This is a staff observation view. It does not join the room, send a challenge, or award student rewards.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-amber-950">
+                  <h4 className="text-sm font-extrabold">Preview only</h4>
+                  <p className="mt-1 text-sm">
+                    Students are not able to enter this room yet. This view lets staff inspect its description and any
+                    presence data without implying that its activities are available.
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-5">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Students in this room</h4>
+                  <span className="text-xs font-semibold text-[var(--muted)]">{roomSummary.count} online</span>
+                </div>
+                {roomSummary.people.length === 0 ? (
+                  <p className="mt-3 rounded-2xl border border-dashed border-[var(--border)] p-4 text-center text-sm text-[var(--muted)]">
+                    Nobody in this room right now.
+                  </p>
+                ) : (
+                  <ul className={`mt-3 ${immersive ? "grid gap-2 sm:grid-cols-2" : "space-y-2"}`}>
+                    {roomSummary.people.map((person) => (
+                      <li key={person.userId} className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
+                        <YouthFace config={person.avatar} seed={person.name} size={immersive ? 48 : 40} live />
+                        <div className="min-w-0">
+                          <p className="truncate font-bold">{person.name}</p>
+                          <p className="text-xs text-[var(--muted)]">{person.level}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+          ) : (
+            <>
+              <div className={`mt-4 grid grid-cols-2 gap-3 ${immersive ? "sm:gap-4 lg:grid-cols-4" : ""}`}>
+                {ROOMS.map((campusRoom) => {
+                  const summary = snap.rooms[campusRoom.id];
+                  return (
+                    <CampusRoomCard
+                      key={campusRoom.id}
+                      room={campusRoom}
+                      count={summary?.count ?? 0}
+                      people={summary?.people ?? []}
+                      more={summary?.more ?? 0}
+                      tall={immersive}
+                      onSelect={() => setSelectedRoom(campusRoom.id)}
+                      destinationLabel={campusRoom.open ? undefined : "Admin preview"}
+                    />
+                  );
+                })}
+              </div>
+
+              <section className="mt-7">
+                <h3 className="px-1 text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Who&apos;s around</h3>
+                {everyone.length === 0 ? (
+                  <p className="mt-3 rounded-3xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
+                    Nobody in this group is on Campus right now.
+                  </p>
+                ) : (
+                  <ul className={`mt-3 ${immersive ? "grid gap-2 sm:grid-cols-2" : "space-y-2"}`}>
+                    {everyone.map((person) => (
+                      <li
+                        key={person.userId}
+                        className="youth-pop flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5"
+                      >
+                        <YouthFace config={person.avatar} seed={person.name} size={immersive ? 48 : 40} live />
+                        <div className="min-w-0">
+                          <p className="truncate font-bold">{person.name}</p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {person.level} · {person.room === "lobby" ? "wandering" : person.room}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
         </div>
       </div>
     </div>

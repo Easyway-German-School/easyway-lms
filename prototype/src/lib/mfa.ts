@@ -20,7 +20,7 @@ import { capabilitiesForUser, SUPER_ONLY_CAPABILITIES } from "@/lib/admin-roles"
  * two-factor is defeated by SIM swap, and SIM swap is not exotic in Nigeria.
  */
 
-const ISSUER = "EasyWay Language School";
+const ISSUER = "Easyway Language School";
 
 /**
  * How much clock disagreement to forgive, in SECONDS — not time-steps, which

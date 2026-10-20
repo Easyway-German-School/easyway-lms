@@ -34,7 +34,7 @@ export type PushState = {
   permission: NotificationPermission | "unsupported";
   enabled: boolean;
   busy: boolean;
-  enable: () => Promise<void>;
+  enable: () => Promise<boolean>;
   disable: () => Promise<void>;
   error: string | null;
 };
@@ -76,7 +76,7 @@ export function usePushNotifications(): PushState {
   }, []);
 
   const enable = useCallback(async () => {
-    if (!supported || busy) return;
+    if (!supported || busy) return false;
     setBusy(true);
     setError(null);
 
@@ -91,7 +91,7 @@ export function usePushNotifications(): PushState {
       const result = await permissionRequest;
       setPermission(result);
       if (result !== "granted") {
-        throw new Error("Notifications were blocked. You can turn them on in Settings > Notifications > EasyWay.");
+        throw new Error("Notifications were blocked. You can turn them on in Settings > Notifications > Easyway.");
       }
 
       const config = await fetch("/api/push/subscribe").then((r) => r.json());
@@ -124,8 +124,10 @@ export function usePushNotifications(): PushState {
       if (!res.ok) throw new Error("Could not save your notification settings.");
 
       setEnabled(true);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not turn on notifications.");
+      return false;
     } finally {
       setBusy(false);
     }

@@ -293,7 +293,7 @@ function FeatureToggleList({
       </div>
       <p className="text-[11px] leading-4 text-[var(--muted)]">
         ÖSD / telc booking is only worth turning on once this school actually has a confirmed fee and a
-        real booking link with that awarding body. EasyWay&apos;s own are off for exactly that reason.
+        real booking link with that awarding body. Easyway&apos;s own are off for exactly that reason.
       </p>
       <Labeled label="Goethe referral link" hint="Leave blank to hide the Goethe card entirely.">
         <input

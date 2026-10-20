@@ -77,6 +77,37 @@ describe("deriveStudentAccess — omitting the tuition ledger (charges)", () => 
   });
 });
 
+describe("deriveStudentAccess — currentLevelPaid (the tuition-offer 'paid in full' lie)", () => {
+  // Same promoted-A1-to-A2 student as above. `/api/student/tuition-offer`
+  // used to compare lifetime totalPaid (₦150,000) against the A2 fee
+  // (₦150,000) and declare "paid in full — certificate clean", while this
+  // same ledger correctly keeps the portal locked. `currentLevelPaid` is the
+  // one number both screens must read, so neither can say something the
+  // other disagrees with.
+  const charges = [
+    { id: "c1", level: "A1", amount: 150_000, waivedAmount: 0, legacyArrears: false, createdAt: daysAgo(60) },
+    { id: "c2", level: "A2", amount: 150_000, waivedAmount: 0, legacyArrears: false, createdAt: daysAgo(10) },
+  ];
+  const base = { totalPaid: 150_000, tuitionFee: 150_000, requiredDeposit: 90_000, level: "A2", now: NOW };
+
+  it("is 0 toward A2 once the ledger shows every naira already went to A1", () => {
+    const access = deriveStudentAccess({ ...base, charges });
+    expect(access.currentLevelPaid).toBe(0);
+    expect(access.totalPaid).toBe(150_000); // lifetime money is still there — just not credited to THIS level
+  });
+
+  it("falls back to the raw lifetime sum when there is no ledger (pre-rollout, exactly as before)", () => {
+    const access = deriveStudentAccess(base); // charges omitted
+    expect(access.currentLevelPaid).toBe(150_000);
+  });
+
+  it("equals the charge's own FIFO allocation once A2 itself is actually paid", () => {
+    const access = deriveStudentAccess({ ...base, totalPaid: 300_000, charges }); // clears A1, then funds A2 in full
+    expect(access.currentLevelPaid).toBe(150_000);
+    expect(access.hasAccess).toBe(true);
+  });
+});
+
 describe("deriveStudentAccess — omitting flatDeposit for Travel Package", () => {
   // Travel Package prices the whole pathway at once (₦980,000), but the
   // minimum first payment is a flat ₦200,000 floor, not 60% of the package.
@@ -126,6 +157,80 @@ describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
     }
   });
 
+  describe("deriveStudentAccess — previous-level debt blocks current access", () => {
+    const charges = [
+      { id: "a1", level: "A1", amount: 180_000, legacyArrears: false, createdAt: daysAgo(90) },
+      { id: "a2", level: "A2", amount: 180_000, legacyArrears: false, createdAt: daysAgo(1) },
+    ];
+
+    it("locks an otherwise fully paid current level while the completed level still has debt", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 180_000,
+        tuitionFee: 180_000,
+        requiredDeposit: 108_000,
+        level: "A2",
+        charges,
+        payments: [{ amount: 180_000, level: "A2", createdAt: daysAgo(1) }],
+        now: NOW,
+      });
+
+      expect(access.outstanding).toBe(0);
+      expect(access.currentLevelOutstanding).toBe(0);
+      expect(access.previousLevelOutstanding).toBe(180_000);
+      expect(access.hasAccess).toBe(false);
+      expect(access.lockReason).toBe("previous_level_balance");
+    });
+
+    it("opens current access once every earlier level is settled", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 360_000,
+        tuitionFee: 180_000,
+        requiredDeposit: 108_000,
+        level: "A2",
+        charges,
+        payments: [{ amount: 360_000, level: "A2", createdAt: daysAgo(1) }],
+        now: NOW,
+      });
+
+      expect(access.previousLevelOutstanding).toBe(0);
+      expect(access.hasAccess).toBe(true);
+      expect(access.lockReason).toBeNull();
+    });
+
+    it("keeps an earlier-level payment off the current-level tuition balance", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 5_000,
+        tuitionFee: 150_000,
+        requiredDeposit: 90_000,
+        level: "A2",
+        charges: [
+          { id: "a1", level: "A1", amount: 150_000, legacyArrears: false, createdAt: daysAgo(90) },
+          { id: "a2", level: "A2", amount: 150_000, legacyArrears: false, createdAt: daysAgo(1) },
+        ],
+        payments: [{ amount: 5_000, level: "A1", description: "A1 tuition", createdAt: daysAgo(90) }],
+        now: NOW,
+      });
+
+      expect(access.currentLevelOutstanding).toBe(150_000);
+      expect(access.previousLevelOutstanding).toBe(145_000);
+    });
+
+    it("uses labelled payment levels when a returning student has no ledger charges yet", () => {
+      const access = deriveStudentAccess({
+        totalPaid: 5_000,
+        tuitionFee: 150_000,
+        requiredDeposit: 90_000,
+        level: "A2",
+        charges: [],
+        payments: [{ amount: 5_000, level: "A1", description: "A1 tuition", createdAt: daysAgo(90) }],
+        now: NOW,
+      });
+
+      expect(access.currentLevelPaid).toBe(0);
+      expect(access.currentLevelOutstanding).toBe(150_000);
+    });
+  });
+
   it("opens the portal on the first day for someone who has paid", () => {
     const access = deriveStudentAccess({ ...october, totalPaid: 150_000, now: new Date("2026-10-01T00:30:00+01:00") });
     expect(access.hasAccess).toBe(true);
@@ -164,5 +269,206 @@ describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
     });
     expect(access.batchLocked).toBe(false);
     expect(access.hasAccess).toBe(true);
+  });
+});
+
+describe("deriveStudentAccess — August money must not open October", () => {
+  const a1 = {
+    id: "chg-a1",
+    level: "A1",
+    amount: 155_000,
+    waivedAmount: 0,
+    legacyArrears: false,
+    createdAt: new Date("2026-08-01T00:00:00Z"),
+  };
+
+  it("keeps A2 locked when the only tuition paid is the finished A1 fee", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 155_000,
+      tuitionFee: 155_000,
+      requiredDeposit: 93_000,
+      level: "A2",
+      charges: [a1],
+    });
+
+    expect(access.hasAccess).toBe(false);
+    expect(access.depositCleared).toBe(false);
+    expect(access.lockReason).toBe("unpaid_deposit");
+    expect(access.outstanding).toBe(93_000);
+  });
+
+  it("keeps B1 locked until older legacy arrears are settled", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 180_000,
+      tuitionFee: 180_000,
+      requiredDeposit: 108_000,
+      level: "B1",
+      charges: [
+        {
+          id: "a2",
+          level: "A2",
+          amount: 180_000,
+          legacyArrears: true,
+          createdAt: daysAgo(60),
+        },
+        {
+          id: "b1",
+          level: "B1",
+          amount: 180_000,
+          legacyArrears: false,
+          createdAt: daysAgo(10),
+        },
+      ],
+      payments: [
+        {
+          amount: 180_000,
+          level: "B1",
+          description: "Tuition payment (recorded by office)",
+          createdAt: daysAgo(1),
+        },
+      ],
+      now: NOW,
+    });
+
+    expect(access.hasAccess).toBe(false);
+    expect(access.depositCleared).toBe(true);
+    expect(access.totalPaid).toBe(180_000);
+    expect(access.outstandingBalance).toBe(0);
+    expect(access.previousLevelOutstanding).toBe(180_000);
+    expect(access.lockReason).toBe("previous_level_balance");
+    expect(access.lifetimeOutstanding).toBe(180_000);
+  });
+
+  it("reports B1 deposit met when older go-forward debt still locks portal access", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 180_000,
+      tuitionFee: 180_000,
+      requiredDeposit: 108_000,
+      level: "B1",
+      charges: [
+        {
+          id: "a2",
+          level: "A2",
+          amount: 180_000,
+          legacyArrears: false,
+          createdAt: daysAgo(60),
+        },
+        {
+          id: "b1",
+          level: "B1",
+          amount: 180_000,
+          legacyArrears: false,
+          createdAt: daysAgo(10),
+        },
+      ],
+      payments: [
+        {
+          amount: 180_000,
+          level: "B1",
+          description: "Tuition payment (recorded by office)",
+          createdAt: daysAgo(1),
+        },
+      ],
+      now: NOW,
+    });
+
+    expect(access.depositCleared).toBe(true);
+    expect(access.hasAccess).toBe(false);
+    expect(access.lockReason).toBe("previous_level_balance");
+    expect(access.outstandingBalance).toBe(180_000);
+  });
+
+  it("keeps A2 locked even when an A2 charge exists and FIFO already sat the A1 fee", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 155_000,
+      tuitionFee: 155_000,
+      requiredDeposit: 93_000,
+      level: "A2",
+      charges: [
+        a1,
+        {
+          id: "chg-a2",
+          level: "A2",
+          amount: 155_000,
+          waivedAmount: 0,
+          legacyArrears: false,
+          createdAt: new Date("2026-10-01T00:00:00Z"),
+        },
+      ],
+    });
+
+    expect(access.hasAccess).toBe(false);
+    expect(access.depositCleared).toBe(false);
+  });
+
+  it("still opens A1 when that level's own deposit is on the ledger", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 155_000,
+      tuitionFee: 155_000,
+      requiredDeposit: 93_000,
+      level: "A1",
+      charges: [a1],
+    });
+
+    expect(access.hasAccess).toBe(true);
+    expect(access.depositCleared).toBe(true);
+  });
+});
+
+describe("deriveStudentAccess — tuitionFee reads the frozen charge, not a fresh price-book lookup", () => {
+  // A TuitionCharge freezes its fee the moment it is raised (see
+  // lib/finance/reprice.ts). If the price list is edited afterwards — A1
+  // dropped from ₦180,000 to ₦150,000 — a student charged and billed at the
+  // old price has paid exactly what they owed. The caller still passes the
+  // CURRENT price-book figure as `tuitionFee` (that is all `tuitionFeeFor`
+  // can return); this must not leak into the headline figure the dossier and
+  // the student's own dashboard show, or a fully-paid student reads as
+  // "₦180,000 paid of a ₦150,000 fee".
+  const chargedAtOldPrice = {
+    id: "c-a1",
+    level: "A1",
+    amount: 180_000,
+    waivedAmount: 0,
+    legacyArrears: false,
+    createdAt: new Date("2026-09-10T00:00:00Z"),
+  };
+
+  it("shows the charge's own frozen amount, not the live price-book figure the caller passed in", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 180_000,
+      tuitionFee: 150_000, // the price list today, AFTER this student was charged
+      requiredDeposit: 90_000,
+      level: "A1",
+      charges: [chargedAtOldPrice],
+    });
+
+    expect(access.tuitionFee).toBe(180_000);
+    expect(access.totalPaid).toBe(180_000);
+    expect(access.requiredDeposit).toBe(108_000);
+    expect(access.hasAccess).toBe(true);
+    expect(access.outstandingBalance).toBe(0);
+  });
+
+  it("falls back to the raw price-book figure when there is no charge yet for the level they are in", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 0,
+      tuitionFee: 150_000,
+      requiredDeposit: 90_000,
+      level: "A2",
+      charges: [chargedAtOldPrice], // A1 only — nothing raised yet for A2
+    });
+
+    expect(access.tuitionFee).toBe(150_000);
+  });
+
+  it("falls back to the raw price-book figure with no ledger at all", () => {
+    const access = deriveStudentAccess({
+      totalPaid: 0,
+      tuitionFee: 150_000,
+      requiredDeposit: 90_000,
+      level: "A1",
+    });
+
+    expect(access.tuitionFee).toBe(150_000);
   });
 });

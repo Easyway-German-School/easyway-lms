@@ -22,7 +22,10 @@ import { PulseIcon } from "@/components/icons";
 
 const PERIODS = [
   { key: "daily", label: "Today" },
-  { key: "weekly", label: "This week" },
+  // Not "This week" — it is a rolling trailing 7 days, not the calendar week
+  // since Monday. See the dated range AdminBriefView prints under the
+  // headline for each tab's exact span.
+  { key: "weekly", label: "Last 7 days" },
   { key: "monthly", label: "This month" },
 ] as const;
 

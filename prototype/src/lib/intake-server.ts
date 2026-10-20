@@ -25,10 +25,11 @@ import {
  * student, just with the month we are in.
  */
 export async function readCurrentIntake(tenantId: string | null | undefined): Promise<CurrentIntake> {
-  if (!tenantId) return defaultCurrentIntake();
   try {
+    const resolvedTenantId = await resolveSettingsTenantId(tenantId);
+    if (!resolvedTenantId) return defaultCurrentIntake();
     const row = await prisma.schoolSetting.findUnique({
-      where: { tenantId_key: { tenantId, key: CURRENT_INTAKE_KEY } },
+      where: { tenantId_key: { tenantId: resolvedTenantId, key: CURRENT_INTAKE_KEY } },
     });
     return parseCurrentIntake(row?.value);
   } catch {
@@ -38,8 +39,9 @@ export async function readCurrentIntake(tenantId: string | null | undefined): Pr
 
 /**
  * The batch month a new student gets when they did not pick one. Callers store
- * this straight onto `admission.batch`, which is a bare month name — the year
- * is implied by the student's registration date (see resolveBatchAbsolute).
+ * this onto `admission.batch`, which remains a bare month name. New signup
+ * records also store the intake year separately; legacy rows infer it from the
+ * student's registration date (see resolveBatchAbsolute).
  */
 export async function defaultBatchMonth(tenantId: string | null | undefined): Promise<string> {
   return (await readCurrentIntake(tenantId)).month;
@@ -54,7 +56,11 @@ let defaultTenantId: string | null = null;
  * land on, and be read from, the default tenant — otherwise the office saves an
  * opening day that no screen ever shows (and the save is refused outright).
  */
-async function overrideTenantId(tenantId: string | null | undefined): Promise<string | null> {
+/**
+ * Resolve the default school for legacy accounts and admin users without a
+ * tenant id, so settings reads and writes consistently use its setting row.
+ */
+export async function resolveSettingsTenantId(tenantId: string | null | undefined): Promise<string | null> {
   if (tenantId) return tenantId;
   if (defaultTenantId) return defaultTenantId;
   const tenant = await prisma.tenant.findUnique({ where: { slug: DEFAULT_TENANT_SLUG }, select: { id: true } });
@@ -71,7 +77,7 @@ export async function readIntakeStartDayOverrides(
   tenantId: string | null | undefined,
 ): Promise<IntakeStartDayOverrides> {
   try {
-    const resolved = await overrideTenantId(tenantId);
+    const resolved = await resolveSettingsTenantId(tenantId);
     if (!resolved) return {};
     const row = await prisma.schoolSetting.findUnique({
       where: { tenantId_key: { tenantId: resolved, key: INTAKE_START_DAYS_KEY } },
@@ -91,7 +97,7 @@ export async function writeIntakeStartDayOverride(
   monthKey: string,
   day: number | null,
 ): Promise<IntakeStartDayOverrides | null> {
-  const resolved = await overrideTenantId(tenantId);
+  const resolved = await resolveSettingsTenantId(tenantId);
   if (!resolved) return null;
   const current = await readIntakeStartDayOverrides(resolved);
   const next = { ...current };

@@ -48,10 +48,26 @@ type PortalRule = {
   apiPattern: RegExp;
   allowedRoles: string[];
   signInPath: string;
+  /**
+   * Only set on the admin portal. Lets a well-formed `Authorization: Bearer
+   * eak_...` header through this edge check with NO session cookie at all —
+   * this gate cannot look the key up (no DB access at the edge, and
+   * ADMIN_API_KEYS_ENABLED may be off), so it only checks the shape and
+   * defers the real hash lookup, revocation/expiry check and capability scope
+   * to requireCapability() inside the route, same as every session-based
+   * request already does. See AdminApiKey in schema.prisma.
+   */
+  allowApiKey?: boolean;
 };
 
 const PORTALS: PortalRule[] = [
-  { pagePattern: /^\/admin(\/|$)/, apiPattern: /^\/api\/admin(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+  {
+    pagePattern: /^\/admin(\/|$)/,
+    apiPattern: /^\/api\/admin(\/|$)/,
+    allowedRoles: ["admin"],
+    signInPath: "/auth/admin",
+    allowApiKey: true,
+  },
   {
     pagePattern: /^\/lecturer(\/|$)/,
     apiPattern: /^\/api\/lecturer(\/|$)/,
@@ -90,11 +106,29 @@ const normalizeRole = (value: unknown) => String(value || "student").toLowerCase
  */
 const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
 
+/** Shape-only check — `eak_<prefix>_<secret>` — not a lookup. */
+function hasAdminApiKeyHeader(request: NextRequest): boolean {
+  const header = request.headers.get("authorization");
+  if (!header) return false;
+  const [scheme, ...rest] = header.split(" ");
+  if (scheme?.toLowerCase() !== "bearer") return false;
+  return rest.join(" ").trim().startsWith("eak_");
+}
+
 async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
   if (path === IMPERSONATION_END_PATH) return null;
 
   const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
   if (!portal) return null;
+
+  if (
+    portal.allowApiKey &&
+    portal.apiPattern.test(path) &&
+    process.env.ADMIN_API_KEYS_ENABLED === "true" &&
+    hasAdminApiKeyHeader(request)
+  ) {
+    return null;
+  }
 
   /**
    * secureCookie must be forced, not inferred.
@@ -252,6 +286,16 @@ function contentSecurityPolicy(): string {
     process.env.RECORDING_PUBLIC_BASE_URL,
     process.env.STORAGE_S3_ENDPOINT,
   ].filter(Boolean) as string[];
+  const embeddedMedia = [
+    "https://www.youtube-nocookie.com",
+    "https://www.youtube.com",
+    "https://player.vimeo.com",
+    "https://drive.google.com",
+    "https://docs.google.com",
+    "https://www.loom.com",
+    "https://w.soundcloud.com",
+    "https://open.spotify.com",
+  ];
 
   const livekit = liveKitConnectSrc();
 
@@ -263,10 +307,12 @@ function contentSecurityPolicy(): string {
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://checkout.paystack.com",
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${media.join(" ")}`,
-    `media-src 'self' blob: ${media.join(" ")}`,
+    // Tutors can link directly to hosted video/audio files as well as upload
+    // them, so permit HTTPS media while keeping scripts and connections scoped.
+    `media-src 'self' blob: https: ${media.join(" ")}`,
     "font-src 'self' data:",
-    `connect-src 'self' https://api.paystack.co http://127.0.0.1:7524 ${livekit.join(" ")} ${media.join(" ")}`,
-    "frame-src 'self' https://checkout.paystack.com",
+    `connect-src 'self' https://api.paystack.co ${livekit.join(" ")} ${media.join(" ")}`,
+    `frame-src 'self' https://checkout.paystack.com ${embeddedMedia.join(" ")}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

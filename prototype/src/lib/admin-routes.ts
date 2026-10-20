@@ -21,6 +21,19 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // with whoever holds the student records.
   { prefix: "/admin/certificates", capability: "students" },
   { prefix: "/admin/leads", capability: "students" },
+  // The Growth Desk is a rep's own view on top of the same leads — gated on
+  // `growth`, not `students`, so a rep's account doesn't also pick up the
+  // rest of the student record.
+  { prefix: "/admin/growth", capability: "growth" },
+  // An influencer's own dashboard — their code, their sign-ups, their payout
+  // ledger. Gated on its own capability so it carries nothing else `growth`
+  // or `payments` would otherwise pull in.
+  { prefix: "/admin/influencer", capability: "influencer" },
+  // The Influencer Program hub — admin's list of every partner (influencer,
+  // travel agent, other), and the remote-view door into each one's own
+  // dashboard (the SAME component /admin/influencer renders). Same desk as
+  // the rest of the promo-code system, so `payments`, not `influencer`.
+  { prefix: "/admin/influencer-program", capability: "payments" },
   // A guardian's account is paperwork about a named student, same desk as
   // the rest of the student record.
   { prefix: "/admin/parents", capability: "students" },
@@ -67,6 +80,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/payments", capability: "payments" },
   { prefix: "/admin/finance", capability: "payments" },
+  { prefix: "/admin/referrals", capability: "payments" },
   // Refund decisions are money leaving the school, and Terms acceptance is
   // what a refund decision gets checked against — same desk as the rest of
   // the fee book rather than a new capability for what is, underneath, a

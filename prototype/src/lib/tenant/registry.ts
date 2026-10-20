@@ -57,9 +57,24 @@ export const TENANT_OWNED_MODELS = [
   "Certificate",
   "Invoice",
   "Payment",
+  "PromoCode",
+  "PromoRedemption",
+  "PromoRedemptionHold",
+  "PromoPayout",
   "TuitionCharge",
   "PaymentPlan",
   "Lead",
+  // Growth Desk: the sales pipeline sitting on top of Lead. Same reasoning —
+  // one school's pipeline notes and commission figures must never be
+  // readable by another school's.
+  "LeadActivity",
+  "SalesTask",
+  "CommissionEntry",
+  "Partner",
+  "FundRequest",
+  "DailyReport",
+  "StaffChannel",
+  "StaffChannelMessage",
   "Notification",
   "NotificationSetting",
   /**
@@ -125,6 +140,13 @@ export const TENANT_OWNED_MODELS = [
   "CampusDuel",
   "CoinTransaction",
   /**
+   * Student-created sessions and their member lists. The session stores
+   * tenantId directly, and every read is additionally scoped to the exact
+   * cohort and Campus age band.
+   */
+  "StudyGroup",
+  "StudyGroupMember",
+  /**
    * The live quiz game. A game carries a PIN that admits somebody to it, a
    * frozen copy of one school's question paper, and a leaderboard of one
    * school's students by name. All three are the same category of leak as a
@@ -171,6 +193,15 @@ export const TENANT_OWNED_MODELS = [
    * instead.
    */
   "ApiKey",
+  /**
+   * The admin-facing twin of ApiKey above — a credential that borrows its
+   * creating admin's own identity rather than a third party's scoped slice.
+   * Tenant-owned for the same reason: one school's admin must never list or
+   * revoke another school's keys. The lookup by hash in resolveAdminApiKey()
+   * is the one query that runs on the raw client, same exception as
+   * resolveApiKey() above and for the same reason.
+   */
+  "AdminApiKey",
   "IdempotencyRecord",
 
   /**
@@ -376,6 +407,24 @@ export const GLOBAL_MODELS = {
    * console, gated by capability. `tenantId` on the row is an audit column.
    */
   Incident: "platform-wide problem register; written by sessionless paths, read by the developer console",
+
+  /**
+   * The kill switch for one self-healing pattern (src/lib/auto-heal.ts),
+   * keyed by a pattern name ("portal-witness-resync"), not by tenant — there
+   * is one on/off/dry-run setting per pattern, platform-wide, same as every
+   * other developer-console toggle.
+   */
+  AutoHealPattern: "one global on/off/dry-run switch per self-healing pattern, not per tenant",
+
+  /**
+   * The decision log behind AutoHealPattern: written by a cron job with no
+   * session in context (same sessionless-writer shape as Incident above), and
+   * deliberately not a hard relation to Student/tenant (see the model doc in
+   * schema.prisma) so a derived log row can never block on, or be cascaded
+   * by, the record it is about. `tenantId` on the row is an audit column,
+   * read only through the developer console's Patterns tab.
+   */
+  AutoHealLog: "self-heal decision log; written by cron with no tenant in session, read by the developer console",
 
   /**
    * Carries its own tenantId already and is the join point for the others.

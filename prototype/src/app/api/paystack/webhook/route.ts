@@ -8,6 +8,8 @@ import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
+import { recordCommissionForPayment } from "@/lib/growth/commission";
+import { recordPromoRewardForPayment } from "@/lib/growth/promo-rewards";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped, setTenantScope } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
@@ -264,6 +266,7 @@ async function handlePOST(request: Request) {
     if (student.tenantId) setTenantScope(student.tenantId);
 
     const paymentReference = String(data.reference || "");
+    const paymentLevel = String(metadata.level || metadata.targetLevel || "").trim().toUpperCase();
 
     // Enrolment deliberately does NOT run before this point. It used to: an
     // unguarded upsert sat directly above, and a pathway id with no matching
@@ -292,6 +295,7 @@ async function handlePOST(request: Request) {
           currency: "NGN",
           method: "paystack",
           description: getPaymentDescription(effectivePaymentType, pathwayName),
+          ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
           paymentIntentId: paymentReference,
         },
       });
@@ -362,6 +366,7 @@ async function handlePOST(request: Request) {
         status: settledStatus,
         method: "paystack",
         description: getPaymentDescription(effectivePaymentType, pathwayName),
+        ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
         stripeSessionId: paymentReference,
         paymentIntentId: paymentReference,
       },
@@ -392,6 +397,19 @@ async function handlePOST(request: Request) {
 
     await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
       console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
+    });
+
+    // Growth Desk: credit the rep if this student came through an assigned
+    // Lead. A no-op for every other payment. See the rate placeholder note
+    // in src/lib/growth/commission.ts — not wired to real pay yet.
+    await recordCommissionForPayment(payment.id).catch((error) => {
+      console.error("Paystack webhook: commission recording failed", { paymentId: payment.id, error });
+    });
+
+    // Promo/referral reward accrual: a no-op unless this payment's student
+    // signed up with a promo code. See src/lib/growth/promo-rewards.ts.
+    await recordPromoRewardForPayment(payment.id).catch((error) => {
+      console.error("Paystack webhook: promo reward recording failed", { paymentId: payment.id, error });
     });
 
     const notificationMessage =

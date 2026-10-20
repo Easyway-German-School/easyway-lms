@@ -1413,6 +1413,7 @@ export default function AdminTutorsPage() {
    * of a status is that the record survives.
    */
   const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
+  const [tutorSearch, setTutorSearch] = useState("");
   /**
    * A campus and an online tutor can look identical in a flat list — same
    * level, same "Currently teaching" status — which is exactly the kind of
@@ -1458,9 +1459,14 @@ export default function AdminTutorsPage() {
         : statusFilter === "current"
           ? tutors.filter((tutor) => tutor.status !== "inactive")
           : tutors.filter((tutor) => tutor.status === statusFilter);
-    if (modeFilter === "all") return byStatus;
-    return byStatus.filter((tutor) => tutorCoversMode(tutor, modeFilter));
-  }, [tutors, statusFilter, modeFilter]);
+    const byMode = modeFilter === "all" ? byStatus : byStatus.filter((tutor) => tutorCoversMode(tutor, modeFilter));
+    const query = tutorSearch.trim().toLowerCase();
+    if (!query) return byMode;
+    return byMode.filter((tutor) =>
+      [tutor.user.name, tutor.user.email, tutor.specialization, tutor.phone]
+        .some((value) => value?.toLowerCase().includes(query)),
+    );
+  }, [tutors, statusFilter, modeFilter, tutorSearch]);
 
   const modeCounts = useMemo(() => {
     const base = statusFilter === "current" ? tutors.filter((tutor) => tutor.status !== "inactive") : tutors;
@@ -1554,9 +1560,19 @@ export default function AdminTutorsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not create the tutor account");
 
-      setSuccess(
-        `Tutor account created for ${data.lecturer?.email}. Temporary password: ${data.lecturer?.password} — hand this over now, it is not shown again.`,
-      );
+      if (data.welcomeEmailStatus === "queued") {
+        setSuccess(
+          `Tutor account created for ${data.lecturer?.email}. Their tutor-portal login email has been queued.`,
+        );
+      } else if (data.welcomeEmailStatus === "suppressed") {
+        setError(
+          `Tutor account created, but ${data.lecturer?.email} is on the email suppression list. The welcome email was not sent. Temporary password: ${data.lecturer?.password}`,
+        );
+      } else {
+        setError(
+          `Tutor account created, but the welcome email could not be queued. Please share this temporary password securely: ${data.lecturer?.password}`,
+        );
+      }
       setForm({
         name: "",
         email: "",
@@ -1664,7 +1680,10 @@ export default function AdminTutorsPage() {
   }
 
   const canCreate =
-    form.name.trim() !== "" && form.email.trim() !== "" && form.password.length >= 8 && !creating;
+    form.name.trim() !== "" &&
+    form.email.trim() !== "" &&
+    (!form.password.trim() || form.password.length >= 8) &&
+    !creating;
 
   return (
     <AdminShell>
@@ -1701,6 +1720,18 @@ export default function AdminTutorsPage() {
               ? "Loading…"
               : `Showing ${visibleTutors.length} of ${tutors.length} tutor${tutors.length === 1 ? "" : "s"}.`}
           </p>
+
+          <label className="mt-4 block max-w-xl text-sm font-medium">
+            Search tutors
+            <input
+              type="search"
+              value={tutorSearch}
+              onChange={(event) => setTutorSearch(event.target.value)}
+              placeholder="Search by name, email, specialization or phone"
+              aria-label="Search tutors by name, email, specialization or phone"
+              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm"
+            />
+          </label>
 
           <div className="mt-4 flex flex-wrap gap-2">
             {(
@@ -1776,7 +1807,7 @@ export default function AdminTutorsPage() {
 
             {!loading && tutors.length > 0 && visibleTutors.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--border)] p-5 text-sm text-[var(--muted)]">
-                No tutors with this status.
+                {tutorSearch.trim() ? `No tutors match “${tutorSearch.trim()}” with these filters.` : "No tutors with this status."}
               </p>
             ) : null}
 
@@ -2038,13 +2069,16 @@ export default function AdminTutorsPage() {
               />
             </label>
             <label className="block text-sm font-medium">
-              Temporary password
+              Temporary password (optional)
               <PasswordInput
                 value={form.password}
                 onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                 className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm"
-                placeholder="Minimum 8 characters"
+                placeholder="Leave blank to generate and email one"
               />
+              <span className="mt-1 block text-xs text-[var(--muted)]">
+                The tutor&apos;s login details are emailed automatically when the account is created.
+              </span>
             </label>
             <label className="block text-sm font-medium">
               Phone

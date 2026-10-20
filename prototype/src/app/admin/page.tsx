@@ -4,6 +4,7 @@ import { LecturerIcon, PencilIcon, TrendingDownIcon, TrendingUpIcon, WalletIcon 
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import AdminShell from "@/components/AdminShell";
@@ -245,9 +246,15 @@ function RowLink({ href, children, className = "" }: { href?: string; children: 
 }
 
 export default function AdminHomePage() {
+  const router = useRouter();
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Set the instant a Growth Desk account is detected, so the render below
+  // can bail out before the Command Centre's school-wide figures ever
+  // paint — a sales rep landing here first and clicking through to their
+  // own desk was exactly the "not impressive" complaint this fixes.
+  const [redirecting, setRedirecting] = useState(false);
   // "Hide the balance", front-desk edition — blanks every figure below to dots.
   const { hidden } = usePrivacyMode();
 
@@ -257,13 +264,19 @@ export default function AdminHomePage() {
     try {
       const response = await fetch("/api/admin/overview", { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load the admin overview");
-      setData(await response.json());
+      const overview = (await response.json()) as Overview;
+      if (overview.viewer.adminRole === "growth") {
+        setRedirecting(true);
+        router.replace("/admin/growth");
+        return;
+      }
+      setData(overview);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load the admin overview");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     void load();
@@ -304,6 +317,16 @@ export default function AdminHomePage() {
     (focus: string) => to(`/admin/students?focus=${focus}`, `/admin/finance?tab=receivables&focus=${focus}`),
     [to],
   );
+
+  if (redirecting) {
+    return (
+      <AdminShell>
+        <div className="flex h-[60vh] items-center justify-center text-sm text-[var(--muted)]">
+          Taking you to your desk…
+        </div>
+      </AdminShell>
+    );
+  }
 
   return (
     <AdminShell>

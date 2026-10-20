@@ -299,8 +299,8 @@ browser is a distributed component whose real state the server cannot otherwise 
 
 ### 5.3 Mission Control  (`/admin/developer`, `components/developer/*`, `app/api/admin/developer/*`)
 
-Gated by the super-only `security` capability. Tabs: **Live · Incidents · Access drift · Backend map
-· Patterns**.
+Gated by the super-only `security` capability. Tabs: **Live · Incidents · Diagnose & fix · Access
+drift · Backend map · Patterns · Recovery library · Risk radar**.
 
 - **Polling design.** Cheap indexed counts; pauses while the tab is hidden; failed polls draw as
   *gaps*, never zeros (a database that stops answering must not draw as "fast").
@@ -323,6 +323,21 @@ Gated by the super-only `security` capability. Tabs: **Live · Incidents · Acce
     *silent*, not wrong, for the rest.
 - **The Patterns tab** maps five well-known patterns (gateway, backend-for-frontend, circuit
   breaker, retry-with-backoff, bulkhead) to this codebase with live breaker state.
+- **The Recovery library** ranks sanitized incidents, legacy bug/improvement feedback and recorded
+  resolution notes against repository issues, pull requests and commits. Refresh the checked-in repository snapshot with
+  `npm run snapshot:developer-history` from `prototype/` (requires authenticated GitHub CLI access).
+  The search is reference-only: code changes cannot be applied from a running deployment. Data
+  repairs remain in Diagnose & fix, whose allowlisted actions re-derive the fault, require an admin
+  click, verify the result and write an audit entry.
+- **The Risk radar** examines the last 90 days of incidents and bug/improvement feedback, groups
+  similar reports with deterministic inverse-frequency-weighted word overlap, and flags open,
+  recurring or accelerating patterns. Each card shows the evidence, 7-day versus previous-23-day
+  counts, a heuristic risk index and related repository history. It examines up to 500 incident
+  records and 500 submitted bug/improvement reports per scan; the UI warns when either limit is
+  reached. The score is not a calibrated probability and never triggers a repair; a prediction is a
+  review prompt, and the existing diagnosis/approval path handles any data change. The radar is
+  limited to recorded incidents, submitted in-app feedback and the checked-in repository snapshot;
+  it cannot see unreported problems or external support conversations.
 
 ### 5.4 The resilience toolkit  (`lib/resilience.ts`)
 

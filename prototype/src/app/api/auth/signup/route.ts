@@ -12,9 +12,12 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
-import { defaultBatchMonth } from "@/lib/intake-server";
+import { defaultBatchMonth, readCurrentIntake } from "@/lib/intake-server";
+import { availableBatchOptions } from "@/lib/intake";
 import { readSessionSettings } from "@/lib/school-settings-server";
 import { isCellEnabled, isModeEnabled } from "@/lib/school-settings";
+import { readClosedSignupSlots } from "@/lib/signup-availability-server";
+import { signupSlotIsClosed } from "@/lib/signup-availability";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
@@ -22,10 +25,18 @@ import { REGISTRATION_FEE } from "@/lib/payment";
 import { SIGNUP_ACCESS_GATE_ENABLED, validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
+import { phoneIdentityKey, sameStudentIdentity } from "@/lib/signup-identity";
 import { openEnrolment } from "@/lib/student-enrolment";
-import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import {
+  archiveDeletedAccountHistory,
+  FRESH_ENROLMENT_STUDENT_RESET,
+  lookupEmailAccount,
+} from "@/lib/deleted-account";
 import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
+import { resolveSignupPromoAttribution } from "@/lib/promo-attribution";
+import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
+import { DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT } from "@/lib/promo-pricing";
 
 /**
  * Whether there is a Branch table to select from.
@@ -108,6 +119,7 @@ export async function POST(request: NextRequest) {
       level,
       pathway,
       batch,
+      batchYear,
       sessionSlot,
       classType,
       deliveryMode,
@@ -159,6 +171,7 @@ export async function POST(request: NextRequest) {
       allowParentLogin,
       transportRoute,
       heardFrom,
+      promoCode: promoCodeInput,
       // Signup access proof — see the gate below. One of: a returning-student
       // token, a paid Paystack ref (new student), or a first-party invite
       // signature.
@@ -203,10 +216,34 @@ export async function POST(request: NextRequest) {
     // September cohort" send with nothing to match on. Fall back to the
     // school's current intake month (lib/intake.ts) — bare month name, same as
     // a chosen value; the year is implied by their registration date.
+    const currentIntake =
+      typeof batch === "string" && batch.trim() ? null : await readCurrentIntake(currentTenantId());
     const normalizedBatch =
       typeof batch === "string" && batch.trim()
         ? batch.trim()
-        : await defaultBatchMonth(currentTenantId());
+        : currentIntake?.month ?? (await defaultBatchMonth(currentTenantId()));
+    const batchWasSelected = typeof batch === "string" && batch.trim() !== "";
+    const availableBatches = availableBatchOptions();
+    const matchingBatchOption = batchWasSelected
+      ? availableBatches.find((option) => option.value.toLowerCase() === normalizedBatch.toLowerCase())
+      : undefined;
+    const normalizedBatchYear =
+      batchWasSelected
+        ? typeof batchYear === "number" && Number.isInteger(batchYear)
+          ? batchYear
+          : matchingBatchOption?.year ?? NaN
+        : currentIntake?.year ?? NaN;
+    const offeredBatch =
+      !batchWasSelected ||
+      availableBatches.some(
+        (option) => option.value.toLowerCase() === normalizedBatch.toLowerCase() && option.year === normalizedBatchYear,
+      );
+    if (!offeredBatch) {
+      return NextResponse.json(
+        { error: "Choose a valid upcoming batch, including its year." },
+        { status: 400, headers: buildCorsHeaders(request) },
+      );
+    }
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
     // Same story as level: this used to fall back to "morning" for any missing
     // or invalid value, so a student who never opened the session dropdown got
@@ -278,6 +315,34 @@ export async function POST(request: NextRequest) {
       hybridComboWasDefaulted = !combo || combo.id === "other";
     }
 
+    if (normalizedClassType === "group") {
+      const tenantId = currentTenantId();
+      if (!tenantId) {
+        console.error("Signup has no tenant while checking closed slots.");
+        return NextResponse.json(
+          { error: "Unable to verify class availability. Please try again." },
+          { status: 500, headers: buildCorsHeaders(request) },
+        );
+      }
+      const closedSlots = await readClosedSignupSlots(tenantId);
+      if (
+        signupSlotIsClosed(closedSlots, {
+          batch: normalizedBatch,
+          year: normalizedBatchYear,
+          level: normalizedLevel,
+          sessionSlot: normalizedSessionSlot,
+        })
+      ) {
+        return NextResponse.json(
+          {
+            error: `${normalizedBatch} ${normalizedBatchYear} ${normalizedLevel} ${normalizedSessionSlot} is full. Please choose another batch.`,
+            code: "signup_slot_full",
+          },
+          { status: 409, headers: buildCorsHeaders(request) },
+        );
+      }
+    }
+
     // Only present on an online signup. Left undefined for a campus student so
     // their admission record does not gain an empty object.
     const onlineProfile = (body as Record<string, unknown> | null)?.online;
@@ -334,6 +399,7 @@ export async function POST(request: NextRequest) {
       transportRoute: typeof transportRoute === "string" ? transportRoute : undefined,
       heardFrom: typeof heardFrom === "string" ? heardFrom : undefined,
       batch: normalizedBatch,
+      batchYear: normalizedBatchYear,
       // Online cohort answers (timezone / device / connection). Nested rather
       // than flattened so `readOnlineProfile` has one place to look and these
       // keys can never collide with an admission field added later.
@@ -548,12 +614,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Three cases, not two. A live account blocks the signup with "please sign
-    // in". A soft-deleted one — a student the office removed who is now coming
-    // back — is NOT a block: the guard leaves that row (and its email) in the
-    // table (see lib/deleted-account.ts), so a plain `user.create` would trip
-    // the email unique index. Revive the tombstone and update it into the new
-    // signup instead.
+    // A live account blocks the signup with "please sign in". A soft-deleted
+    // student is re-enrolled in place because the email remains unique; old
+    // billing/enrolment records are archived before the account is reactivated.
     const emailState = await lookupEmailAccount(normalizedEmail);
     if (emailState.kind === "live") {
       return NextResponse.json(
@@ -565,15 +628,125 @@ export async function POST(request: NextRequest) {
         { status: 409, headers: buildCorsHeaders(request) }
       );
     }
+    if (
+      emailState.kind === "deleted" &&
+      emailState.tenantId !== currentTenantId()
+    ) {
+      return NextResponse.json(
+        {
+          error: "This email belongs to a deleted account from another school. Contact the school for help.",
+          code: "email_exists",
+        },
+        { status: 409, headers: buildCorsHeaders(request) },
+      );
+    }
     const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
-    if (revivedUserId) {
-      await reviveDeletedAccount(revivedUserId);
+    const signupProfile = normalizeProfileInput(normalizedAdmission);
+    const phoneSearch = phoneIdentityKey(
+      signupProfile.phone ?? signupProfile.whatsapp ?? signupProfile.altPhone,
+    )?.slice(-7);
+    const governmentId = signupProfile.govIdNumber?.trim();
+    const governmentIdSearch = governmentId?.replace(/[^a-z0-9]/gi, "").slice(-6);
+    const identityFilters = [
+      ...(phoneSearch
+        ? [
+            { profile: { is: { phone: { contains: phoneSearch } } } },
+            { profile: { is: { altPhone: { contains: phoneSearch } } } },
+            { profile: { is: { whatsapp: { contains: phoneSearch } } } },
+            { admission: { path: ["phone"], string_contains: phoneSearch } },
+            { admission: { path: ["phoneNumber"], string_contains: phoneSearch } },
+            { admission: { path: ["whatsapp"], string_contains: phoneSearch } },
+          ]
+        : []),
+      ...(governmentIdSearch
+        ? [
+            { profile: { is: { govIdNumber: { contains: governmentIdSearch } } } },
+            { admission: { path: ["idNumber"], string_contains: governmentIdSearch } },
+            { admission: { path: ["govIdNumber"], string_contains: governmentIdSearch } },
+          ]
+        : []),
+    ];
+
+    // Email is the primary unique account key. This catches a second email
+    // being used to create the same student's record without treating a
+    // shared family phone number as proof of identity.
+    if (!revivedUserId && identityFilters.length > 0) {
+      const identityCandidates = await prisma.student.findMany({
+        where: { tenantId: currentTenantId(), OR: identityFilters },
+        select: {
+          admission: true,
+          user: { select: { name: true } },
+          profile: {
+            select: {
+              phone: true,
+              altPhone: true,
+              whatsapp: true,
+              dateOfBirth: true,
+              govIdNumber: true,
+            },
+          },
+        },
+      });
+      // The default soft-delete guard hides deleted students. Include them
+      // explicitly so an alternate email cannot create a second identity.
+      const deletedIdentityCandidates = await prisma.student.findMany({
+        where: { tenantId: currentTenantId(), deletedAt: { not: null }, OR: identityFilters },
+        select: {
+          admission: true,
+          user: { select: { name: true } },
+          profile: {
+            select: {
+              phone: true,
+              altPhone: true,
+              whatsapp: true,
+              dateOfBirth: true,
+              govIdNumber: true,
+            },
+          },
+        },
+      });
+      const duplicate = [...identityCandidates, ...deletedIdentityCandidates].some((candidate) =>
+        sameStudentIdentity(
+          { name: normalizedName, admission: normalizedAdmission, profile: signupProfile },
+          { name: candidate.user.name, admission: candidate.admission, profile: candidate.profile },
+        ),
+      );
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            error: "A student account already matches these details. Please sign in with the original email, or contact the school office if your details have changed.",
+            code: "duplicate_student",
+          },
+          { status: 409, headers: buildCorsHeaders(request) },
+        );
+      }
     }
 
+    const promoAttribution = await resolveSignupPromoAttribution(
+      promoCodeInput,
+      !revivedUserId,
+      async (code) => {
+        const found = await prisma.promoCode.findUnique({
+          where: { code },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            discountPercent: true,
+            discountFlat: true,
+            discountCapAmount: true,
+          },
+        });
+        return found && found.status === "active" ? found : null;
+      },
+      { level: normalizedLevel, branch: branchRow?.name ?? null, classType: normalizedClassType, pathway: normalizedPathway },
+    );
     const hashedPassword = await bcryptjs.hash(normalizedPassword, 10);
 
     const studentFields = {
+      ...(revivedUserId ? FRESH_ENROLMENT_STUDENT_RESET : {}),
       level: normalizedLevel,
+      tenantId: currentTenantId(),
       pathway: normalizedPathway,
       sessionSlot: normalizedSessionSlot,
       classType: normalizedClassType,
@@ -588,15 +761,37 @@ export async function POST(request: NextRequest) {
       // names the parser's aliases expect, so this is a straight reread.
       profile: normalizeProfileInput(normalizedAdmission),
     };
+    const studentCreateFields = {
+      ...studentFields,
+      referralCode: `EW${crypto.randomBytes(8).toString("hex").toUpperCase()}`,
+      profile: { create: studentFields.profile },
+      ...(promoAttribution
+        ? {
+            promoRedemption: {
+              create: {
+                promoCodeId: promoAttribution.promoCodeId,
+                codeSnapshot: promoAttribution.codeSnapshot,
+                type: promoAttribution.type,
+                discountAmount: promoAttribution.discountAmount,
+                tenantId: currentTenantId(),
+              },
+            },
+          }
+        : {}),
+    };
 
     let user;
 
     try {
+      if (revivedUserId) {
+        await archiveDeletedAccountHistory(revivedUserId, currentTenantId());
+      }
       const userFields = {
         email: normalizedEmail,
         name: normalizedName,
         password: hashedPassword,
         role: normalizedRole,
+        ...(revivedUserId ? { deletedAt: null } : {}),
         // `User` is a global model, so nothing stamps this for us — see the
         // note on the same line in the admin tutor route. Without it a
         // student signs up successfully and then holds a session with no
@@ -610,7 +805,7 @@ export async function POST(request: NextRequest) {
               ...userFields,
               student: {
                 upsert: {
-                  create: ({ ...studentFields, profile: { create: studentFields.profile } } as any),
+                  create: (studentCreateFields as any),
                   update: ({
                     ...studentFields,
                     profile: { upsert: { create: studentFields.profile, update: studentFields.profile } },
@@ -623,7 +818,7 @@ export async function POST(request: NextRequest) {
             data: {
               ...userFields,
               student: {
-                create: ({ ...studentFields, profile: { create: studentFields.profile } } as any),
+                create: (studentCreateFields as any),
               },
             },
           });
@@ -649,10 +844,36 @@ export async function POST(request: NextRequest) {
       try {
         const created = await prisma.student.findUnique({
           where: { userId: user.id },
-          select: { id: true },
+          select: { id: true, referralCode: true },
         });
         if (created) {
           studentId = created.id;
+
+          // Mirror this student's own referral code into the unified promo
+          // system, so they immediately have a shareable PromoCode like
+          // every other student — best-effort, like the rest of this block:
+          // upsert on the code itself so a revived account (which already
+          // had a referralCode before this feature shipped) is a no-op.
+          if (created.referralCode) {
+            try {
+              await prisma.promoCode.upsert({
+                where: { code: created.referralCode },
+                create: {
+                  code: created.referralCode,
+                  type: "student_referral",
+                  status: "active",
+                  ownerStudentId: created.id,
+                  // A real number from the start, not null — see the
+                  // PLACEHOLDER comment on this constant in promo-pricing.ts.
+                  commissionFlat: DEFAULT_STUDENT_REFERRAL_COMMISSION_FLAT,
+                  tenantId: currentTenantId(),
+                },
+                update: {},
+              });
+            } catch (promoCodeError) {
+              console.error("Mirroring PromoCode creation failed on signup:", promoCodeError);
+            }
+          }
           studentCode = await assignStudentCode(created.id, {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
@@ -678,6 +899,18 @@ export async function POST(request: NextRequest) {
             console.error("Tuition charge creation failed on signup:", chargeError);
           }
 
+          // Freeze this student's promo discount as a waiver on the charge
+          // just created — see src/lib/promo-discount.ts. Best-effort, same
+          // as the charge creation above: a miss here is repaired the first
+          // time they reach checkout (paystack/initialize applies it too).
+          if (signupCharge && promoAttribution && promoAttribution.discountAmount > 0) {
+            try {
+              await applyPromoDiscountIfNeeded(created.id, signupCharge.chargeId);
+            } catch (discountError) {
+              console.error("Promo discount application failed on signup:", discountError);
+            }
+          }
+
           // Enrolment #1 — see lib/student-enrolment.ts. Best-effort like the
           // code assignment and tuition charge above: a missed row is repaired
           // by scripts/backfill-student-enrolments.mjs, never a reason to fail
@@ -691,7 +924,7 @@ export async function POST(request: NextRequest) {
               classType: normalizedClassType,
               deliveryMode: normalizedDeliveryMode,
               batch: (normalizedAdmission as any)?.batch,
-              registeredAt: user.createdAt,
+              registeredAt: revivedUserId ? new Date() : user.createdAt,
               tenantId: currentTenantId(),
               tuitionChargeId: signupCharge?.chargeId ?? null,
               feeSnapshot: signupCharge?.amount ?? null,

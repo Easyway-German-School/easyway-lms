@@ -4,7 +4,9 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeJson } from "@/lib/safe-json";
 import {
+  DEPOSIT_RATE,
   isLevelSellable,
+  isTravelPackagePathway,
   privateClassPriceForLevel,
   receivedPaymentFilter,
   REGISTRATION_FEE,
@@ -12,9 +14,10 @@ import {
   resolvePartialPaymentAmount,
   tuitionFeeFor,
 } from "@/lib/payment";
-import { nextLevelAfter } from "@/lib/levels";
+import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { signOffForCheckout } from "@/lib/graduation-server";
-import { loadStudentLedger } from "@/lib/tuition-charges";
+import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
+import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 /**
@@ -39,6 +42,7 @@ export async function POST(request: Request) {
     const requestedStage = String(body?.paymentStage ?? body?.stage ?? "full").toLowerCase();
     const requestType = String(body?.type ?? "").toLowerCase();
     const forNextLevel = Boolean(body?.forNextLevel);
+    const forPriorBalance = Boolean(body?.forPriorBalance);
 
     const studentRecord = await prisma.student.findUnique({
       where: { userId: session.user.id as string },
@@ -153,8 +157,36 @@ export async function POST(request: Request) {
     let alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
     let priorOpenBalance = 0;
     let priorOwedLevel: string | null = null;
+    let priorBalanceToPay = 0;
 
-    if (forNextLevel) {
+    if (forPriorBalance) {
+      let balanceBeforeLevel = studentRecord.level;
+      if (forNextLevel) {
+        if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
+          return NextResponse.json(
+            { error: "Your level has not been signed off yet — no previous-level balance is due." },
+            { status: 409 },
+          );
+        }
+        const target = nextLevelAfter(studentRecord.level);
+        if (!target) {
+          return NextResponse.json({ error: "You are already at the top of the ladder." }, { status: 409 });
+        }
+        balanceBeforeLevel = target;
+      }
+      const currentPosition = (LEVELS as readonly string[]).indexOf(balanceBeforeLevel.toUpperCase());
+      const ledger = await loadStudentLedger(studentRecord.id);
+      const priorLines = ledger.lines.filter((line) => {
+        const position = (LEVELS as readonly string[]).indexOf(line.level.toUpperCase());
+        return position >= 0 && currentPosition >= 0 && position < currentPosition && line.outstanding > 0;
+      });
+      priorBalanceToPay = priorLines.reduce((sum, line) => sum + line.outstanding, 0);
+      if (priorBalanceToPay <= 0 || priorLines.length === 0) {
+        return NextResponse.json({ error: "There is no previous-level balance to settle." }, { status: 409 });
+      }
+      billingLevel = priorLines[0].level;
+      alreadyPaid = priorLines[0].allocated;
+    } else if (forNextLevel) {
       // Paying is signing off: a student whose batch ended (or whom the office
       // invited) is signed off here, so nobody waits for a button. Held-back and
       // never-started students still get the 409 below.
@@ -188,13 +220,27 @@ export async function POST(request: Request) {
       // next-level payment made earlier) is credited so we do not double-bill.
       const targetLine = ledger.lines.find((line) => line.level === target);
       alreadyPaid = targetLine ? targetLine.allocated : 0;
+    } else {
+      const currentPosition = (LEVELS as readonly string[]).indexOf(studentRecord.level.toUpperCase());
+      const ledger = await loadStudentLedger(studentRecord.id);
+      const previousLevelOutstanding = ledger.lines
+        .filter((line) => {
+          const position = (LEVELS as readonly string[]).indexOf(line.level.toUpperCase());
+          return position >= 0 && currentPosition >= 0 && position < currentPosition;
+        })
+        .reduce((sum, line) => sum + line.outstanding, 0);
+      if (previousLevelOutstanding > 0) {
+        return NextResponse.json(
+          { error: "Clear your previous-level tuition balance first. This checkout is for your current level." },
+          { status: 409 },
+        );
+      }
     }
 
     const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType, pathway: studentRecord.pathway };
-    const normalizedTuitionFee = tuitionFeeFor(feeLookup);
-    const requiredDeposit = requiredDepositFor(feeLookup);
+    const grossTuitionFee = tuitionFeeFor(feeLookup);
 
-    if (requestedStage !== "registration" && !isLevelSellable(billingLevel)) {
+    if (requestedStage !== "registration" && !forPriorBalance && !isLevelSellable(billingLevel)) {
       return NextResponse.json(
         {
           error:
@@ -203,6 +249,47 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+
+    // A promo/referral discount only ever applies to the level a student
+    // signed up with — never to a later "Continue to X" next-level purchase.
+    // Read from the student's own frozen PromoRedemption, never from the
+    // request body (see the comment on this route's price derivation above).
+    let discountAmount = 0;
+
+    if (requestedStage !== "registration") {
+      const charge = await ensureChargeForLevel({
+        studentId: studentRecord.id,
+        level: billingLevel,
+        origin: forNextLevel ? "next_level_payment" : "signup",
+      });
+      if (!charge) {
+        return NextResponse.json(
+          { error: `We couldn't prepare the ${billingLevel} tuition balance. No payment has been started; please try again or contact your branch office.` },
+          { status: 503 },
+        );
+      }
+
+      if (!forNextLevel) {
+        // Best-effort fallback: normally already applied at signup (see
+        // api/auth/signup/route.ts) — this only matters if that best-effort
+        // step missed, so the discount still lands the first time this
+        // student actually reaches checkout.
+        await applyPromoDiscountIfNeeded(studentRecord.id, charge.chargeId).catch((error) => {
+          console.error("Promo discount application failed at checkout:", error);
+        });
+        const redemption = await prisma.promoRedemption.findUnique({
+          where: { redeemedByStudentId: studentRecord.id },
+          select: { discountAmount: true },
+        });
+        discountAmount = redemption?.discountAmount ?? 0;
+      }
+    }
+
+    const normalizedTuitionFee = Math.max(0, grossTuitionFee - discountAmount);
+    const requiredDeposit =
+      discountAmount > 0 && !isTravelPackagePathway(feeLookup.pathway)
+        ? Math.round(normalizedTuitionFee * DEPOSIT_RATE)
+        : requiredDepositFor(feeLookup);
 
     // What is genuinely still owed at each stage — never more, so a student who
     // has already deposited is charged the balance instead of the whole fee again.
@@ -240,13 +327,17 @@ export async function POST(request: Request) {
       effectivePaymentType = "full";
       amountToCharge = Math.max(0, normalizedTuitionFee - alreadyPaid);
     }
+    if (forPriorBalance) {
+      effectivePaymentType = "full";
+      amountToCharge = priorBalanceToPay;
+    }
 
     // The portion of this payment that goes toward the level being bought.
     const targetPortion = amountToCharge;
     // A next-level checkout also collects whatever is still open on a level the
     // student has already been in. FIFO on the verify side does the actual
     // split; here we just bill the sum.
-    amountToCharge = amountToCharge + priorOpenBalance;
+    if (!forPriorBalance) amountToCharge = amountToCharge + priorOpenBalance;
 
     const breakdown =
       forNextLevel && priorOpenBalance > 0
@@ -277,6 +368,7 @@ export async function POST(request: Request) {
             Math.min(100, Math.round(((alreadyPaid + amountToCharge) / Math.max(1, normalizedTuitionFee)) * 100)),
           );
     const requiredThreshold = effectivePaymentType === "deposit" ? requiredDeposit : normalizedTuitionFee;
+    const invoiceTotal = forPriorBalance ? priorBalanceToPay : normalizedTuitionFee;
 
     const resolvedPathway = await prisma.pathway.findFirst({
       where: {
@@ -354,15 +446,17 @@ export async function POST(request: Request) {
           // The name is free text and only ever used for wording the receipt,
           // so it keeps the client's value even when no row matched.
           pathwayName: pathwayName || String(pathwayId || ""),
-          totalAmount: String(normalizedTuitionFee),
+          totalAmount: String(invoiceTotal),
           depositAmount: String(amountToCharge),
-          tuitionFee: String(normalizedTuitionFee),
+          tuitionFee: String(invoiceTotal),
           requiredThreshold: String(requiredThreshold),
           depositPercent: String(normalizedDepositPercent),
           paymentType: effectivePaymentType,
           paymentStage: effectivePaymentType,
           forNextLevel: forNextLevel ? "true" : "false",
+          forPriorBalance: forPriorBalance ? "true" : "false",
           targetLevel: billingLevel,
+          level: billingLevel,
         },
       }),
     });

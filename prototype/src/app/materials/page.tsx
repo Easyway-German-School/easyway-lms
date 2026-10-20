@@ -136,22 +136,51 @@ export default function MaterialsPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="min-h-screen bg-[var(--background)] px-6 py-10 text-[var(--foreground)]"
+        className={
+          tab === "watch"
+            ? "relative min-h-screen overflow-hidden bg-[#080b14] px-0 py-0 text-white"
+            : "min-h-screen bg-[var(--background)] px-6 py-10 text-[var(--foreground)]"
+        }
       >
-        <div className="mx-auto max-w-6xl space-y-8">
-          <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-xl ring-1 ring-white/10">
-            <p className="text-sm uppercase tracking-[0.24em] text-[var(--accent)]">Learning resources</p>
-            <h1 className="mt-3 text-4xl font-bold">Course materials</h1>
-            <p className="mt-2 text-[var(--muted)]">
-              Watch your class recordings and lesson videos, or download the documents for your level
-              {level ? ` (${level})` : ""}.
-            </p>
-          </div>
+        {tab === "watch" ? (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(249,115,22,0.18),transparent_42%),radial-gradient(ellipse_at_100%_48%,rgba(79,70,229,0.12),transparent_34%)]" />
+        ) : null}
+        <div className={`relative mx-auto space-y-6 ${tab === "watch" ? "max-w-[1440px] pb-10" : "max-w-6xl space-y-8"}`}>
+          {tab === "watch" ? (
+            <header className="relative overflow-hidden px-5 pb-5 pt-8 sm:px-8 sm:pt-10">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-orange-400">Learning resources</p>
+              <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h1 className="text-3xl font-black tracking-tight sm:text-5xl">Your video library</h1>
+                  <p className="mt-2 max-w-xl text-sm text-slate-300">
+                    Class recordings and lessons, picked up where you left off{level ? ` · ${level}` : ""}.
+                  </p>
+                </div>
+                {videos.length > 0 ? (
+                  <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200">
+                    {videos.length} {videos.length === 1 ? "video" : "videos"}
+                  </span>
+                ) : null}
+              </div>
+            </header>
+          ) : (
+            <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-xl">
+              <p className="text-sm uppercase tracking-[0.24em] text-[var(--accent)]">Learning resources</p>
+              <h1 className="mt-3 text-4xl font-bold">Course materials</h1>
+              <p className="mt-2 text-[var(--muted)]">
+                Download the documents for your level{level ? ` (${level})` : ""}.
+              </p>
+            </div>
+          )}
 
-          {error ? <div className="rounded-xl bg-red-500/10 p-4 text-sm text-red-700">{error}</div> : null}
+          {error ? (
+            <div className={`rounded-xl p-4 text-sm ${tab === "watch" ? "bg-red-400/10 text-red-200" : "bg-red-500/10 text-red-700"}`}>
+              {error}
+            </div>
+          ) : null}
 
           {lockedMessage ? (
-            <div className="rounded-3xl border border-amber-400/40 bg-amber-500/10 p-6 text-sm text-amber-900">
+            <div className={`rounded-3xl p-6 text-sm ${tab === "watch" ? "bg-amber-400/10 text-amber-100" : "border border-amber-400/40 bg-amber-500/10 text-amber-900"}`}>
               <p className="font-semibold">Materials are locked</p>
               <p className="mt-2">{lockedMessage}</p>
               <a href="/programs" className="mt-4 inline-flex rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
@@ -160,7 +189,7 @@ export default function MaterialsPage() {
             </div>
           ) : null}
 
-          <div className="flex gap-2 rounded-2xl cinematic-card p-1.5">
+          <div className={`flex gap-2 rounded-2xl p-1.5 ${tab === "watch" ? "bg-white/[0.04]" : "cinematic-card"}`}>
             {(
               [
                 { value: "watch" as const, icon: <FilmIcon />, label: `Watch${videos.length ? ` (${videos.length})` : ""}` },
@@ -173,7 +202,9 @@ export default function MaterialsPage() {
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition ${
                   tab === item.value
                     ? "bg-[var(--accent)] text-white shadow-lg"
-                    : "text-[var(--muted)] hover:bg-[var(--surface-alt)]"
+                    : tab === "watch"
+                      ? "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                      : "text-[var(--muted)] hover:bg-[var(--surface-alt)]"
                 }`}
               >
                 {item.icon}
@@ -183,18 +214,18 @@ export default function MaterialsPage() {
           </div>
 
           {loading ? (
-            <div className="rounded-3xl cinematic-card p-12 text-center">
-              <p className="text-[var(--muted)]">Loading your materials…</p>
+            <div className={`rounded-3xl p-12 text-center ${tab === "watch" ? "text-slate-400" : "cinematic-card text-[var(--muted)]"}`}>
+              <p>Loading your materials…</p>
             </div>
           ) : tab === "watch" ? (
             <div className="space-y-5">
               {recommendations.length > 0 ? (
-                <section className="rounded-3xl border border-[var(--accent)]/30 bg-[var(--surface)] p-5 shadow-sm">
+                <section className="rounded-3xl bg-gradient-to-br from-orange-500/10 via-white/[0.04] to-transparent p-5 sm:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Recommended for you</p>
-                      <h2 className="mt-2 text-xl font-bold text-[var(--foreground)]">Your next watch</h2>
-                      <p className="mt-1 text-sm text-[var(--muted)]">Chosen from your progress, level, pathway, and learning goal.</p>
+                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-orange-400">Recommended for you</p>
+                      <h2 className="mt-2 text-xl font-bold text-white">Your next watch</h2>
+                      <p className="mt-1 text-sm text-slate-400">Chosen from your progress, level, pathway, and learning goal.</p>
                     </div>
                     <Mascot mood="cocky" className="hidden h-16 w-16 sm:block" />
                   </div>
@@ -203,10 +234,10 @@ export default function MaterialsPage() {
                       const video = videos.find((item) => item.id === recommendation.videoId);
                       if (!video) return null;
                       return (
-                        <Link key={recommendation.videoId} href={`/materials/watch/${video.id}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 transition hover:border-[var(--accent)]/50">
-                          <p className="truncate text-sm font-semibold text-[var(--foreground)]">{video.title}</p>
-                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-[var(--muted)]">{recommendation.reason}</p>
-                          <span className="mt-3 inline-flex items-center text-xs font-bold text-[var(--accent)]">Watch next →</span>
+                        <Link key={recommendation.videoId} href={`/materials/watch/${video.id}`} className="rounded-2xl bg-white/[0.04] p-3 transition hover:bg-white/[0.08]">
+                          <p className="truncate text-sm font-semibold text-white">{video.title}</p>
+                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">{recommendation.reason}</p>
+                          <span className="mt-3 inline-flex items-center text-xs font-bold text-orange-400">Watch next →</span>
                         </Link>
                       );
                     })}

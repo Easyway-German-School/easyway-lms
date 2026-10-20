@@ -125,6 +125,11 @@ async function handleGET(request: NextRequest) {
     return runAutoGraduation();
   });
 
+  register("auto-level-progression", async () => {
+    const { runAutoLevelProgression } = await import("@/lib/graduation-server");
+    return runAutoLevelProgression();
+  });
+
   register("auto-next-level", async () => {
     // Off until a school switches it on at /admin/next-level. Messages (bell, push
     // and email) every student who has become eligible and has never been

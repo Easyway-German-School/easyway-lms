@@ -24,6 +24,7 @@ import HybridComboMoment from "@/components/moment/HybridComboMoment";
 import FeeReminderMoment from "@/components/moment/FeeReminderMoment";
 import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
+import ReferralPromotionMoment from "@/components/ReferralPromotionMoment";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
@@ -63,17 +64,16 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CommunityIcon,
-  CrossIcon,
   DashboardIcon,
   ExamCentreIcon,
   LockIcon,
-  MenuIcon,
   PaymentIcon,
   PencilIcon,
   PlayIcon,
   ProfileIcon,
   QuizIcon,
   ResultsIcon,
+  UsersIcon,
 } from "@/components/icons";
 
 type NavItem = {
@@ -119,6 +119,7 @@ const navGroups: NavGroup[] = [
       { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
       { label: "Live class", href: "/live", icon: <BroadcastIcon /> },
       { label: "Community", href: "/community", icon: <CommunityIcon /> },
+      { label: "Study groups", href: "/campus/groups", icon: <UsersIcon /> },
     ],
   },
   {
@@ -228,10 +229,6 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     status === "authenticated" && !invalidSession && rawRole !== "" && rawRole !== "student";
   useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
-  // Below lg the sidebar is a drawer, not a column. It used to be a fixed 288px
-  // pane with the content pushed 288px right, which on a phone left the portal
-  // showing a sliver of itself off the side of the screen.
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const { access, hasAccess } = useStudentAccess();
   const campus = useCampusBeat(youth && hasAccess && access !== null && !inClassroom && !onCampus && !accountRevoked);
 
@@ -280,14 +277,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const visibleNavGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => showsLiveClass || !isLiveOnlyRoute(item.href)),
+      items: group.items.filter(
+        (item) =>
+          (showsLiveClass || !isLiveOnlyRoute(item.href)) &&
+          (item.href !== "/campus/groups" || access?.classType === "group"),
+      ),
     }))
     .filter((group) => group.items.length > 0);
-
-  // Navigating is the end of the drawer's job.
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
 
   /**
    * Signed out means signed out — the same guard AdminShell has always had.
@@ -333,36 +329,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     if (wrongPortalRole) router.replace(homePathForRole(rawRole));
   }, [wrongPortalRole, rawRole, router]);
 
-  // The welcome tour spotlights real sidebar buttons, which on a phone live
-  // inside the drawer. It asks; the shell decides — the drawer's state stays
-  // owned here rather than being reached into from outside.
-  useEffect(() => {
-    const onTourDrawer = (event: Event) => {
-      const wanted = (event as CustomEvent<{ open?: boolean }>).detail?.open;
-      // Only on the small layout. On a desktop the sidebar is already a
-      // permanent column and opening a drawer over it would be nonsense.
-      if (window.innerWidth >= 1024) return;
-      setDrawerOpen(Boolean(wanted));
-    };
-
-    window.addEventListener("easyway:tour-drawer", onTourDrawer);
-    return () => window.removeEventListener("easyway:tour-drawer", onTourDrawer);
-  }, []);
-
-  // A drawer over the page must not let the page behind it scroll.
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [drawerOpen]);
-
   // One gate for the whole portal. Every student page renders through this
   // shell, so locking here covers pages that do not exist yet — and there is no
   // per-page payment fetch to forget to add.
-  const routeLocked = !hasAccess && isTuitionGatedRoute(pathname);
+  const previousLevelPreviewRoute =
+    !hasAccess &&
+    access?.previousLevelOutstanding === 0 &&
+    (pathname === "/materials" || pathname.startsWith("/materials/"));
+  const routeLocked = !hasAccess && isTuitionGatedRoute(pathname) && !previousLevelPreviewRoute;
   const lockedAreaLabel =
     navItems.find((item) => pathname === item.href || pathname.startsWith(item.href + "/"))?.label ??
     "This page";
@@ -417,20 +391,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     {/* Was a hardcoded blue gradient, which is why the portal stayed daylight-
         blue whatever theme was chosen. The themed canvas is the page's job. */}
     <div className={`app-canvas flex min-h-screen text-[var(--foreground)] ${youth ? "look-youth" : ""}`}>
-      {/* Scrim, phones only. Tapping anywhere off the drawer closes it. */}
-      {drawerOpen && (
-        <button
-          aria-label="Close menu"
-          onClick={() => setDrawerOpen(false)}
-          className="fixed inset-0 z-40 cursor-default bg-slate-950/40 backdrop-blur-sm lg:hidden"
-        />
-      )}
-
       <aside
         data-tour="sidebar"
-        className={`sidebar-glass fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
-          drawerOpen ? "translate-x-0" : "-translate-x-full"
-        } w-[17rem] ${collapsed ? "lg:w-20" : "lg:w-72"}`}
+        className={`sidebar-glass fixed left-0 top-0 z-40 hidden h-dvh flex-col border-r border-[var(--border)] transition-all duration-300 lg:flex ${
+          collapsed ? "lg:w-20" : "lg:w-72"
+        }`}
       >
         <div className="border-b border-[var(--border)] p-4">
           {/* Collapsed rail (desktop only): the brand mark stacked over a
@@ -469,13 +434,6 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
               className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
               <ChevronLeftIcon />
-            </button>
-            <button
-              onClick={() => setDrawerOpen(false)}
-              aria-label="Close menu"
-              className="rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:hidden"
-            >
-              <CrossIcon className="h-5 w-5" />
             </button>
           </div>
         </div>
@@ -594,18 +552,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           collapsed ? "lg:ml-20" : "lg:ml-72"
         } ${youth && !inClassroom ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0" : ""}`}
       >
-        {/* The only chrome on a phone: the way back to the menu, and the bell.
-            On desktop it keeps the bell reachable from every page, which it
-            was not before — the component existed but nothing rendered it. */}
+        {/* On a phone, the bottom tabs are the primary navigation. */}
         <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2 backdrop-blur-xl sm:px-5">
-          <button
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open menu"
-            className="grid h-10 w-10 place-items-center rounded-xl text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)] lg:hidden"
-          >
-            <MenuIcon className="h-5 w-5" />
-          </button>
-
           <div className="min-w-0 flex-1 lg:hidden">
             <Link href="/dashboard" aria-label="Go to dashboard">
               <BrandLogo variant="wordmark" className="h-7" />
@@ -778,6 +726,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         See PortalUpdates for why the card carries the real message text.
       */}
       <PortalUpdates />
+      <ReferralPromotionMoment />
 
       {/* Whatever the queue held back. Bottom left, because the community
           launcher and the theme switch already own the other corner. */}

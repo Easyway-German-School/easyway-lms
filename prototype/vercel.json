@@ -10,7 +10,15 @@
     },
     {
       "path": "/api/cron/tick-fast",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/15 * * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
     }
   ],
   "functions": {

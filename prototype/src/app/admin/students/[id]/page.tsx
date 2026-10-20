@@ -29,8 +29,11 @@ import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { availableBatchOptions } from "@/lib/intake";
+import { resolveBatchWindow } from "@/lib/batch";
 import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
 import SchedulePreview from "@/components/admin/SchedulePreview";
+import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 
 /**
  * One student's file.
@@ -96,8 +99,10 @@ type Dossier = {
   };
   origin: { source: string; status: string; enquiredAt: string; notes: string | null } | null;
   money: {
-    paywall: "unpaid" | "registeredOnly" | "depositPaid" | "fullPaid";
+    paywall: "unpaid" | "registeredOnly" | "owesThisLevel" | "depositPaid" | "fullPaid";
     lockedOut: boolean;
+    /** Already sat a previous level — registration is not on this file. */
+    returningStudent?: boolean;
     /** Placed in an intake that has not opened — the portal is a countdown. */
     waitingForBatch?: boolean;
     batchLabel?: string | null;
@@ -111,6 +116,9 @@ type Dossier = {
     deposit?: number;
     paid?: number;
     owed?: number;
+    /** This level is clear, but an older un-flagged charge is still what keeps the portal locked. */
+    owesPriorLevel?: boolean;
+    priorLevelOutstanding?: number;
     feeProgressPercent?: number;
     reminderStages?: Record<string, boolean>;
     payments?: Array<{
@@ -235,6 +243,7 @@ type Dossier = {
 const PAYWALL_LABEL: Record<Dossier["money"]["paywall"], string> = {
   unpaid: "Nothing paid",
   registeredOnly: "Registered only — below deposit",
+  owesThisLevel: "This level unpaid",
   depositPaid: "Deposit paid",
   fullPaid: "Paid in full",
 };
@@ -661,12 +670,15 @@ export default function StudentDossierPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editNotice, setEditNotice] = useState<string | null>(null);
   const [branches, setBranches] = useState<Array<{ id: string; name: string; mode?: string | null }>>([]);
   const [sessionCfg, setSessionCfg] = useState<SessionSettings>(() => defaultSessionSettings());
   const [editForm, setEditForm] = useState({
     name: "",
     email: "",
     phone: "",
+    batch: "",
+    batchYear: new Date().getFullYear(),
     level: "A1",
     sessionSlot: "morning",
     classType: "group",
@@ -762,10 +774,21 @@ export default function StudentDossierPage() {
 
   function openEdit() {
     if (!data) return;
+    const currentEnrolment = data.enrolments.find((row) => row.outcome === "ongoing");
+    const admissionBatch = data.admissionEntries.find((entry) => entry.key === "batch")?.value || currentEnrolment?.batchMonth || "";
+    const admissionYear = Number(data.admissionEntries.find((entry) => entry.key === "batchYear")?.value);
+    const batchYear =
+      Number.isInteger(admissionYear) && admissionYear > 0
+        ? admissionYear
+        : currentEnrolment?.batchYear ??
+          resolveBatchWindow(admissionBatch, { registeredAt: new Date(data.identity.registeredAt) })?.year ??
+          new Date().getFullYear();
     setEditForm({
       name: data.identity.name || "",
       email: data.identity.email || "",
       phone: data.identity.phone || "",
+      batch: admissionBatch,
+      batchYear,
       level: data.identity.level || "A1",
       sessionSlot: data.identity.sessionSlot || "morning",
       classType: data.identity.classType || "group",
@@ -815,6 +838,7 @@ export default function StudentDossierPage() {
     if (!id) return;
     setEditBusy(true);
     setEditError(null);
+    setEditNotice(null);
     try {
       const response = await fetch("/api/admin/students", {
         method: "PATCH",
@@ -823,6 +847,19 @@ export default function StudentDossierPage() {
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json?.error || "Could not save these changes");
+      // Pathway changes used to leave the tuition charge priced at whatever
+      // it was before — this is the server confirming it actually re-priced
+      // it, so the admin knows the fee really moved and is not stuck.
+      if (json?.levelSyncWarning) {
+        setEditNotice(json.levelSyncWarning);
+      } else if (json?.pathwayReprice?.repriced) {
+        const { from, to, level } = json.pathwayReprice;
+        setEditNotice(`${level} tuition re-priced: ₦${Number(from).toLocaleString("en-NG")} → ₦${Number(to).toLocaleString("en-NG")}.`);
+      } else if (json?.pathwayReprice?.reason === "already_paid") {
+        setEditNotice(
+          "Pathway changed, but this level already has a payment allocated against it at the old price — the tuition charge was left as-is for the office to reconcile by hand.",
+        );
+      }
       setEditOpen(false);
       void load(false);
     } catch (saveErr) {
@@ -920,11 +957,10 @@ export default function StudentDossierPage() {
           currency: "ngn",
           method: payForm.method,
           status: "completed",
-          // "Registration fee" is the prefix lib/payment.ts keys on to keep
-          // this row out of the tuition total — so a registration payment says
-          // nothing about unlocking, exactly as intended.
+          // Returning students already paid registration on the previous
+          // level — never record a second ₦5,000 row against this file.
           description:
-            payForm.kind === "registration"
+            !data?.money.returningStudent && payForm.kind === "registration"
               ? `Registration fee${payForm.note.trim() ? ` — ${payForm.note.trim()}` : ""}`
               : payForm.note.trim() || "Tuition payment (recorded by office)",
         }),
@@ -952,7 +988,7 @@ export default function StudentDossierPage() {
     } finally {
       setPayBusy(false);
     }
-  }, [id, payForm, load]);
+  }, [id, payForm, load, data?.money.returningStudent]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -1302,12 +1338,20 @@ export default function StudentDossierPage() {
               )}
               {data.viewer.canSeeMoney && money.owed !== undefined && (
                 <p className="mt-0.5 text-xs text-white/60">
-                  {money.owed > 0 ? `${naira(money.owed)} outstanding` : "Nothing outstanding"}
+                  {money.owed > 0
+                    ? `${naira(money.owed)} outstanding`
+                    : money.owesPriorLevel
+                      ? `Nothing outstanding this level — but ${naira(money.priorLevelOutstanding ?? 0)} is still open on an earlier level, which is what is keeping the portal locked`
+                      : "Nothing outstanding"}
                 </p>
               )}
             </div>
           </div>
         </motion.div>
+
+        {data.viewer.canSeeMoney && (
+          <LevelHistoryManager key={data.identity.id} studentId={data.identity.id} currentLevel={data.identity.level} />
+        )}
 
         {/* ---- Vitals ---------------------------------------------------- */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1349,7 +1393,7 @@ export default function StudentDossierPage() {
             }
             sub={
               data.viewer.canSeeMoney && money.fee !== undefined
-                ? `of ${naira(money.fee)} · deposit ${naira(money.deposit ?? 0)}`
+                ? `of ${naira(money.fee)}${money.returningStudent ? " this level" : ""} · deposit ${naira(money.deposit ?? 0)}`
                 : "Amounts are restricted to the payments role"
             }
             tone={money.lockedOut ? "bad" : money.paywall === "fullPaid" ? "good" : "warn"}
@@ -1387,6 +1431,22 @@ export default function StudentDossierPage() {
               </Link>
               .
             </p>
+          </div>
+        )}
+
+        {/* Pathway-reprice confirmation. Rendered at page level, not inside
+            the Edit panel, because saving a edit closes that panel — a
+            notice shown only inside it would vanish before anyone read it. */}
+        {editNotice && (
+          <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-emerald-300 bg-emerald-50 p-5 text-sm text-emerald-900">
+            <p className="min-w-0">{editNotice}</p>
+            <button
+              type="button"
+              onClick={() => setEditNotice(null)}
+              className="ml-auto text-xs font-semibold text-emerald-700 underline"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
@@ -1491,7 +1551,7 @@ export default function StudentDossierPage() {
             ) : (
               <>
                 <div className="grid grid-cols-3 gap-4">
-                  <Field label="Tuition" value={naira(money.fee ?? 0)} />
+                  <Field label={money.returningStudent ? "This level" : "Tuition"} value={naira(money.fee ?? 0)} />
                   <Field label="Paid" value={naira(money.paid ?? 0)} />
                   <Field
                     label="Outstanding"
@@ -1502,9 +1562,19 @@ export default function StudentDossierPage() {
                     }
                   />
                 </div>
+                {money.returningStudent && (
+                  <p className="mt-3 text-xs text-[var(--muted)]">
+                    Registration was paid once, on the previous level. Earlier tuition stays on the file
+                    and does not count toward {identity.level}.
+                  </p>
+                )}
                 <div className="mt-5 space-y-2">
                   {(money.payments ?? []).length === 0 && (
-                    <p className="text-sm text-[var(--muted)]">No payment has ever been recorded for this student.</p>
+                    <p className="text-sm text-[var(--muted)]">
+                      {money.returningStudent
+                        ? `No ${identity.level} tuition has been recorded yet.`
+                        : "No payment has ever been recorded for this student."}
+                    </p>
                   )}
                   {(money.payments ?? []).map((payment) => (
                     <div
@@ -1553,9 +1623,9 @@ export default function StudentDossierPage() {
                 ) : (
                   <div className="space-y-3">
                     <p className="text-xs text-[var(--muted)]">
-                      A payment made in cash or by bank transfer. This records it against{" "}
-                      {identity.name.split(" ")[0]}; a tuition payment opens their classes once the
-                      deposit is met.
+                      {money.returningStudent
+                        ? `A payment made in cash or by bank transfer. Registration was paid on the previous level — this records ${identity.level} tuition only.`
+                        : `A payment made in cash or by bank transfer. This records it against ${identity.name.split(" ")[0]}; a tuition payment opens their classes once the deposit is met.`}
                     </p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -1588,6 +1658,7 @@ export default function StudentDossierPage() {
                           <option value="other">Other</option>
                         </select>
                       </label>
+                      {!money.returningStudent && (
                       <label className="block text-xs font-semibold text-[var(--muted)]">
                         For
                         <select
@@ -1604,6 +1675,7 @@ export default function StudentDossierPage() {
                           <option value="registration">Registration fee</option>
                         </select>
                       </label>
+                      )}
                       <label className="block text-xs font-semibold text-[var(--muted)]">
                         Note (optional)
                         <input
@@ -2346,6 +2418,39 @@ export default function StudentDossierPage() {
                   placeholder="e.g. 0812 345 6789"
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Batch</span>
+                <select
+                  value={editForm.batch ? `${editForm.batch}|${editForm.batchYear}` : ""}
+                  onChange={(event) => {
+                    const [month, year] = event.target.value.split("|");
+                    setEditForm((form) => ({
+                      ...form,
+                      batch: month || "",
+                      batchYear: Number(year) || new Date().getFullYear(),
+                    }));
+                  }}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">No batch</option>
+                  {editForm.batch &&
+                    !availableBatchOptions().some(
+                      (option) => option.value === editForm.batch && option.year === editForm.batchYear,
+                    ) && (
+                      <option value={`${editForm.batch}|${editForm.batchYear}`}>
+                        {editForm.batch} {editForm.batchYear} (current)
+                      </option>
+                    )}
+                  {availableBatchOptions().map((option) => (
+                    <option key={`${option.value}|${option.year}`} value={`${option.value}|${option.year}`}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Changing the batch updates this student&apos;s roster and current enrolment only.
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Level</span>

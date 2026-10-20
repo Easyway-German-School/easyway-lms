@@ -27,6 +27,9 @@ export default function PaymentsPage() {
   // from the server rather than a constant on this page.
   const [summary, setSummary] = useState<{
     totalPaid: number;
+    currentLevelPaid?: number;
+    lifetimeOutstanding?: number;
+    feeProgressPercent?: number;
     tuitionFee: number;
     fullPaid: boolean;
     paymentProgressPercent: number;
@@ -85,7 +88,17 @@ export default function PaymentsPage() {
       }
     }
 
+    const refreshVisiblePayments = () => {
+      if (document.visibilityState === "visible") void loadPayments();
+    };
+    window.addEventListener("focus", refreshVisiblePayments);
+    document.addEventListener("visibilitychange", refreshVisiblePayments);
     void syncPendingPayment();
+
+    return () => {
+      window.removeEventListener("focus", refreshVisiblePayments);
+      document.removeEventListener("visibilitychange", refreshVisiblePayments);
+    };
   }, []);
 
   // Prefer the server's figures; fall back to summing the visible rows only
@@ -95,8 +108,10 @@ export default function PaymentsPage() {
     .reduce((sum, payment) => sum + payment.amount, 0);
   const tuitionFee = summary?.tuitionFee ?? 150000;
   const fullPaid = summary?.fullPaid ?? false;
-  const amountDue = Math.max(0, tuitionFee - totalPaid);
-  const paymentProgress = Math.min(100, Math.round((totalPaid / tuitionFee) * 100));
+  const currentLevelPaid = summary?.currentLevelPaid ?? totalPaid;
+  const amountDue = summary?.lifetimeOutstanding ?? Math.max(0, tuitionFee - currentLevelPaid);
+  const paymentProgress =
+    summary?.feeProgressPercent ?? Math.min(100, Math.round((currentLevelPaid / tuitionFee) * 100));
   const isTravelPackage = pathway === "Travel Package";
   // The enrolment letter says "enrolled", so it unlocks with the first tuition payment — full or part.
   const canDownloadLetter = hasPaidAnyTuition(payments);
@@ -112,7 +127,7 @@ export default function PaymentsPage() {
             <div className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
               <p className="font-semibold">Travel Package — part payment</p>
               <p className="mt-1">
-                You&apos;ve paid ₦{totalPaid.toLocaleString()} of the ₦{tuitionFee.toLocaleString()} Travel
+                You&apos;ve paid ₦{currentLevelPaid.toLocaleString()} of the ₦{tuitionFee.toLocaleString()} Travel
                 Package fee. That leaves ₦{amountDue.toLocaleString()} to go — you can pay it in any
                 amounts, any time, and your classes stay open.
               </p>
@@ -172,11 +187,16 @@ export default function PaymentsPage() {
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Total paid</p>
                 <p className="mt-4 text-4xl font-semibold text-[var(--foreground)]">₦{totalPaid.toLocaleString()}</p>
                 <p className="mt-2 text-sm text-[var(--muted)]">Completed payments received</p>
+                {summary && (
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Current level: ₦{currentLevelPaid.toLocaleString()} of ₦{tuitionFee.toLocaleString()}
+                  </p>
+                )}
               </div>
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-sm">
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Outstanding</p>
                 <p className="mt-4 text-4xl font-semibold text-[var(--accent)]">₦{amountDue.toLocaleString()}</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">Balance remaining for tuition.</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Total balance, including earlier levels.</p>
               </div>
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-sm">
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Progress</p>
@@ -212,7 +232,13 @@ export default function PaymentsPage() {
                     const received = ["completed", "partial"].includes(payment.status.toLowerCase());
                     return (
                       <div key={payment.id} className="grid grid-cols-6 gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm">
-                        <span className="col-span-2">{payment.description || "Payment received"}</span>
+                        <span
+                          className="col-span-2"
+                          title="This note was recorded with the payment and does not change when your batch changes."
+                        >
+                          {payment.description || "Payment received"}
+                          <span className="ml-1 text-xs text-[var(--muted)]">· recorded payment note</span>
+                        </span>
                         <span className={payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"}>
                           {payment.status}
                         </span>

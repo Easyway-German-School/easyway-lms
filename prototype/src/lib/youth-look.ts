@@ -1,27 +1,9 @@
 /**
  * WHO GETS THE NEW LOOK — decided in one place.
  *
- * The student portal is being reshaped for the young learner: a phone tab bar,
- * avatars, a profile that reads like a feed, and a livelier community. That is
- * a real change to how the product feels, so the school sets a default by age
- * and the student always has the last word.
- *
- * Two cohorts, and a student belongs to exactly one:
- *
- *   WAVE     Under 25 (configurable). Gets the new look BY DEFAULT, and Becca
- *            tells them once — "we gave the app a fresh look, keep it or go
- *            back".
- *
- *   INVITED  Everyone else — including anybody whose age we cannot work out.
- *            Nothing changes for them, but Becca offers the choice once: try
- *            the new look, or stay exactly where you are. (This used to be
- *            only 25–34s who were demonstrably phone-heavy. That quietly hid
- *            the offer from most of the roster — a laptop user, a student with
- *            no birth date on file, anyone over 34 — so nobody who tested the
- *            portal as one of them ever saw it. The choice is now everyone's.)
- *
- * On top of that, the student's own choice wins over all of it, in both
- * directions, forever.
+ * The new student experience is now the default for every student, regardless
+ * of age or any previously saved look preference. The retained wave shape is
+ * only for compatibility with existing admin settings and analytics.
  *
  * What each look means for the community is decided from the same answer — see
  * lib/community-skin.ts: the new look gets the lively, avatar-first chat; the
@@ -89,14 +71,8 @@ export function resolveLook(input: {
   choice: Look | null | undefined;
   wave?: LookWave;
 }): LookDecision {
-  const wave = input.wave ?? DEFAULT_LOOK_WAVE;
-  const age = typeof input.age === "number" && Number.isFinite(input.age) ? input.age : null;
-  const inWave = age === null ? wave.includeUnknownAge : age <= wave.maxAge;
-  const cohort: Cohort = inWave ? "wave" : "invited";
-
-  if (input.choice) return { look: input.choice, reason: "chosen", cohort, inWave };
-  if (cohort === "wave") return { look: "youth", reason: "wave", cohort, inWave };
-  return { look: "classic", reason: "default", cohort, inWave };
+  void input;
+  return { look: "youth", reason: "wave", cohort: "wave", inWave: true };
 }
 
 /**
@@ -104,14 +80,10 @@ export function resolveLook(input: {
  * not been told before, and anyone who already picked a look themselves has
  * already answered the question.
  *
- * Everyone else gets one quiet banner on their next visit: wave students hear
- * that the look is theirs, everyone else is invited to try it. Join date and
- * account age used to hide this from most of the roster — new joiners, unknown
- * dates, anyone under two days — so the people who most needed the choice
- * never saw it. The banner itself waits its turn in the moment queue and can
- * be dismissed without a competing "skip" button.
+ * Students who have not seen the announcement get one quiet banner on their
+ * next visit. The banner waits its turn in the moment queue.
  */
 export function promptFor(decision: LookDecision, promptedBefore: boolean): "announce" | "invite" | null {
-  if (promptedBefore || decision.reason === "chosen") return null;
-  return decision.cohort === "wave" ? "announce" : "invite";
+  void decision;
+  return promptedBefore ? null : "announce";
 }

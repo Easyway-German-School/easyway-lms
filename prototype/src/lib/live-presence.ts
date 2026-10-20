@@ -92,6 +92,17 @@ export function mayJoinAnyLiveCohort(deliveryMode?: string | null): boolean {
   return String(deliveryMode ?? "").toLowerCase() === "hybrid";
 }
 
+export function hybridStudentMatchesOnlineSlot(
+  deliveryMode: string | null | undefined,
+  hybridOnlineSlot: string | null | undefined,
+  sessionSlot: string,
+): boolean {
+  return (
+    String(deliveryMode ?? "").toLowerCase() !== "hybrid" ||
+    Boolean(hybridOnlineSlot && hybridOnlineSlot.toLowerCase() === sessionSlot.toLowerCase())
+  );
+}
+
 export type LiveSessionRow = {
   id: string;
   roomName: string;
@@ -370,6 +381,8 @@ export async function liveSessionForStudent(student: {
    * the exact-slot match: they attend one specific sitting, in a building.
    */
   deliveryMode?: string | null;
+  /** The online half of a hybrid student's selected schedule. */
+  hybridOnlineSlot?: string | null;
   /** Branch row — so an Online-branch student whose `deliveryMode` column was
    *  never set is still treated as attending over video. */
   branch?: { name?: string | null; mode?: string | null } | null;
@@ -428,6 +441,8 @@ export async function liveSessionForStudent(student: {
     canAttendLive(student.deliveryMode, student.classType) ||
     isOnlineBranch(student.branch ?? null);
   const mayJoinAnyCohortFlag = mayJoinAnyLiveCohort(student.deliveryMode);
+  const hybridTargetSlot =
+    student.deliveryMode === "hybrid" ? student.hybridOnlineSlot?.toLowerCase() ?? null : null;
 
   // THE BATCH IS PART OF THE CLASS. A room pinned to the October batch is not
   // the September student's class even when branch, level and sitting all
@@ -456,7 +471,11 @@ export async function liveSessionForStudent(student: {
         kind: "cohort",
         branchId: student.branchId,
         level: student.level,
-        ...(attendsOverVideo && mayJoinAnyCohortFlag ? {} : { sessionSlot: student.sessionSlot }),
+        ...(attendsOverVideo && mayJoinAnyCohortFlag
+          ? hybridTargetSlot
+            ? { sessionSlot: hybridTargetSlot }
+            : {}
+          : { sessionSlot: student.sessionSlot }),
         ...liveWhere(now),
       },
       include: { lecturer: { select: { user: { select: { name: true } } } } },
@@ -473,8 +492,16 @@ export async function liveSessionForStudent(student: {
     [student.tutorId, ...(student.coTutorIds ?? [])].filter((id): id is string => Boolean(id)),
   );
   const cohort =
+    liveCohorts.find((room) => {
+      if (hybridTargetSlot) return room.sessionSlot?.toLowerCase() === hybridTargetSlot;
+      return room.lecturerId && ownTutorIds.has(room.lecturerId);
+    }) ??
+    liveCohorts.find((room) => {
+      if (hybridTargetSlot) return room.sessionSlot?.toLowerCase() === student.sessionSlot.toLowerCase();
+      return room.lecturerId && ownTutorIds.has(room.lecturerId);
+    }) ??
+    liveCohorts.find((room) => room.sessionSlot?.toLowerCase() === student.sessionSlot.toLowerCase()) ??
     liveCohorts.find((room) => room.lecturerId && ownTutorIds.has(room.lecturerId)) ??
-    liveCohorts.find((room) => room.sessionSlot === student.sessionSlot) ??
     liveCohorts[0] ??
     null;
 
@@ -539,11 +566,28 @@ export async function mayJoinPrivateRoom(args: {
 
   const booking = await prisma.privateClass.findUnique({
     where: { id: args.privateClassId },
-    select: { studentId: true, lecturerId: true },
+    select: {
+      studentId: true,
+      lecturerId: true,
+      student: {
+        select: {
+          tutorId: true,
+          coTutors: { select: { lecturerId: true } },
+        },
+      },
+    },
   });
   if (!booking) return false;
 
   if (args.lecturerId && booking.lecturerId === args.lecturerId) return true;
+  if (
+    args.lecturerId &&
+    !booking.lecturerId &&
+    (booking.student.tutorId === args.lecturerId ||
+      booking.student.coTutors.some((link) => link.lecturerId === args.lecturerId))
+  ) {
+    return true;
+  }
   if (args.studentId && booking.studentId === args.studentId) return true;
 
   // A tutor may also have been added to the room by whoever opened it, and a
@@ -605,6 +649,18 @@ export function announceLiveSession(session: LiveSessionRow, opts: { studentIds?
     push: true,
     emailBody: `${tutor} started ${session.title}.\n\nJoin from the portal, or enter the code ${session.joinCode} at the live class page.`,
   });
+
+  notifyInBackground({
+    to: { audience: "admin", capability: "classes" },
+    kind: KIND.classStarting,
+    severity: "info",
+    title: `Live class started: ${session.title}`,
+    message: `${session.lecturerName ?? "A tutor"} started a live class for ${session.level} (${session.sessionSlot}).`,
+    link: "/admin/live",
+    dedupeKey: `live-start-admin:${session.id}`,
+    push: true,
+    email: false,
+  });
 }
 
 /**
@@ -661,6 +717,7 @@ export function announceLiveToNamedStudents(session: LiveSessionRow, studentIds:
  */
 export async function announceLiveToVideoStudents(session: LiveSessionRow): Promise<void> {
   if (session.kind !== "cohort" || !session.branchId || !session.level || !session.sessionSlot) return;
+  const sessionSlot = session.sessionSlot;
 
   const found = await prisma.student.findMany({
     where: {
@@ -678,10 +735,12 @@ export async function announceLiveToVideoStudents(session: LiveSessionRow): Prom
         { branch: { is: { mode: "online" } } },
       ],
     },
-    select: { id: true, admission: true },
+    select: { id: true, admission: true, deliveryMode: true, hybridOnlineSlot: true },
   });
   // Only this batch's students — the other batch's class is not theirs.
-  const candidates = onlyBatchStudents(session, found);
+  const candidates = onlyBatchStudents(session, found).filter(
+    (student) => hybridStudentMatchesOnlineSlot(student.deliveryMode, student.hybridOnlineSlot, sessionSlot),
+  );
   if (!candidates.length) return;
 
   const reachable = await studentsWhoCanEnterLiveClass(candidates.map((s) => s.id));

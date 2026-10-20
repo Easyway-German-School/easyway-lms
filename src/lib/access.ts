@@ -1,7 +1,9 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
-import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
+import { buildLedger, type LedgerChargeInput, type LedgerPaymentInput } from "@/lib/finance/ledger";
+import { resolvePaymentLevel } from "@/lib/payment-level";
 import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 import type { IntakeStartDayOverrides } from "@/lib/intake";
+import { LEVELS } from "@/lib/levels";
 
 /**
  * Who can see what before tuition is paid.
@@ -158,7 +160,7 @@ const LOCK_DAY_MS = 24 * 60 * 60 * 1000;
  *                      Wins over the other two: while it holds, the money
  *                      question is "reserve your seat", not "start class".
  */
-export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | "upcoming_batch" | null;
+export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | "previous_level_balance" | "upcoming_batch" | null;
 
 export type StudentAccess = {
   /** physical | hybrid | online — see DeliveryMode. */
@@ -172,15 +174,38 @@ export type StudentAccess = {
   classType: ClassType;
   /** False while a registration-only student still owes the deposit. */
   hasAccess: boolean;
+  /** True once the CURRENT level's 60% deposit is cleared. Previous-level money does not count. */
+  depositCleared: boolean;
   /** True once anything at all has been paid — the registration fee. */
   registrationPaid: boolean;
   totalPaid: number;
+  /**
+   * What the LEDGER actually credits to the student's CURRENT level — not the
+   * raw lifetime sum. With a ledger this is the current-level charge's FIFO
+   * allocation (so it is 0 when every charge the student has is for a level
+   * other than the one they are in now, and never counts old arrears as if
+   * they paid for today's level); without one it is the raw total, exactly as
+   * before. Anything that wants to say "this student has settled their
+   * CURRENT level" — tuition-offer's "paid in full" screen, a certificate,
+   * an admin summary — must compare against THIS, not `totalPaid`. Comparing
+   * `totalPaid` (lifetime, every level) against `tuitionFee` (this level
+   * only) is exactly the bug that let a student with old, unsettled arrears
+   * see "Tuition paid in full — certificate issued clean" while the portal
+   * itself, reading the same ledger correctly, kept them locked out.
+   */
+  currentLevelPaid: number;
   tuitionFee: number;
   requiredDeposit: number;
   /** What is still owed before classes open. */
   outstanding: number;
   /** Against the FULL fee — what a part-payer must clear to lift the balance lock. */
   outstandingBalance: number;
+  /** Amount still owed on the student's current level. */
+  currentLevelOutstanding: number;
+  /** Total still owed across current and legacy charges, including earlier levels. */
+  lifetimeOutstanding: number;
+  /** Outstanding tuition on completed levels below the student's current level. */
+  previousLevelOutstanding: number;
   /** Progress towards the deposit (not the full fee) — that is the gate. */
   progressPercent: number;
   /** Progress towards the full fee — what the settle-your-balance screen shows. */
@@ -224,9 +249,9 @@ function toDate(value: unknown): Date | null {
  * CURRENT level's charge and the GO-FORWARD outstanding, not the raw sum of
  * every payment against the current fee. That is what stops a student who was
  * promoted with a balance still open — whose lifetime payments happen to
- * exceed one level's fee — from walking into the next level for free. Legacy
- * arrears (levels passed before the ledger existed) are deliberately excluded
- * from the lock: they are chased, never walled.
+ * exceed one level's fee — from walking into the next level for free. Any
+ * outstanding completed-level balance, including legacy arrears, also locks
+ * current access until it is settled.
  *
  * With no `charges` the behaviour is exactly as before.
  */
@@ -238,6 +263,7 @@ export function deriveStudentAccess({
   classType,
   level,
   charges,
+  payments,
   flatDeposit = false,
   classesStartedAt,
   enrolledAt,
@@ -256,6 +282,8 @@ export function deriveStudentAccess({
   level?: string | null;
   /** The student's TuitionCharge rows. When present, the ledger drives the gate. */
   charges?: LedgerChargeInput[] | null;
+  /** Received tuition transactions; level stamps keep payment intent with its charge. */
+  payments?: LedgerPaymentInput[] | null;
   /**
    * `requiredDeposit` is a FLAT FLOOR, not 60% of the fee — use it verbatim as
    * the deposit gate even when the ledger is driving, instead of recomputing
@@ -291,11 +319,35 @@ export function deriveStudentAccess({
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
   const deposit = Math.max(0, Math.round(Number(requiredDeposit) || 0));
 
-  const ledger = charges && charges.length ? buildLedger(charges, paid, now) : null;
+  const ledger = charges && charges.length ? buildLedger(charges, paid, now, payments ?? undefined) : null;
   const currentLevelKey = String(level ?? "").trim().toUpperCase();
   const currentLine = ledger && currentLevelKey
     ? ledger.lines.find((line) => line.level.toUpperCase() === currentLevelKey) ?? null
     : null;
+  const currentLevelPayments = currentLevelKey
+    ? (payments ?? []).reduce((sum, payment) => {
+        if (resolvePaymentLevel(payment) !== currentLevelKey) return sum;
+        return sum + Math.max(0, Math.round(Number(payment.amount) || 0));
+      }, 0)
+    : 0;
+  const hasPaymentsFromOtherLevels = currentLevelKey
+    ? (payments ?? []).some((payment) => {
+        const paymentLevel = resolvePaymentLevel(payment);
+        return paymentLevel !== null && paymentLevel !== currentLevelKey;
+      })
+    : false;
+  const currentLevelPaidWithoutLedger = hasPaymentsFromOtherLevels ? currentLevelPayments : paid;
+  const missingCurrentCharge = Boolean(ledger && ledger.lines.length > 0 && !currentLine);
+  const currentLevelPaid = missingCurrentCharge ? currentLevelPayments : 0;
+  const currentLevelPosition = (LEVELS as readonly string[]).indexOf(currentLevelKey);
+  const previousLevelOutstanding = ledger && currentLevelPosition >= 0
+    ? ledger.lines
+        .filter((line) => {
+          const position = (LEVELS as readonly string[]).indexOf(line.level.toUpperCase());
+          return position >= 0 && position < currentLevelPosition;
+        })
+        .reduce((sum, line) => sum + line.outstanding, 0)
+    : 0;
 
   // Has the student cleared the 60% deposit on the level they are IN right now?
   //   ledger: their current-level charge has its deposit portion allocated
@@ -308,21 +360,40 @@ export function deriveStudentAccess({
       ? Math.min(currentLine.net, deposit)
       : Math.round(currentLine.net * DEPOSIT_RATE)
     : deposit;
-  const depositPaid = ledger
-    ? currentLine
-      ? currentLine.allocated >= currentLevelDeposit
-      // Ledger exists but has no row for the current level (mid-rollout gap) —
-      // fall back rather than lock everyone out.
-      : deposit > 0 ? paid >= deposit : paid >= fee
-    : deposit > 0
-      ? paid >= deposit
-      : paid >= fee;
+  // Paid a previous level, then moved up, and this level has no charge yet:
+  // August A1 money must not clear the October A2 gate. An empty ledger
+  // (mid-rollout, no charges at all) still falls back to the raw sum.
+  const paidOtherLevelsOnly = missingCurrentCharge && currentLevelPaid === 0;
+  const depositPaid = paidOtherLevelsOnly
+    ? false
+    : ledger
+      ? currentLine
+        ? currentLine.allocated >= currentLevelDeposit
+        : missingCurrentCharge
+          ? deposit > 0 ? currentLevelPaid >= deposit : currentLevelPaid >= fee
+          : deposit > 0 ? paid >= deposit : paid >= fee
+      : deposit > 0
+          ? currentLevelPaidWithoutLedger >= deposit
+          : currentLevelPaidWithoutLedger >= fee;
 
-  // What must be cleared to lift the balance lock. Legacy arrears are excluded.
-  const outstandingBalance = ledger
-    ? ledger.goForwardOutstanding
-    : Math.max(0, fee - paid);
-  const fullPaid = ledger ? outstandingBalance <= 0 : fee > 0 ? paid >= fee : depositPaid;
+  // What must be cleared to lift the current-level balance lock.
+  const outstandingBalance = paidOtherLevelsOnly
+    ? Math.max(0, fee)
+    : ledger
+      ? ledger.goForwardOutstanding +
+        (missingCurrentCharge ? Math.max(0, fee - currentLevelPaid) : 0)
+      : Math.max(0, fee - currentLevelPaidWithoutLedger);
+  const lifetimeOutstanding = ledger?.lifetimeOutstanding ?? Math.max(0, fee - paid);
+  const currentLevelOutstanding = paidOtherLevelsOnly
+    ? Math.max(0, fee - currentLevelPaid)
+    : ledger
+      ? currentLine
+        ? currentLine.legacyArrears ? 0 : currentLine.outstanding
+        : missingCurrentCharge
+          ? Math.max(0, fee - currentLevelPaid)
+          : Math.max(0, fee - paid)
+        : Math.max(0, fee - currentLevelPaidWithoutLedger);
+  const fullPaid = currentLevelOutstanding <= 0;
 
   // Waiting for an intake that has not opened yet.
   const upcomingBatch = resolveUpcomingBatch(batch, {
@@ -367,18 +438,38 @@ export function deriveStudentAccess({
     }
   }
 
-  const hasAccess = depositPaid && !balanceLocked && !batchLocked;
+  const hasPreviousBalance = previousLevelOutstanding > 0;
+  const hasAccess = !hasPreviousBalance && depositPaid && !balanceLocked && !batchLocked;
   const lockReason: PaymentLockReason = hasAccess
     ? null
-    : batchLocked
+    : hasPreviousBalance
+      ? "previous_level_balance"
+      : batchLocked
       ? "upcoming_batch"
       : balanceLocked
         ? "unsettled_balance"
         : "unpaid_deposit";
 
+  // THE STICKER PRICE SHOWN TO THE STUDENT/OFFICE — the frozen charge for the
+  // level they are in NOW, not a fresh price-book lookup. A TuitionCharge
+  // freezes its fee the moment it is raised (see the model comment in
+  // schema.prisma and lib/finance/reprice.ts); if the price list is edited
+  // afterwards, `tuitionFee` must still read what this student was actually
+  // billed, or the dossier and the student's own dashboard show something
+  // like "₦180,000 paid of a ₦150,000 fee" on somebody who paid exactly what
+  // they owed. `requiredDeposit` below already reads off `currentLine`; this
+  // mirrors it for the headline fee.
+  const displayFee = currentLine && !paidOtherLevelsOnly ? currentLine.net : fee;
+
   // Deposit-gate figures: against the CURRENT level's charge when the ledger is
   // driving, against the raw payment sum otherwise.
-  const towardDeposit = currentLine ? currentLine.allocated : paid;
+  const towardDeposit = currentLine
+    ? currentLine.allocated
+    : missingCurrentCharge
+      ? currentLevelPaid
+      : paidOtherLevelsOnly
+        ? 0
+        : currentLevelPaidWithoutLedger;
   const outstandingDeposit = Math.max(0, currentLevelDeposit - towardDeposit);
   const progressPercent = currentLevelDeposit > 0
     ? Math.min(100, Math.round((towardDeposit / currentLevelDeposit) * 100))
@@ -391,19 +482,24 @@ export function deriveStudentAccess({
       ? Math.min(100, Math.round((ledger.lifetimeAllocated / ledger.lifetimeCharged) * 100))
       : 100
     : fee > 0
-      ? Math.min(100, Math.round((paid / fee) * 100))
+      ? Math.min(100, Math.round((currentLevelPaidWithoutLedger / fee) * 100))
       : 0;
 
   return {
     deliveryMode: normaliseDeliveryMode(deliveryMode),
     classType: normaliseClassType(classType),
     hasAccess,
+    depositCleared: depositPaid,
     registrationPaid: paid > 0,
     totalPaid: paid,
-    tuitionFee: fee,
+    currentLevelPaid: towardDeposit,
+    tuitionFee: displayFee,
     requiredDeposit: currentLevelDeposit,
     outstanding: outstandingDeposit,
     outstandingBalance,
+    currentLevelOutstanding,
+    lifetimeOutstanding,
+    previousLevelOutstanding,
     progressPercent,
     feeProgressPercent,
     lockReason,

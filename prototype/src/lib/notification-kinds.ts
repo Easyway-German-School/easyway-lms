@@ -68,6 +68,16 @@ export const KIND = {
   attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",
+  /** To the rep: a lead just landed in their queue, auto-routed or handed to them by the Teamlead. See src/lib/growth/leads.ts's assignLead. */
+  leadAssigned: "lead.assigned",
+  /** Once a day, the first time a Growth Desk account opens the desk: queue size, unassigned count, or stale partners, depending on the job. See src/lib/growth/tasks.ts's sendDailyDigestIfNeeded. */
+  growthDailyDigest: "growth.daily_digest",
+  /** A partner (influencer/travel agent/other) asked for help from their own dashboard. See /api/admin/influencer's POST. */
+  influencerHelpRequest: "influencer.help_request",
+  /** A high/critical Mission Control incident appeared, escalated, or regressed. */
+  missionControlIncident: "mission_control.incident",
+  /** Mission Control's auto-heal: this student's screen stopped checking in while stale; a nudge to reopen the app. See src/lib/auto-heal.ts. */
+  portalResync: "portal.resync",
   /** A student asked the office for help, or wrote back on a thread. */
   supportTicket: "support.ticket",
   /** The office answered. This is the one the student is waiting on. */

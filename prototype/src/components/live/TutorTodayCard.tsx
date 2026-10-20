@@ -19,10 +19,10 @@ import { BroadcastIcon, CheckCircleIcon, UsersIcon, VideoIcon } from "@/componen
  * chosen — no group-chooser page in between, even for a tutor who teaches
  * three cohorts — and "Start the class" there is click two.
  *
- * Renders nothing once a room is actually open: `TutorLivePanel`, mounted
- * alongside this on the dashboard, owns that view (the join code, who has
- * turned up). The two are mutually exclusive by construction — this card
- * only ever shows the class that ISN'T live yet.
+ * The group-class prompt steps aside once a room opens; `TutorLivePanel`,
+ * mounted alongside this on the dashboard, owns that view (the join code and
+ * who has turned up). Assigned private bookings remain listed so a live group
+ * class never hides a tutor's one-to-one sessions.
  */
 
 export type TodayGroup = {
@@ -34,12 +34,30 @@ export type TodayGroup = {
   note: string;
 };
 
+export type TodayPrivateClass = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  topic: string | null;
+  status: string;
+};
+
 export type TodayState = {
   assigned: boolean;
   groups: TodayGroup[];
+  privateClasses: TodayPrivateClass[];
   focusKey: string | null;
   register: { total: number; marked: number; takenToday: boolean } | null;
-  live: { id: string; title: string; joinCode: string; startedAt: string } | null;
+  live: {
+    id: string;
+    title: string;
+    joinCode: string;
+    startedAt: string;
+    kind: string;
+    privateClassId: string | null;
+  } | null;
 };
 
 const STATE_TONE: Record<TodayGroup["state"], string> = {
@@ -76,88 +94,130 @@ export default function TutorTodayCard({ className = "" }: { className?: string 
 
 /** The card itself, from data already in hand — kept apart so it can be rendered and tested without a network. */
 export function TodayCardView({ data, className = "" }: { data: TodayState | null; className?: string }) {
-  if (!data || !data.assigned || data.live || data.groups.length === 0) return null;
+  if (!data || (!data.assigned && data.privateClasses.length === 0)) return null;
 
   const focus = data.groups.find((group) => group.key === data.focusKey) ?? data.groups[0];
-  const others = data.groups.filter((group) => group.key !== focus.key);
+  const others = focus ? data.groups.filter((group) => group.key !== focus.key) : [];
   const registerDone = data.register?.takenToday ?? false;
+  const showGroupCard = Boolean(focus && !data.live);
+  if (!showGroupCard && data.privateClasses.length === 0) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={`overflow-hidden rounded-3xl border border-[#0D7C7E]/25 bg-gradient-to-br from-[#0D7C7E]/10 via-[var(--surface)] to-[var(--surface)] shadow-lg ${className}`}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0D7C7E]/15 text-[#0D7C7E]">
-            <BroadcastIcon className="h-5 w-5" />
-          </span>
-          <div className="min-w-0">
-            <p
-              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${STATE_TONE[focus.state]}`}
-            >
-              {focus.note}
-            </p>
-            <h2 className="mt-1 truncate text-lg font-bold text-[var(--foreground)] sm:text-xl">{focus.label}</h2>
-            <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--muted)]">
-              <UsersIcon className="h-3.5 w-3.5 shrink-0" />
-              {focus.studentCount} student{focus.studentCount === 1 ? "" : "s"}
-              <span aria-hidden="true">·</span>
-              {registerDone ? (
-                <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
-                  <CheckCircleIcon className="h-3.5 w-3.5" />
-                  Register taken
-                </span>
-              ) : (
-                <Link href="/lecturer/attendance" className="font-semibold text-[var(--accent)] hover:underline">
-                  Register not taken yet
-                </Link>
-              )}
-            </p>
-          </div>
-        </div>
-
-        <Link
-          href={`/live?group=${encodeURIComponent(focus.key)}`}
-          className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[#0D7C7E] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+    <div className={`space-y-4 ${className}`}>
+      {showGroupCard && focus && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="overflow-hidden rounded-3xl border border-[#0D7C7E]/25 bg-gradient-to-br from-[#0D7C7E]/10 via-[var(--surface)] to-[var(--surface)] shadow-lg"
         >
-          <VideoIcon className="h-4 w-4" />
-          Go live
-        </Link>
-      </div>
+          <div className="flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0D7C7E]/15 text-[#0D7C7E]">
+                <BroadcastIcon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${STATE_TONE[focus.state]}`}
+                >
+                  {focus.note}
+                </p>
+                <h2 className="mt-1 truncate text-lg font-bold text-[var(--foreground)] sm:text-xl">{focus.label}</h2>
+                <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--muted)]">
+                  <UsersIcon className="h-3.5 w-3.5 shrink-0" />
+                  {focus.studentCount} student{focus.studentCount === 1 ? "" : "s"}
+                  <span aria-hidden="true">·</span>
+                  {registerDone ? (
+                    <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
+                      <CheckCircleIcon className="h-3.5 w-3.5" />
+                      Register taken
+                    </span>
+                  ) : (
+                    <Link href="/lecturer/attendance" className="font-semibold text-[var(--accent)] hover:underline">
+                      Register not taken yet
+                    </Link>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <Link
+              href={`/live?group=${encodeURIComponent(focus.key)}`}
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[#0D7C7E] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+            >
+              <VideoIcon className="h-4 w-4" />
+              Go live
+            </Link>
+          </div>
 
       {/* Every other class the tutor runs — a different level, a different
           sitting, or the OTHER BATCH of the same sitting (September next to
           October) — named in full with its own Go live. A tutor whose
           auto-picked focus is not the one they meant to start is never stuck
           with a guess, and never has to work out which batch a button is for. */}
-      {others.length > 0 && (
-        <div className="border-t border-[var(--border)] px-5 pb-4 pt-3 sm:px-6">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--foreground-soft)]">
-            Your other classes
-          </p>
-          <ul className="mt-2 divide-y divide-[var(--border)]">
-            {others.map((group) => (
-              <li key={group.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-[var(--foreground)]">{group.label}</p>
-                  <p className="text-xs text-[var(--muted)]">
-                    {group.note} · {group.studentCount} student{group.studentCount === 1 ? "" : "s"}
-                  </p>
-                </div>
-                <Link
-                  href={`/live?group=${encodeURIComponent(group.key)}`}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#0D7C7E]/40 bg-[#0D7C7E]/10 px-4 py-1.5 text-xs font-bold text-[#0D7C7E] transition hover:bg-[#0D7C7E]/20"
-                >
-                  <VideoIcon className="h-3.5 w-3.5" />
-                  Go live
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
+          {others.length > 0 && (
+            <div className="border-t border-[var(--border)] px-5 pb-4 pt-3 sm:px-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--foreground-soft)]">
+                Your other classes
+              </p>
+              <ul className="mt-2 divide-y divide-[var(--border)]">
+                {others.map((group) => (
+                  <li key={group.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--foreground)]">{group.label}</p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {group.note} · {group.studentCount} student{group.studentCount === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/live?group=${encodeURIComponent(group.key)}`}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#0D7C7E]/40 bg-[#0D7C7E]/10 px-4 py-1.5 text-xs font-bold text-[#0D7C7E] transition hover:bg-[#0D7C7E]/20"
+                    >
+                      <VideoIcon className="h-3.5 w-3.5" />
+                      Go live
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </motion.div>
       )}
-    </motion.div>
+      {data.privateClasses.length > 0 && (
+        <section className="overflow-hidden rounded-3xl border border-violet-500/25 bg-[var(--surface)] shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-5 py-4 sm:px-6">
+            <div>
+              <h2 className="text-base font-bold text-[var(--foreground)]">Your private lessons</h2>
+              <p className="mt-0.5 text-xs text-[var(--muted)]">Assigned to you · current and next 7 days</p>
+            </div>
+            <Link href="/lecturer/private-classes" className="text-xs font-semibold text-[var(--accent)] hover:underline">
+              Manage private classes
+            </Link>
+          </div>
+          <ul className="divide-y divide-[var(--border)] px-5 sm:px-6">
+            {data.privateClasses.map((privateClass) => {
+              const liveNow = data.live?.privateClassId === privateClass.id;
+              return (
+                <li key={privateClass.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--foreground)]">{privateClass.studentName}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {new Date(privateClass.scheduledAt).toLocaleString()} · {privateClass.durationMinutes} min
+                      {privateClass.topic ? ` · ${privateClass.topic}` : ""}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/live?privateClassId=${encodeURIComponent(privateClass.id)}`}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#0D7C7E] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110"
+                  >
+                    <VideoIcon className="h-3.5 w-3.5" />
+                    {liveNow ? "Open private room" : "Start & ring"}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+    </div>
   );
 }

@@ -207,8 +207,8 @@ export async function POST(req: NextRequest) {
       kind: KIND.resultPublished,
       severity: "info",
       title: "Your submission has been marked",
-      message: `${tutorPhrase(attribution)} finished marking your work. Open your results to see it.`,
-      link: "/results",
+      message: `${tutorPhrase(attribution)} finished marking your work. Open Assignments to see what they said.`,
+      link: `/assignment?id=${submission.assignmentId}`,
       dedupeKey: `submission-marked:${submission.id}`,
       push: true,
     }).catch((error) => console.error("Marking notification failed", error));

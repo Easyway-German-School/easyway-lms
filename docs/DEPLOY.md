@@ -8,6 +8,32 @@ follows is environment and verification.
 
 ---
 
+## 0. One release path across Claude, Cursor, and VS Code
+
+`main` is the only production source. The Vercel Git integration is configured
+to deploy `main` only. IDEs must not deploy or promote their own branch directly
+to production.
+
+For work in any IDE:
+
+1. Start from the latest `main` and use a separate feature branch or Git
+   worktree for that task. Do not let multiple IDEs edit the same checkout or
+   push unrelated changes to the same branch.
+2. Commit and push the task branch, then open a pull request to `main`.
+3. Merge only after the `checks` and `scan` GitHub actions pass. For an existing
+   feature branch, rebase or merge the latest `main` and rerun checks rather
+   than force-pushing an old snapshot over newer work.
+4. Let the Vercel Git integration deploy the resulting `main` commit. Do not
+   run `vercel --prod` or promote a preview/older deployment as a shortcut.
+5. Before calling a release done, confirm the production deployment's commit
+   is the merged `main` SHA and check the live app's sign-in and affected pages.
+
+When rolling back, promote only a known-good deployment built from `main`, then
+verify the production aliases and commit again. A successful build by itself
+does not make a deployment the approved release.
+
+---
+
 ## 1. Import the project
 
 Vercel → **Add New → Project** → import `Easyway-German-School/easyway-lms`.

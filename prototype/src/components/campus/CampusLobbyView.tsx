@@ -9,6 +9,7 @@ import { CampusAlertsCard, CampusHeader, CampusRoomCard, CoinChip, Flash, GhostT
 import { YouthBlobs, YouthStoryStrip, youthStagger } from "@/components/youth/YouthMotion";
 import { ROOMS, type PresencePerson } from "@/lib/campus";
 import { useCampusLive, useGhost } from "@/lib/useCampus";
+import { useStudentAccess } from "@/lib/useStudentAccess";
 
 /**
  * CAMPUS — the place that makes the app feel inhabited.
@@ -22,6 +23,7 @@ import { useCampusLive, useGhost } from "@/lib/useCampus";
 export default function CampusLobbyView() {
   const router = useRouter();
   const { live, isPending, isError } = useCampusLive("lobby", true);
+  const { access } = useStudentAccess();
   const ghost = useGhost("lobby");
   const { message, flash } = useFlash();
 
@@ -58,6 +60,37 @@ export default function CampusLobbyView() {
         />
 
         {off ? (
+          live?.reason === "impersonation" ? (
+            <>
+              <div className="mt-6 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+                <p className="text-base font-extrabold">Campus preview · read only</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  Remote view cannot join a student&apos;s Campus, show live student presence, or send rewards.
+                  To preview the live student experience, leave remote view and open Admin → Community → Youth view.
+                </p>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                {ROOMS.map((room) => (
+                  <div
+                    key={room.id}
+                    className="rounded-[1.75rem] border border-[var(--border)] bg-[var(--surface)] p-5"
+                  >
+                    <p className="text-base font-extrabold">{room.name}</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">{room.blurb}</p>
+                    <p className="mt-2 text-xs font-bold text-[var(--accent)]">
+                      {room.id === "cafe"
+                        ? "Class chats in Community"
+                        : room.id === "exam"
+                          ? "Exam practice in Exams"
+                          : room.open
+                            ? "Available to students"
+                            : "Preview only"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
           <div className="mt-6 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
             <p className="text-base font-extrabold">
               {live?.reason === "off" ? "Campus is taking a break" : live?.reason === "locked" ? "Campus opens when your tuition is up to date" : "Campus is for students"}
@@ -66,6 +99,7 @@ export default function CampusLobbyView() {
               {live?.reason === "off" ? "The school has paused it for now. It'll be back." : "Everything else in the app works as normal."}
             </p>
           </div>
+          )
         ) : (
           <>
             <div className="mt-3 flex items-center justify-between gap-3">
@@ -96,6 +130,19 @@ export default function CampusLobbyView() {
               <RequestsPanel cards={direct} room="lobby" onFlash={flash} onDuel={(id) => router.push(`/campus/duel/${id}`)} />
             </div>
 
+            {access?.classType === "group" ? (
+              <Link
+                href="/campus/groups"
+                className="mt-4 flex items-center justify-between gap-3 rounded-3xl border border-[var(--accent)]/20 bg-[var(--surface)] p-4 transition hover:border-[var(--accent)]/50"
+              >
+                <span>
+                  <span className="block text-sm font-extrabold">Find or start a study group</span>
+                  <span className="mt-0.5 block text-xs text-[var(--muted)]">Meet classmates for vocabulary, speaking, grammar or exam prep.</span>
+                </span>
+                <span className="shrink-0 text-sm font-extrabold text-[var(--accent)]">Open →</span>
+              </Link>
+            ) : null}
+
             <motion.div className="mt-4 grid grid-cols-2 gap-3" variants={youthStagger} initial="hidden" animate="show">
               {ROOMS.map((room) => {
                 const summary = snapshot?.rooms[room.id];
@@ -106,7 +153,8 @@ export default function CampusLobbyView() {
                       count={summary?.count ?? 0}
                       people={summary?.people ?? []}
                       more={summary?.more ?? 0}
-                      href={`/campus/${room.id}`}
+                      href={room.open ? `/campus/${room.id}` : room.id === "cafe" ? "/community" : "/exams"}
+                      destinationLabel={room.open ? undefined : room.id === "cafe" ? "Open your class chats" : "Open your exams"}
                     />
                   </motion.div>
                 );

@@ -57,7 +57,7 @@ export async function revealTutorAfterPayment(studentId: string): Promise<void> 
       severity: "success",
       title: "Your tutor has been assigned",
       message,
-      link: student.classType === "private" ? "/calendar" : "/classes",
+      link: "/calendar",
       push: true,
     }).catch((error) => console.error("Tutor reveal notification failed", error));
 

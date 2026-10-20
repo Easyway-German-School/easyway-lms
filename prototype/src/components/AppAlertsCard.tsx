@@ -38,7 +38,7 @@ export default function AppAlertsCard() {
     };
   } else if (push.supported && push.permission === "denied") {
     alerts = {
-      text: "Blocked for this device. Allow notifications for EasyWay in your phone's Settings, then come back.",
+      text: "Blocked for this device. Allow notifications for Easyway in your phone's Settings, then come back.",
       action: null,
     };
   } else if (push.supported) {
@@ -52,7 +52,7 @@ export default function AppAlertsCard() {
     };
   } else if (push.needsInstall) {
     alerts = {
-      text: "iPhone only sends alerts to apps on your Home Screen. Install EasyWay first, open it from the icon, then turn alerts on.",
+      text: "iPhone only sends alerts to apps on your Home Screen. Install Easyway first, open it from the icon, then turn alerts on.",
       action: (
         <button type="button" onClick={requestInstall} className={primary}>
           Show me how
@@ -74,9 +74,9 @@ export default function AppAlertsCard() {
   return (
     <section className="mx-auto mt-6 w-full max-w-5xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
       <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">App &amp; alerts</p>
-      <h2 className="mt-2 text-2xl font-black text-[var(--foreground)]">EasyWay on your phone</h2>
+      <h2 className="mt-2 text-2xl font-black text-[var(--foreground)]">Easyway on your phone</h2>
       <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-        Put EasyWay on your Home Screen to open it in one tap, read downloaded notes with no data, and get alerts on
+        Put Easyway on your Home Screen to open it in one tap, read downloaded notes with no data, and get alerts on
         your lock screen.
       </p>
 
@@ -90,8 +90,8 @@ export default function AppAlertsCard() {
               <p className="text-sm font-bold text-[var(--foreground)]">{installed ? "App installed" : "Install the app"}</p>
               <p className="mt-0.5 text-xs leading-5 text-[var(--muted)]">
                 {installed
-                  ? "You're using EasyWay from your Home Screen."
-                  : "Add EasyWay to your Home Screen. We'll show you exactly where to tap."}
+                  ? "You're using Easyway from your Home Screen."
+                  : "Add Easyway to your Home Screen. We'll show you exactly where to tap."}
               </p>
             </div>
           </div>

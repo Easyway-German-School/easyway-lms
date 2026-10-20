@@ -18,12 +18,13 @@ const tx = (over: Partial<PaystackTx> = {}): PaystackTx => ({
 });
 
 const base = (over: Partial<Facts> = {}): Facts => ({
-  student: { id: "s1", studentCode: "EW/2026/B1/SEP/A001", tenantId: "t1", level: "B1" },
+  student: { id: "s1", studentCode: "EW/2026/B1/SEP/A001", tenantId: "t1", level: "B1", status: "active" },
   user: { id: "u1", email: "ada@example.com", name: "Ada", tenantId: "t1" },
   access: { hasAccess: true, lockReason: null, totalPaid: 300_000, tuitionFee: 400_000, requiredDeposit: 240_000, outstanding: 0, graceUntil: null, batchLabel: null },
   hasPhoto: true,
   verdict: portalVerdict({ hasAccess: true, lockReason: null }, true),
   payments: [],
+  priorLevelArrears: [],
   snapshot: null,
   paystack: null,
   ...over,
@@ -86,6 +87,92 @@ describe("the rules", () => {
     expect(d.rulesRun).toBe(RULES.length);
   });
 
+  it("detects an unpaid current charge short by exactly the registration fee", () => {
+    const findings = diagnose(base({
+      levelAlignment: {
+        currentLevelChargeExists: true,
+        currentChargeId: "charge-a2",
+        currentChargeAmount: 145_000,
+        currentChargeWaivedAmount: 0,
+        currentChargeAllocated: 0,
+        expectedCurrentChargeAmount: 150_000,
+        ongoingEnrolment: null,
+        expectedBatchMonth: null,
+        expectedBatchYear: null,
+      },
+      access: { ...base().access, tuitionFee: 145_000, currentLevelOutstanding: 145_000 },
+    })).findings;
+
+    expect(findings.find((finding) => finding.rule === "current-tuition-underpriced-by-registration-fee")?.offers[0])
+      .toMatchObject({ id: "reprice_current_tuition", needs: "payments" });
+  });
+
+  it("detects when a registration payment matches the amount missing from current tuition", () => {
+    const findings = diagnose(base({
+      access: { ...base().access, tuitionFee: 150_000, currentLevelOutstanding: 145_000 },
+      registrationFeePayments: [{ amount: 5_000, description: "registration fee for language training" }],
+    })).findings;
+
+    expect(findings.find((finding) => finding.rule === "registration-fee-counted-toward-tuition")?.severity).toBe("problem");
+  });
+
+  it("flags a hybrid student without a usable online sitting", () => {
+    const d = diagnose(base({
+      student: { ...base().student, classType: "group", deliveryMode: "hybrid", sessionSlot: "morning" },
+      classSetup: { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [] },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "class-schedule-setup")).toMatchObject({
+      severity: "problem",
+      title: "The student's class sitting is missing or invalid",
+    });
+  });
+
+  it("flags an online class with no active tutor", () => {
+    const d = diagnose(base({
+      student: { ...base().student, classType: "group", deliveryMode: "online" },
+      classSetup: { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [] },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "class-tutor-assignment")?.severity).toBe("problem");
+  });
+
+  it("reports a private student with no upcoming booked session", () => {
+    const d = diagnose(base({
+      student: { ...base().student, classType: "private", deliveryMode: "online" },
+      classSetup: { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [] },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "private-class-coverage")?.title).toBe(
+      "No upcoming private session is booked",
+    );
+  });
+
+  it("identifies a live same-level tutor room in the wrong slot or intake", () => {
+    const d = diagnose(base({
+      student: {
+        ...base().student,
+        classType: "group",
+        deliveryMode: "hybrid",
+        sessionSlot: "morning",
+        admission: { batch: "September" },
+      },
+      classSetup: {
+        hybridOnlineSlot: "evening",
+        tutors: [{ id: "t1", status: "active", role: "online" }],
+        upcomingPrivateClasses: [],
+        liveSessions: [{
+          id: "room-1",
+          kind: "cohort",
+          title: "Lagos · B1 · October Morning",
+          level: "B1",
+          sessionSlot: "morning",
+          batch: "October",
+          lecturerId: "t1",
+          privateClassId: null,
+        }],
+      },
+    }));
+    expect(d.findings.find((finding) => finding.rule === "live-tutor-room-mismatch")?.severity).toBe("warning");
+  });
+
   it("paid-not-recorded: a problem with one repair offer per transaction, with a plain preview", () => {
     const d = diagnose(base({ paystack: { checked: true, emailChecked: "ada@example.com", transactions: [tx(), tx({ reference: "ref-9", amountKobo: 5_000_000 })] } }));
     const f = d.findings.find((x) => x.rule === "paid-not-recorded")!;
@@ -116,6 +203,121 @@ describe("the rules", () => {
     expect(f.severity).toBe("warning");
     expect(f.title).toMatch(/payment is fine/i);
     expect(f.detail).toMatch(/nothing is wrong with their payment/i);
+  });
+
+  it("missing-level-charge: fires when lifetime money covers the fee but the ledger credits none of it to this level", () => {
+    const f = diagnose(base({ access: { ...base().access, totalPaid: 400_000, currentLevelPaid: 0, tuitionFee: 400_000 } })).findings.find((x) => x.rule === "missing-level-charge")!;
+    expect(f.severity).toBe("problem");
+    expect(f.offers[0]).toMatchObject({ id: "sync_tuition_charge", needs: "payments" });
+    expect(f.evidence.find((e) => e.label === "Paid in total")?.value).toBe("₦400,000");
+  });
+
+  it("missing-level-charge: says nothing once the level is actually credited", () => {
+    const d = diagnose(base({ access: { ...base().access, totalPaid: 400_000, currentLevelPaid: 400_000, tuitionFee: 400_000 } }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("missing-level-charge: says nothing when currentLevelPaid was never supplied (older/fixture callers)", () => {
+    const { currentLevelPaid, ...accessWithoutField } = base().access;
+    const d = diagnose(base({ access: accessWithoutField }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("missing-level-charge: says nothing when they simply have not paid enough yet (no drift, just unpaid)", () => {
+    const d = diagnose(base({ access: { ...base().access, totalPaid: 50_000, currentLevelPaid: 50_000, tuitionFee: 400_000 } }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(false);
+  });
+
+  it("missing-level-charge: detects an absent current charge even before payments reach the new level fee", () => {
+    const d = diagnose(base({
+      access: { ...base().access, totalPaid: 180_000, currentLevelPaid: 0, tuitionFee: 400_000 },
+      levelAlignment: {
+        currentLevelChargeExists: false,
+        currentChargeId: null,
+        currentChargeAmount: null,
+        ongoingEnrolment: null,
+        expectedBatchMonth: "September",
+        expectedBatchYear: 2026,
+      },
+    }));
+    expect(d.findings.some((f) => f.rule === "missing-level-charge")).toBe(true);
+  });
+
+  it("current-enrolment-mismatch: catches a changed level with a stale ongoing fee snapshot", () => {
+    const d = diagnose(base({
+      levelAlignment: {
+        currentLevelChargeExists: true,
+        currentChargeId: "charge-b1",
+        currentChargeAmount: 400_000,
+        ongoingEnrolment: {
+          id: "enrolment-a2",
+          level: "A2",
+          tuitionChargeId: "charge-a2",
+          feeSnapshot: 180_000,
+          batchMonth: "September",
+          batchYear: 2026,
+        },
+        expectedBatchMonth: "September",
+        expectedBatchYear: 2026,
+      },
+    }));
+    expect(d.findings.some((f) => f.rule === "current-enrolment-mismatch")).toBe(true);
+  });
+
+  it("current-enrolment-mismatch: stays quiet when the active level, fee and batch are aligned", () => {
+    const d = diagnose(base({
+      levelAlignment: {
+        currentLevelChargeExists: true,
+        currentChargeId: "charge-b1",
+        currentChargeAmount: 400_000,
+        ongoingEnrolment: {
+          id: "enrolment-b1",
+          level: "B1",
+          tuitionChargeId: "charge-b1",
+          feeSnapshot: 400_000,
+          batchMonth: "September",
+          batchYear: 2026,
+        },
+        expectedBatchMonth: "September",
+        expectedBatchYear: 2026,
+      },
+    }));
+    expect(d.findings.some((f) => f.rule === "current-enrolment-mismatch")).toBe(false);
+  });
+
+  it("reports a confirmed prior-level balance without proposing to waive it", () => {
+    const verdict = portalVerdict({ hasAccess: false, lockReason: "previous_level_balance" }, true);
+    const f = diagnose(
+      base({
+        verdict,
+        access: { ...base().access, hasAccess: false, lockReason: "previous_level_balance" },
+        priorLevelArrears: [{ chargeId: "c-a2", level: "A2", outstanding: 35_000 }],
+      }),
+    ).findings.find((x) => x.rule === "prior-level-balance")!;
+    expect(f.severity).toBe("problem");
+    expect(f.title).toContain("A2");
+    expect(f.title).toContain("₦35,000");
+    expect(f.offers).toEqual([]);
+  });
+
+  it("reports unreviewed inferred history as non-collectible and does not call it confirmed debt", () => {
+    const unreviewed = diagnose(base({
+      unreviewedPriorLevels: [{ level: "A2", potentialOutstanding: 35_000 }],
+    })).findings.find((finding) => finding.rule === "unreviewed-prior-level-history");
+    expect(unreviewed?.severity).toBe("warning");
+    expect(unreviewed?.offers).toEqual([]);
+
+    expect(diagnose(base({ priorLevelArrears: [] })).findings.some((f) => f.rule === "prior-level-balance")).toBe(false);
+    const depositLock = portalVerdict({ hasAccess: false, lockReason: "unpaid_deposit" }, true);
+    expect(
+      diagnose(
+        base({
+          verdict: depositLock,
+          access: { ...base().access, hasAccess: false, lockReason: "unpaid_deposit" },
+          priorLevelArrears: [{ chargeId: "c-a2", level: "A2", outstanding: 35_000 }],
+        }),
+      ).findings.some((f) => f.rule === "prior-level-balance"),
+    ).toBe(false);
   });
 
   it("missing-student-code: warns and offers the repair, needing the students capability", () => {

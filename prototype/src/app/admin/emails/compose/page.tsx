@@ -52,6 +52,7 @@ export default function AdminEmailComposePage() {
   const [blocks, setBlocks] = useState<EmailBlock[]>(() => [newBlock("heading"), newBlock("text")]);
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("");
+  const [segment, setSegment] = useState<"active" | "alumni">("active");
   const [paymentStatus, setPaymentStatus] = useState("all");
   const [deliveryMode, setDeliveryMode] = useState("");
   const [sessionSlot, setSessionSlot] = useState("");
@@ -67,7 +68,7 @@ export default function AdminEmailComposePage() {
   const [engines, setEngines] = useState<Engine[]>([]);
   const [drafting, setDrafting] = useState(false);
 
-  const [preview, setPreview] = useState<{ count: number; students: number; tutors: number; sample: Recipient[] } | null>(null);
+  const [preview, setPreview] = useState<{ count: number; students: number; tutors: number; admins: number; sample: Recipient[] } | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [recent, setRecent] = useState<Message[]>([]);
   const [suppressions, setSuppressions] = useState<Suppression[]>([]);
@@ -115,13 +116,18 @@ export default function AdminEmailComposePage() {
 
   // The mode / sitting / intake filters describe a student, not a tutor, so a
   // "tutors" send drops them; "both" keeps them, narrowing only the student half.
-  const studentOnly = group !== "tutors";
+  // Admin staff has no level, branch, payment status or any of this — the API
+  // ignores every filter for that group, and the controls below are disabled
+  // to match rather than sit there implying they do something.
+  const isAdminGroup = group === "admin";
+  const studentOnly = group !== "tutors" && !isAdminGroup;
   const audience = {
-    branchId: branchId || null,
-    level: level || null,
+    branchId: isAdminGroup ? null : branchId || null,
+    level: isAdminGroup ? null : level || null,
+    segment: studentOnly ? segment : null,
     paymentStatus,
     group,
-    lecturerId: group === "students" ? null : lecturerId || null,
+    lecturerId: group === "students" || isAdminGroup ? null : lecturerId || null,
     deliveryMode: studentOnly ? deliveryMode || null : null,
     sessionSlot: studentOnly ? sessionSlot || null : null,
     batch: studentOnly ? batch || null : null,
@@ -297,35 +303,43 @@ export default function AdminEmailComposePage() {
               <option value="students">Students</option>
               <option value="tutors">Tutors</option>
               <option value="both">Students and tutors</option>
+              <option value="admin">Admin staff</option>
             </select>
-            <select value={branchId} onChange={(e) => { setBranchId(e.target.value); setPreview(null); }} disabled={group !== "students" && lecturerId !== ""} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            {/* Alumni are everyone who finished a batch (Student.status "graduated") —
+                previously unreachable from this composer at all, which was the gap in
+                the handbook's "old students get marketing emails" rule. */}
+            <select value={segment} onChange={(e) => { setSegment(e.target.value as "active" | "alumni"); setPreview(null); }} disabled={!studentOnly} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="active">Current students</option>
+              <option value="alumni">Alumni (finished a batch)</option>
+            </select>
+            <select value={branchId} onChange={(e) => { setBranchId(e.target.value); setPreview(null); }} disabled={isAdminGroup || (group !== "students" && lecturerId !== "")} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">All branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
-            <select value={level} onChange={(e) => { setLevel(e.target.value); setPreview(null); }} disabled={group !== "students" && lecturerId !== ""} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            <select value={level} onChange={(e) => { setLevel(e.target.value); setPreview(null); }} disabled={isAdminGroup || (group !== "students" && lecturerId !== "")} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">All levels</option>
               {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
-            <select value={paymentStatus} onChange={(e) => { setPaymentStatus(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            <select value={paymentStatus} onChange={(e) => { setPaymentStatus(e.target.value); setPreview(null); }} disabled={group === "tutors" || isAdminGroup} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="all">Everyone</option>
               <option value="unpaid">Outstanding balance</option>
               <option value="paid">Fully paid</option>
               <option value="registration-only">Registration fee only — no tuition</option>
             </select>
-            <select value={deliveryMode} onChange={(e) => { setDeliveryMode(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            <select value={deliveryMode} onChange={(e) => { setDeliveryMode(e.target.value); setPreview(null); }} disabled={!studentOnly} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">Any attendance</option>
               <option value="physical">Physical — campus</option>
               <option value="hybrid">Hybrid</option>
               <option value="online">Online</option>
             </select>
-            <select value={sessionSlot} onChange={(e) => { setSessionSlot(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            <select value={sessionSlot} onChange={(e) => { setSessionSlot(e.target.value); setPreview(null); }} disabled={!studentOnly} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">Any sitting</option>
               <option value="morning">Morning</option>
               <option value="afternoon">Afternoon</option>
               <option value="evening">Evening</option>
               <option value="weekend">Weekend</option>
             </select>
-            <select value={batch} onChange={(e) => { setBatch(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            <select value={batch} onChange={(e) => { setBatch(e.target.value); setPreview(null); }} disabled={!studentOnly} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">Any intake month</option>
               {MONTH_NAMES.map((m) => <option key={m} value={m}>{m} intake</option>)}
             </select>
@@ -334,7 +348,7 @@ export default function AdminEmailComposePage() {
             Attendance, sitting and intake month narrow the send to one class — e.g. Physical · A1 · Morning · September. They apply to students only.
           </p>
 
-          {group !== "students" && (
+          {group !== "students" && !isAdminGroup && (
             <div className="mt-3">
               <select
                 value={lecturerId}

@@ -15,6 +15,7 @@ const group = (key: string, label: string, state: TodayGroup["state"], studentCo
 const today = (overrides: Partial<TodayState> = {}): TodayState => ({
   assigned: true,
   groups: [group("a1-morning", "A1 · Morning", "now")],
+  privateClasses: [],
   focusKey: "a1-morning",
   register: { total: 12, marked: 0, takenToday: false },
   live: null,
@@ -77,7 +78,20 @@ describe("TodayCardView", () => {
   });
 
   it("steps aside once a room is open — TutorLivePanel owns that view", () => {
-    expect(render(today({ live: { id: "s1", title: "A1", joinCode: "123456", startedAt: "" } }))).toBe("");
+    expect(
+      render(
+        today({
+          live: {
+            id: "s1",
+            title: "A1",
+            joinCode: "123456",
+            startedAt: "",
+            kind: "cohort",
+            privateClassId: null,
+          },
+        }),
+      ),
+    ).not.toContain("Go live");
   });
 
   it("renders nothing for an unassigned tutor, a tutor with no classes, or before data arrives", () => {
@@ -89,5 +103,88 @@ describe("TodayCardView", () => {
   it("escapes group keys into the URL", () => {
     const html = render(today({ groups: [group("a1 morning/x", "A1", "now")], focusKey: "a1 morning/x" }));
     expect(liveLinks(html)).toEqual(["/live?group=a1%20morning%2Fx"]);
+  });
+
+  it("shows private lessons for a tutor with no group assignment", () => {
+    const html = render(
+      today({
+        assigned: false,
+        groups: [],
+        privateClasses: [
+          {
+            id: "private-1",
+            studentId: "student-1",
+            studentName: "Ada Student",
+            scheduledAt: "2026-10-20T10:00:00.000Z",
+            durationMinutes: 60,
+            topic: "Conversation",
+            status: "scheduled",
+          },
+        ],
+      }),
+    );
+    expect(html).toContain("Your private lessons");
+    expect(html).toContain("Ada Student");
+    expect(html).toContain("Conversation");
+    expect(html).toContain('href="/live?privateClassId=private-1"');
+    expect(html).toContain("Start &amp; ring");
+  });
+
+  it("keeps private lessons visible while a group room is live", () => {
+    const html = render(
+      today({
+        live: {
+          id: "s1",
+          title: "A1",
+          joinCode: "123456",
+          startedAt: "",
+          kind: "cohort",
+          privateClassId: null,
+        },
+        privateClasses: [
+          {
+            id: "private-1",
+            studentId: "student-1",
+            studentName: "Ada Student",
+            scheduledAt: "2026-10-20T10:00:00.000Z",
+            durationMinutes: 60,
+            topic: null,
+            status: "scheduled",
+          },
+        ],
+      }),
+    );
+    expect(html).toContain("Ada Student");
+    expect(html).toContain("Start &amp; ring");
+    expect(html).not.toContain("Go live");
+  });
+
+  it("offers to reopen a private room that is already live", () => {
+    const html = render(
+      today({
+        groups: [],
+        live: {
+          id: "s1",
+          title: "Private class",
+          joinCode: "123456",
+          startedAt: "",
+          kind: "private",
+          privateClassId: "private-1",
+        },
+        privateClasses: [
+          {
+            id: "private-1",
+            studentId: "student-1",
+            studentName: "Ada Student",
+            scheduledAt: "2026-10-20T10:00:00.000Z",
+            durationMinutes: 60,
+            topic: null,
+            status: "scheduled",
+          },
+        ],
+      }),
+    );
+    expect(html).toContain("Open private room");
+    expect(html).toContain('href="/live?privateClassId=private-1"');
   });
 });

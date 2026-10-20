@@ -169,6 +169,7 @@ type StudentFinanceRow = {
   owedOnDeposit?: number;
   tuitionFee?: number;
   progressPercent?: number;
+  openCharges?: Array<{ level: string; outstanding: number; legacyArrears: boolean }>;
 };
 
 function StudentsRoster() {
@@ -270,7 +271,13 @@ function StudentsRoster() {
    * never re-fetched.
    */
   const [savedCredentials, setSavedCredentials] = useState<
-    Array<{ name: string; email: string; password: string; studentCode?: string | null }>
+    Array<{
+      name: string;
+      email: string;
+      password: string;
+      studentCode?: string | null;
+      reEnrolled?: boolean;
+    }>
   >([]);
   /** Whether the "send their login by email?" prompt has been answered yet, for the credentials just created. */
   const [sendCredsState, setSendCredsState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -325,7 +332,7 @@ function StudentsRoster() {
     if (focusIds) url.searchParams.set("ids", focusIds);
     if (page) url.searchParams.set("page", String(page));
     if (pageSize) url.searchParams.set("pageSize", String(pageSize));
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
       setStudents(data.students || []);
@@ -379,6 +386,37 @@ function StudentsRoster() {
     return `${base}${base.includes("?") ? "&" : "?"}layout=chase`;
   }
 
+  /**
+   * The Reminders tab, carrying this exact view along with it.
+   *
+   * Without the query string, "Send a reminder…" always landed on the generic
+   * Reminders tab with its own four fixed groups over the WHOLE roster — so a
+   * batch filter picked here (October, say) was silently dropped the moment
+   * the office clicked through, and the mass send reached everyone owing,
+   * not just the people this view was narrowed to. The Reminders tab reads
+   * these same params back out and narrows its own audience to match — see
+   * FeeRemindersPanel.
+   */
+  function reminderUrl(): string {
+    const params = new URLSearchParams();
+    if (filterBranchId) params.set("branchId", filterBranchId);
+    if (filterTutorId) params.set("tutorId", filterTutorId);
+    if (filterLevel) params.set("level", filterLevel);
+    if (filterBatch) params.set("batch", filterBatch);
+    if (filterClassType) params.set("classType", filterClassType);
+    if (filterSessionSlot) params.set("sessionSlot", filterSessionSlot);
+    if (filterStatus) params.set("status", filterStatus);
+    if (filterPaymentStatus) params.set("paymentStatus", filterPaymentStatus);
+    if (filterTag) params.set("tag", filterTag);
+    if (filterYear) params.set("year", filterYear);
+    if (search) params.set("search", search);
+    if (focus) params.set("focus", focus);
+    if (agingBucket) params.set("agingBucket", agingBucket);
+    if (focusIds) params.set("ids", focusIds);
+    params.set("tab", "reminders");
+    return `/admin/finance?${params.toString()}`;
+  }
+
   function applyChaseFocus(id: string) {
     setFocus(id);
     setAgingBucket("");
@@ -405,6 +443,18 @@ function StudentsRoster() {
 
   useEffect(() => {
     void loadStudents();
+  }, [loadStudents]);
+
+  useEffect(() => {
+    const refreshVisibleRoster = () => {
+      if (document.visibilityState === "visible") void loadStudents();
+    };
+    window.addEventListener("focus", refreshVisibleRoster);
+    document.addEventListener("visibilitychange", refreshVisibleRoster);
+    return () => {
+      window.removeEventListener("focus", refreshVisibleRoster);
+      document.removeEventListener("visibilitychange", refreshVisibleRoster);
+    };
   }, [loadStudents]);
 
   useEffect(() => {
@@ -518,6 +568,7 @@ function StudentsRoster() {
         email: newEmail.trim().toLowerCase(),
         password: typeof data?.password === "string" ? data.password : newPassword.trim(),
         studentCode: data?.studentCode ?? null,
+        reEnrolled: data?.reEnrolled === true,
       };
       setSavedCredentials((prev) => [...prev, minted]);
     }
@@ -1095,7 +1146,7 @@ function StudentsRoster() {
               </a>
               {canSeeMoney ? (
                 <Link
-                  href="/admin/finance?tab=reminders"
+                  href={reminderUrl()}
                   className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
                 >
                   Send a reminder…
@@ -1415,6 +1466,13 @@ function StudentsRoster() {
                 Dismiss
               </button>
             </div>
+            {savedCredentials.some((cred) => cred.reEnrolled) ? (
+              <p className="rounded-xl border border-emerald-300 bg-white/70 px-3 py-2">
+                A previously deleted account was re-enrolled. Its former tuition charges, payment plans, and
+                enrolment records are archived in the audit trail. Recorded payments remain on the account and
+                apply to the new charge.
+              </p>
+            ) : null}
             <ul className="space-y-1">
               {savedCredentials.map((cred) => (
                 <li key={cred.email}>
@@ -1919,7 +1977,7 @@ function StudentsRoster() {
                 <th className="px-6 py-4">Name</th>
                 <th className="px-6 py-4">Email</th>
                 <th className="px-6 py-4">Branch</th>
-                <th className="px-6 py-4">Starting class</th>
+                <th className="px-6 py-4">Current level</th>
                 <th className="px-6 py-4">Batch</th>
                 {/* What the student said Germany is FOR. It is the single most
                     useful thing about them at a front desk — the conversation
@@ -1933,6 +1991,7 @@ function StudentsRoster() {
                 <th className="px-6 py-4">Tutor</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Payment</th>
+                <th className="px-6 py-4">Current tuition</th>
                 <th className="px-6 py-4">Balance</th>
                 <th className="px-6 py-4">Actions</th>
               </tr>
@@ -1940,11 +1999,11 @@ function StudentsRoster() {
             <tbody className="divide-y divide-[var(--border)] bg-[var(--background)]">
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
+                  <td colSpan={13} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
+                  <td colSpan={13} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
                 </tr>
               ) : (
                 students.map((student) => {
@@ -1952,6 +2011,11 @@ function StudentsRoster() {
                   const isPrivateMember = student.classType === "private";
                   const isWeekender = student.sessionSlot === "weekend";
                   const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
+                  const earlierLevelBalances = (money?.openCharges ?? []).filter(
+                    (charge) =>
+                      charge.outstanding > 0 &&
+                      charge.level.toUpperCase() !== String(student.level ?? "").toUpperCase(),
+                  );
                   // No photo on file → the student's portal is walled off from
                   // every class page (see lib/access.ts isPhotoGatedRoute / the
                   // PhotoLockScreen). Same field and gating as the weekly Becca
@@ -2132,7 +2196,7 @@ function StudentsRoster() {
                     </td>
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
-                    <td className="px-6 py-4">{student.admission && typeof student.admission === "object" && (student.admission as any).classApplied ? String((student.admission as any).classApplied) : (student.level || "—")}</td>
+                    <td className="px-6 py-4">{student.level || "—"}</td>
                     <td className="px-6 py-4">{typeof student.admission === "object" && student.admission && !Array.isArray(student.admission) && (student.admission as Record<string, unknown>).batch ? String((student.admission as Record<string, unknown>).batch) : "—"}</td>
                     <td className="px-6 py-4">
                       {student.germanyGoal ? (
@@ -2223,15 +2287,33 @@ function StudentsRoster() {
                         student.payments?.[0]?.status || "none"
                       )}
                     </td>
-                    {/* Priced off the fee table, like every other outstanding
-                        figure in the portal. It used to be invoiced-minus-paid,
-                        which reads ₦0 for a student who never had an invoice
-                        raised — that is, for most of the people who owe money. */}
+                    <td className="px-6 py-4 font-semibold">
+                      {!canSeeMoney
+                        ? "—"
+                        : money?.tuitionFee != null
+                        ? `₦${money.tuitionFee.toLocaleString("en-NG")}`
+                        : "—"}
+                    </td>
+                    {/* The lifetime balance can include an earlier level even
+                        when the current tuition is fully paid. */}
                     <td className={`px-6 py-4 font-semibold ${highlighted ? tone.text : ""}`}>
                       {!canSeeMoney
                         ? "—"
                         : money?.owed != null
-                        ? `₦${money.owed.toLocaleString("en-NG")}`
+                        ? (
+                          <>
+                            <span title="Total outstanding across current and earlier levels">
+                              ₦{money.owed.toLocaleString("en-NG")}
+                            </span>
+                            {earlierLevelBalances.length > 0 && (
+                              <span className="mt-1 block text-xs font-normal text-[var(--muted)]">
+                                Earlier levels: {earlierLevelBalances
+                                  .map((charge) => `${charge.level} ₦${charge.outstanding.toLocaleString("en-NG")}`)
+                                  .join(", ")}
+                              </span>
+                            )}
+                          </>
+                        )
                         : "—"}
                     </td>
                     <td className="px-6 py-4 flex flex-wrap gap-2">

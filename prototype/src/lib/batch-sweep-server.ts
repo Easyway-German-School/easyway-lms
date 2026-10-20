@@ -1,6 +1,6 @@
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
-import { MONTH_NAMES, batchFromAdmission, monthNameToIndex } from "@/lib/batch";
+import { MONTH_NAMES, batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { nextLevelAfter } from "@/lib/levels";
 import { instantToZonedParts } from "@/lib/school-time";
 import { cohortTiming } from "@/lib/graduation";
@@ -154,6 +154,9 @@ export type AdoptResult = {
   skipped: Array<{ studentId: string; name: string; reason: string }>;
 };
 
+/** Reasons the sweep found someone, where it is safe to re-point their batch label at a different month. */
+const MOVABLE_REASONS: SweepReason[] = ["no_label_strong", "no_label_weak", "unreadable_label", "other_batch"];
+
 /**
  * Writes the batch onto learners who have none. Only learners the sweep calls
  * "no batch on record, but they clearly were in it" are touched — their own history
@@ -216,6 +219,111 @@ export async function adoptIntoBatch(
       result.added.push({ studentId, name: row.name });
     } catch (error) {
       console.error("Adopt into batch failed", { studentId, error });
+      result.skipped.push({ studentId, name: row.name, reason: "Something went wrong — try again" });
+    }
+  }
+  return result;
+}
+
+export type MoveResult = {
+  moved: Array<{ studentId: string; name: string }>;
+  skipped: Array<{ studentId: string; name: string; reason: string }>;
+};
+
+/**
+ * Re-points a learner's batch label at a DIFFERENT month than the one just swept —
+ * "this July learner is really behind, put them on September" — for everyone the
+ * sweep could not place on the current lists for a readable reason (a stray or
+ * missing label, or a batch recorded by hand that does not match any desk).
+ *
+ * Only ever touches `admission.batch`. If the learner has no confirmed
+ * `classesStartedAt`, this also sets it to now: the sweep only surfaces someone
+ * here because their own history, first day or registration already proves they
+ * were in class, so lib/batch-reservation.ts's "confirmed start beats the label"
+ * guard must already be true for them — leaving it unset is what would otherwise
+ * let a FUTURE-dated target batch (one that has not opened yet) padlock a paid,
+ * already-attending learner the moment their label moves forward.
+ */
+export async function moveIntoBatch(
+  studentIds: string[],
+  options: {
+    where?: Record<string, unknown>;
+    tenantId?: string | null;
+    fromMonth: string;
+    toMonth: string;
+    now?: Date;
+    by?: string;
+  },
+): Promise<MoveResult> {
+  const result: MoveResult = { moved: [], skipped: [] };
+  const toIndex = monthNameToIndex(options.toMonth);
+  if (toIndex === null) {
+    result.skipped.push({ studentId: "", name: "", reason: "That is not a month" });
+    return result;
+  }
+  const toMonth = MONTH_NAMES[toIndex];
+  const now = options.now ?? new Date();
+  const sweep = await sweepBatch({ where: options.where, tenantId: options.tenantId, month: options.fromMonth, now });
+  if (!sweep) {
+    result.skipped.push({ studentId: "", name: "", reason: "That is not a month" });
+    return result;
+  }
+  const eligible = new Map(sweep.rows.filter((r) => MOVABLE_REASONS.includes(r.reason)).map((r) => [r.studentId, r]));
+
+  for (const studentId of studentIds) {
+    const row = eligible.get(studentId);
+    if (!row) {
+      result.skipped.push({ studentId, name: studentId, reason: "Not a learner the sweep can safely move" });
+      continue;
+    }
+    try {
+      const student = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: { admission: true, classesStartedAt: true, createdAt: true },
+      });
+      if (!student) {
+        result.skipped.push({ studentId, name: row.name, reason: "Student not found" });
+        continue;
+      }
+      const admission = asRecord(student.admission);
+      const toYear =
+        resolveBatchWindow(toMonth, { registeredAt: student.createdAt, now })?.year ?? sweep.year;
+      await prisma.$transaction([
+        prisma.student.update({
+          where: { id: studentId },
+          data: {
+            admission: { ...admission, batch: toMonth, batchYear: toYear } as never,
+            ...(student.classesStartedAt ? {} : { classesStartedAt: now }),
+          },
+        }),
+        prisma.studentEnrolment.updateMany({
+          where: { studentId, outcome: "ongoing", deletedAt: null },
+          data: { batchMonth: toMonth, batchYear: toYear },
+        }),
+      ]);
+      await prisma.journeyEvent
+        .create({
+          data: {
+            studentId,
+            type: "registered",
+            stage: row.level,
+            label: `Moved from the ${options.fromMonth} to the ${toMonth} batch by the office`,
+            detail: row.evidence.join("; "),
+            source: "admin",
+          },
+        })
+        .catch(() => undefined);
+      await writeAudit(unguardedPrisma, {
+        action: "batch.move",
+        model: "Student",
+        recordId: studentId,
+        severity: "info",
+        summary: `Moved ${row.name} from the ${options.fromMonth} to the ${toMonth} batch (${row.evidence.join("; ")}).`,
+        after: { from: options.fromMonth, to: toMonth, by: options.by ?? null },
+      }).catch((error) => console.error("batch move audit failed", { studentId, error }));
+      result.moved.push({ studentId, name: row.name });
+    } catch (error) {
+      console.error("Move into batch failed", { studentId, error });
       result.skipped.push({ studentId, name: row.name, reason: "Something went wrong — try again" });
     }
   }

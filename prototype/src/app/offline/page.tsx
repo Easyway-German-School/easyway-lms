@@ -13,7 +13,7 @@ import BrandLogo from "@/components/BrandLogo";
  * and "your downloaded materials are still there" is the difference between a
  * student closing the app and a student studying.
  */
-export const metadata = { title: "Offline · EasyWay" };
+export const metadata = { title: "Offline · Easyway" };
 
 export default function OfflinePage() {
   return (
@@ -23,7 +23,7 @@ export default function OfflinePage() {
 
         <h1 className="mt-6 text-2xl font-semibold">You are offline</h1>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-          EasyWay could not reach the school right now. Your place in class, your payments and your progress are all
+          Easyway could not reach the school right now. Your place in class, your payments and your progress are all
           safe — nothing is lost by being offline.
         </p>
 

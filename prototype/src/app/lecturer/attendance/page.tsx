@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useConfirmedSession as useSession } from '@/lib/useConfirmedSession';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import { AttendanceIcon, CheckIcon, CrossIcon, UsersIcon } from '@/components/icons';
 import LecturerStudentRoster from '@/components/LecturerStudentRoster';
 import { compareBatches } from '@/lib/class-batch';
+import { SCHOOL_TIMEZONE, zonedDateKey } from '@/lib/school-time';
 
 interface Student {
   id: string;
@@ -15,9 +16,12 @@ interface Student {
   branch: string;
   /** The intake month ("September"), or "" when the student has none on record. */
   batch?: string;
+  liveJoinedAt?: string | null;
+  liveSessionTitle?: string | null;
   /** null = nobody has marked this student. Never defaulted. */
   present: boolean | null;
   status: 'present' | 'late' | 'absent' | null;
+  alreadyMarked?: boolean;
   notStarted?: boolean;
 }
 
@@ -44,15 +48,16 @@ export default function LecturerAttendance() {
   const router = useRouter();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [history, setHistory] = useState<AttendanceHistory[]>([]);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => zonedDateKey(new Date(), SCHOOL_TIMEZONE));
+  const selectedDateRef = useRef(selectedDate);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
   const [studentFilter, setStudentFilter] = useState('all');
-  // Which BATCH's register is open. September and October of one sitting keep
-  // separate calendars, so the register is taken one batch at a time ("" = no
-  // split: the class has only one batch).
+  // An empty batch displays the full roster; selected batches keep overlapping
+  // intake calendars separate.
   const [batch, setBatch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [studentsLoading, setStudentsLoading] = useState(false);
   const [error, setError] = useState('');
   /**
    * Replaces an `alert()`. A modal dialog for a routine confirmation is a
@@ -61,6 +66,54 @@ export default function LecturerAttendance() {
    */
   const [saved, setSaved] = useState('');
   const [marking, setMarking] = useState(false);
+  const studentRequestId = useRef(0);
+
+  const fetchStudents = useCallback(async (courseId: string, date: string) => {
+    const requestId = ++studentRequestId.current;
+    setStudentsLoading(true);
+    setStudents([]);
+    setStudentFilter('all');
+    setError('');
+    try {
+      const query = new URLSearchParams({ date });
+      if (courseId) query.set('courseId', courseId);
+      const res = await fetch(`/api/lecturer/attendance/students?${query.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch students');
+      const data = await res.json();
+      if (requestId !== studentRequestId.current) return;
+      setStudents(data);
+      const found = [...new Set<string>((data as Student[]).map((s) => s.batch || '').filter(Boolean))].sort((a, b) => compareBatches(a, b));
+      setBatch((current) => (current && found.includes(current) ? current : ''));
+      setError('');
+    } catch (err) {
+      if (requestId !== studentRequestId.current) return;
+      setError(err instanceof Error ? err.message : 'Failed to fetch students');
+    } finally {
+      if (requestId === studentRequestId.current) setStudentsLoading(false);
+    }
+  }, []);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/lecturer/attendance');
+
+      if (res.status === 401) {
+        router.push('/auth/lecturer/signin');
+        return;
+      }
+
+      if (!res.ok) throw new Error('Failed to fetch attendance');
+
+      const data = await res.json();
+      setSessions(data.sessions);
+      setHistory(data.history ?? []);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -69,52 +122,15 @@ export default function LecturerAttendance() {
     }
 
     if (status === 'authenticated') {
-      fetchSessions();
+      const timer = window.setTimeout(() => {
+        void (async () => {
+          await fetchSessions();
+          await fetchStudents('', selectedDateRef.current);
+        })();
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
-  }, [status, router]);
-
-  async function fetchSessions() {
-    try {
-      const res = await fetch('/api/lecturer/attendance');
-      
-      if (res.status === 401) {
-        router.push('/auth/lecturer/signin');
-        return;
-      }
-
-      if (!res.ok) throw new Error('Failed to fetch attendance');
-      
-      const data = await res.json();
-      setSessions(data.sessions);
-      setHistory(data.history ?? []);
-      // The register no longer depends on a Class row existing. A tutor with
-      // no course template still has students — they are found from the
-      // branch + level the office assigned — so this loads either way.
-      const firstCourseId = data.sessions?.[0]?.courseId ?? '';
-      setSelectedCourse(firstCourseId);
-      fetchStudents(firstCourseId, selectedDate);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchStudents(courseId: string, date: string) {
-    try {
-      const query = new URLSearchParams({ date });
-      if (courseId) query.set('courseId', courseId);
-      const res = await fetch(`/api/lecturer/attendance/students?${query.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch students');
-      const data = await res.json();
-      setStudents(data);
-      setStudentFilter('all');
-      const found = [...new Set<string>((data as Student[]).map((s) => s.batch || '').filter(Boolean))].sort((a, b) => compareBatches(a, b));
-      setBatch((current) => (found.length > 1 ? (found.includes(current) ? current : found[0]) : ''));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch students');
-    }
-  }
+  }, [status, router, fetchSessions, fetchStudents]);
 
   // Tapping the mark a student already has clears it back to "not marked".
   function setMark(studentId: string, mark: Mark) {
@@ -132,17 +148,31 @@ export default function LecturerAttendance() {
   const inBatch = (s: Student) => !batch || (s.batch || '') === batch;
 
   // An explicit tutor action, never a default — and only for the batch that is
-  // open, so marking September present never marks October.
+  // open, so marking September present never marks October. When all batches
+  // are visible, require the tutor to choose one before using this bulk action.
   function markEveryonePresent() {
+    const batchNames = new Set(students.map((student) => student.batch || '').filter(Boolean));
+    if (!batch && batchNames.size > 1) return;
     setStudents((prev) =>
       prev.map((s) => (s.notStarted || s.status || !inBatch(s) ? s : { ...s, status: 'present', present: true })),
     );
   }
 
+  function applyLiveJoinSuggestions() {
+    setStudents((prev) =>
+      prev.map((student) =>
+        student.liveJoinedAt && !student.status && !student.notStarted && inBatch(student)
+          ? { ...student, status: 'present', present: true }
+          : student,
+      ),
+    );
+  }
+
   async function handleSubmit() {
-    const marked = students.filter((s) => s.status && !s.notStarted);
-    if (marked.length === 0) {
-      setError('Mark at least one student before saving.');
+    if (studentsLoading) return;
+    const editableStudents = students.filter((s) => !s.notStarted && (s.status !== null || s.alreadyMarked));
+    if (editableStudents.length === 0) {
+      setError('Mark or clear at least one student before saving.');
       return;
     }
     setMarking(true);
@@ -153,7 +183,7 @@ export default function LecturerAttendance() {
         body: JSON.stringify({
           courseId: selectedCourse,
           date: selectedDate,
-          attendance: marked.map((s) => ({
+          attendance: editableStudents.map((s) => ({
             studentId: s.id,
             present: s.present,
             status: s.status,
@@ -163,10 +193,12 @@ export default function LecturerAttendance() {
 
       if (!res.ok) throw new Error('Failed to save attendance');
 
+      const result: { count: number; cleared: number } = await res.json();
       setError('');
-      setSaved(`Attendance saved for ${marked.length} student${marked.length === 1 ? '' : 's'}.`);
+      setSaved(`Attendance saved: ${result.count} mark${result.count === 1 ? '' : 's'} recorded, ${result.cleared} previous mark${result.cleared === 1 ? '' : 's'} cleared.`);
       window.setTimeout(() => setSaved(''), 4000);
-      fetchSessions();
+      await fetchSessions();
+      await fetchStudents(selectedCourse, selectedDate);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -193,10 +225,14 @@ export default function LecturerAttendance() {
   const roster = students.filter(inBatch);
   const visibleStudents =
     studentFilter === 'all' ? roster : roster.filter((s) => s.id === studentFilter);
+  const liveJoinedCount = roster.filter((student) => student.liveJoinedAt).length;
+  const unmarkedLiveJoinedCount = roster.filter(
+    (student) => student.liveJoinedAt && !student.status && !student.notStarted,
+  ).length;
 
   return (
     <LecturerShell>
-      <div className="h-screen overflow-y-auto">
+      <div className="h-screen overflow-y-auto pb-24 md:pb-0">
         {/* Header */}
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto">
@@ -273,11 +309,20 @@ export default function LecturerAttendance() {
             <div className="mb-4 rounded-lg border-2 border-[var(--accent)]/40 bg-[var(--accent-soft)] p-4">
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">You are taking the register for</p>
               <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setBatch(''); setStudentFilter('all'); }}
+                  disabled={studentsLoading || marking}
+                  className={`rounded-full px-4 py-2 text-sm font-semibold ${!batch ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]'}`}
+                >
+                  All batches · {students.length}
+                </button>
                 {batchesHere.map((name) => (
                   <button
                     key={name}
                     type="button"
                     onClick={() => { setBatch(name); setStudentFilter('all'); }}
+                    disabled={studentsLoading || marking}
                     className={`rounded-full px-4 py-2 text-sm font-semibold ${batch === name ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]'}`}
                   >
                     {name} batch · {students.filter((s) => s.batch === name).length}
@@ -304,6 +349,7 @@ export default function LecturerAttendance() {
                     setSelectedCourse(e.target.value);
                     fetchStudents(e.target.value, selectedDate);
                   }}
+                disabled={studentsLoading || marking}
                   className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
                 >
                   <option value="">My whole class</option>
@@ -323,9 +369,11 @@ export default function LecturerAttendance() {
                   type="date"
                   value={selectedDate}
                   onChange={(e) => {
+                    selectedDateRef.current = e.target.value;
                     setSelectedDate(e.target.value);
                     fetchStudents(selectedCourse, e.target.value);
                   }}
+                  disabled={studentsLoading || marking}
                   className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
                 />
               </div>
@@ -361,8 +409,31 @@ export default function LecturerAttendance() {
             </div>
           </div>
 
+          {liveJoinedCount > 0 && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+              <div>
+                <p className="font-semibold text-[var(--foreground)]">
+                  {liveJoinedCount} {liveJoinedCount === 1 ? 'student has' : 'students have'} a live-class check-in
+                </p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  This confirms a connection, not formal attendance. Students without a check-in stay unmarked; nobody is automatically marked absent.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={applyLiveJoinSuggestions}
+                disabled={unmarkedLiveJoinedCount === 0 || marking}
+                className="min-h-10 rounded-full bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Mark {unmarkedLiveJoinedCount} joined {unmarkedLiveJoinedCount === 1 ? 'student' : 'students'} present
+              </button>
+            </div>
+          )}
+
           {/* Students List */}
-          {students.length === 0 ? (
+          {studentsLoading ? (
+            <div className="py-12 text-center text-sm text-[var(--muted)]">Loading your assigned students...</div>
+          ) : students.length === 0 ? (
             <div className="text-center py-12">
               <UsersIcon className="mx-auto mb-2 h-9 w-9 text-[var(--muted)]" />
               <p className="text-[var(--foreground)] font-semibold">Nobody to mark yet</p>
@@ -387,8 +458,47 @@ export default function LecturerAttendance() {
                 </div>
               )}
 
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
-                <table className="w-full">
+              <div className="space-y-3 md:hidden">
+                {visibleStudents.map((student) => (
+                  <article key={student.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-[var(--foreground)]">{student.name}</p>
+                        <p className="break-all text-xs text-[var(--muted)]">{student.email}</p>
+                        <p className="mt-1 text-xs text-[var(--muted)]">{student.branch}</p>
+                      </div>
+                      {student.liveJoinedAt && (
+                        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700" title={student.liveSessionTitle ?? undefined}>
+                          Joined live
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {student.notStarted ? (
+                        <span className="text-sm text-[var(--muted)]">Classes haven&apos;t started</span>
+                      ) : ([
+                        ['present', 'Present', 'bg-green-100 text-green-700 ring-green-400'],
+                        ['late', 'Late', 'bg-amber-100 text-amber-700 ring-amber-400'],
+                        ['absent', 'Absent', 'bg-red-100 text-red-700 ring-red-400'],
+                      ] as const).map(([mark, label, tone]) => (
+                        <button
+                          key={mark}
+                          type="button"
+                          onClick={() => setMark(student.id, mark)}
+                          disabled={marking}
+                          aria-pressed={student.status === mark}
+                          className={`min-h-10 rounded-full px-4 py-2 text-sm font-semibold ${student.status === mark ? `${tone} ring-2` : 'bg-[var(--surface-alt)] text-[var(--muted)]'} disabled:opacity-50`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="hidden overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] md:block">
+                <table className="w-full min-w-[760px]">
                   <thead className="bg-[var(--surface-alt)] border-b border-[var(--border)]">
                     <tr>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-[var(--foreground)]">Student Name</th>
@@ -403,7 +513,14 @@ export default function LecturerAttendance() {
                         key={student.id}
                         className="border-b border-[var(--border)] hover:bg-[var(--surface-alt)] transition-colors"
                       >
-                        <td className="px-4 py-3 text-sm text-[var(--foreground)]">{student.name}</td>
+                        <td className="px-4 py-3 text-sm text-[var(--foreground)]">
+                          <span>{student.name}</span>
+                          {student.liveJoinedAt && (
+                            <span className="ml-2 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700" title={student.liveSessionTitle ?? undefined}>
+                              Joined live
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.email}</td>
                         <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.branch}</td>
                         <td className="px-4 py-3 text-center">
@@ -420,6 +537,7 @@ export default function LecturerAttendance() {
                                   key={mark}
                                   type="button"
                                   onClick={() => setMark(student.id, mark)}
+                                  disabled={marking}
                                   aria-pressed={student.status === mark}
                                   className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold transition-colors ${
                                     student.status === mark
@@ -445,19 +563,21 @@ export default function LecturerAttendance() {
               <div className="mt-6 flex justify-end gap-4">
                 <button
                   onClick={() => fetchStudents(selectedCourse, selectedDate)}
+                  disabled={studentsLoading || marking}
                   className="px-6 py-2 border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:bg-[var(--surface-alt)] transition-colors"
                 >
                   Reset
                 </button>
                 <button
                   onClick={markEveryonePresent}
+                  disabled={studentsLoading || marking || (!batch && batchesHere.length > 1)}
                   className="px-6 py-2 border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:bg-[var(--surface-alt)] transition-colors"
                 >
                   Mark everyone not yet marked as present
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={marking}
+                  disabled={marking || studentsLoading}
                   className="px-6 py-2 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
                 >
                   {marking ? 'Saving...' : 'Save Attendance'}

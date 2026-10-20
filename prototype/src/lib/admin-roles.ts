@@ -1,6 +1,6 @@
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { beginRequestScope } from "@/lib/tenant/context";
+import { beginRequestScope, setTenantScope } from "@/lib/tenant/context";
 import { beginAuditScope } from "@/lib/audit-context";
 
 /**
@@ -15,7 +15,7 @@ import { beginAuditScope } from "@/lib/audit-context";
  * matching how the office is actually staffed rather than per-endpoint.
  */
 
-export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support"] as const;
+export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support", "growth", "influencer"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
@@ -24,6 +24,8 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   accountant: "Accountant",
   data_comm: "Data & Communications Manager",
   support: "Customer Care",
+  growth: "Growth Desk (Sales & Business Development)",
+  influencer: "Influencer / Affiliate Partner",
 };
 
 export const CAPABILITIES = [
@@ -60,6 +62,13 @@ export const CAPABILITIES = [
   "events",       // the staff calendar, events, and webinars
   "payroll",      // what the school pays its tutors — separate from `payments`,
                   // which is tuition coming IN, not compensation going OUT
+  "growth",       // the sales/CRM pipeline: leads, the daily task queue, and a
+                  // rep's own commission entries (read-only — approving one
+                  // still requires `payroll`, since that is money going out)
+  "influencer",   // an influencer's own view of their promo code, the
+                  // sign-ups it attributed and their payout ledger —
+                  // read-only, same split as `growth`: crediting a payout
+                  // still requires `payments`, since that is money moving
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -160,6 +169,23 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // Owns communications and the numbers, not the student records or the money.
   // `events` too: a webinar is a broadcast, and the open day is a comms job.
   data_comm: ["community", "emails", "reports", "integrations", "events"],
+
+  /**
+   * Growth Desk — the Business Development Manager, the Sales & Marketing
+   * Teamlead, and reps, all on one flat role for now. A deliberately narrow
+   * preset: the pipeline and the daily queue, nothing about money itself.
+   * `payments`/`payroll` stay out on purpose — a rep sees their own
+   * commission entries through `growth`, but approving a payout is still
+   * somebody else's job, same reasoning as every other preset here.
+   */
+  growth: ["growth"],
+
+  // An external influencer, signed in to watch their own numbers — their
+  // code, the sign-ups it brought in, and what they are owed. Nothing else:
+  // no student records, no other influencer's figures, no ability to create
+  // or edit a code (that stays with `payments`, same desk that already owns
+  // /admin/referrals).
+  influencer: ["influencer"],
 };
 
 /**
@@ -317,7 +343,7 @@ export async function adminHasCapability(userId: string, capability: Capability)
  * nobody's name on them. An audit line that cannot say who did the thing
  * answers the one question an audit trail exists to answer with a shrug.
  */
-async function nameAuditActor(admin: AdminContext | null): Promise<void> {
+async function nameAuditActor(admin: AdminContext | null, viaApiKey = false): Promise<void> {
   if (!admin) return;
   const { setAuditActor, actorFromRequest } = await import("@/lib/audit-context");
   const { headers } = await import("next/headers");
@@ -333,9 +359,99 @@ async function nameAuditActor(admin: AdminContext | null): Promise<void> {
     userId: admin.userId,
     email: admin.email,
     role: `admin:${admin.adminRole}`,
-    source: "app",
+    source: viaApiKey ? "admin_api_key" : "app",
     ...request,
   });
+}
+
+/**
+ * Session equivalents for the two ways an admin route gets authenticated.
+ *
+ * `keyCapabilities` is `null` for a real browser session — meaning "no
+ * narrowing beyond the admin's own role" — and an array (possibly empty) once
+ * an AdminApiKey resolved, which `narrowToKey` below intersects against
+ * whatever that admin's role would otherwise grant.
+ */
+type AdminAuthResolution = { session: Session; keyCapabilities: Capability[] | null };
+
+async function bearerFromRequestHeaders(): Promise<string | null> {
+  try {
+    const { headers } = await import("next/headers");
+    const header = (await headers()).get("authorization");
+    if (!header) return null;
+    const [scheme, ...rest] = header.split(" ");
+    if (scheme?.toLowerCase() !== "bearer") return null;
+    return rest.join(" ").trim() || null;
+  } catch {
+    // Called outside a request scope — same guard nameAuditActor uses above.
+    return null;
+  }
+}
+
+/**
+ * The door every admin gate now goes through instead of calling
+ * `requireAuthSession` directly: a browser session if there is one, otherwise
+ * — only when `ADMIN_API_KEYS_ENABLED=true` — an `Authorization: Bearer
+ * eak_...` key resolved to the admin account that created it.
+ *
+ * THAT FLAG IS SET IN .env.local ONLY, NEVER IN A DEPLOYED ENVIRONMENT. A key
+ * is inert in production regardless of whether its row still exists — see the
+ * comment on AdminApiKey in schema.prisma.
+ */
+async function resolveSessionOrApiKey(): Promise<AdminAuthResolution | null> {
+  const { requireAuthSession } = await import("@/lib/auth");
+  const session = await requireAuthSession();
+  if (session) return { session, keyCapabilities: null };
+
+  if (process.env.ADMIN_API_KEYS_ENABLED !== "true") return null;
+
+  const bearer = await bearerFromRequestHeaders();
+  if (!bearer) return null;
+
+  const { resolveAdminApiKey } = await import("@/lib/admin-api-key");
+  const resolved = await resolveAdminApiKey(bearer);
+  if (!resolved) return null;
+
+  // Per-key limiting, same reasoning as the partner API's requireApiKey() in
+  // src/lib/api/auth.ts: a leaked or misbehaving key must not degrade the
+  // whole admin surface for everyone else.
+  const { checkRateLimit } = await import("@/lib/rate-limit");
+  const limit = checkRateLimit(`adminapikey:${resolved.id}`, { windowMs: 60 * 1000, max: 60 });
+  if (!limit.ok) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: resolved.userId },
+    select: { id: true, email: true, role: true, tenantId: true },
+  });
+  // The creating admin's account may since have been demoted or removed —
+  // the key dies with them rather than keeping its own stale identity.
+  if (!user || String(user.role).toLowerCase() !== "admin") return null;
+
+  const keySession = {
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId ?? undefined,
+    },
+  } as unknown as Session;
+
+  // Same seam requireAuthSession() uses for a browser session (see
+  // src/lib/auth.ts) — everything the handler queries from here on, through
+  // the tenant-scoped `prisma`, is filtered to this admin's own school.
+  setTenantScope(user.tenantId ?? null);
+
+  return { session: keySession, keyCapabilities: resolved.capabilities };
+}
+
+/** A key's own capability list, capped at whatever the admin already has. */
+function narrowToKey(
+  admin: AdminContext | null,
+  keyCapabilities: Capability[] | null,
+): AdminContext | null {
+  if (!admin || keyCapabilities === null) return admin;
+  const allowed = admin.capabilities.filter((c) => keyCapabilities.includes(c));
+  return { ...admin, capabilities: allowed, can: (capability: Capability) => allowed.includes(capability) };
 }
 
 export async function requireCapability(
@@ -354,19 +470,19 @@ export async function requireCapability(
 
   // Imported here rather than at the top: this module is pulled into client
   // bundles for its label maps, and next-auth's server entry must not follow.
-  const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 
-  const session = await requireAuthSession();
-  if (!session) {
+  const resolution = await resolveSessionOrApiKey();
+  if (!resolution) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
+  const { session, keyCapabilities } = resolution;
 
-  const admin = await resolveAdmin(session.user.id);
-  await nameAuditActor(admin);
+  const admin = narrowToKey(await resolveAdmin(session.user.id), keyCapabilities);
+  await nameAuditActor(admin, keyCapabilities !== null);
 
   if (!admin) {
     return {
@@ -408,23 +524,23 @@ export async function requireCapabilityOrLecturer(
   beginRequestScope();
   beginAuditScope();
 
-  const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 
-  const session = await requireAuthSession();
-  if (!session) {
+  const resolution = await resolveSessionOrApiKey();
+  if (!resolution) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
+  const { session, keyCapabilities } = resolution;
 
   if (session.user.role?.toLowerCase() === "lecturer") {
     return { ok: true, admin: null, session };
   }
 
-  const admin = await resolveAdmin(session.user.id);
-  await nameAuditActor(admin);
+  const admin = narrowToKey(await resolveAdmin(session.user.id), keyCapabilities);
+  await nameAuditActor(admin, keyCapabilities !== null);
 
   if (!admin) {
     return {
@@ -459,19 +575,19 @@ export async function requireAnyCapability(
   beginRequestScope();
   beginAuditScope();
 
-  const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 
-  const session = await requireAuthSession();
-  if (!session) {
+  const resolution = await resolveSessionOrApiKey();
+  if (!resolution) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
+  const { session, keyCapabilities } = resolution;
 
-  const admin = await resolveAdmin(session.user.id);
-  await nameAuditActor(admin);
+  const admin = narrowToKey(await resolveAdmin(session.user.id), keyCapabilities);
+  await nameAuditActor(admin, keyCapabilities !== null);
 
   if (!admin) {
     return {
@@ -500,19 +616,19 @@ export async function requireAdmin(): Promise<
   beginRequestScope();
   beginAuditScope();
 
-  const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 
-  const session = await requireAuthSession();
-  if (!session) {
+  const resolution = await resolveSessionOrApiKey();
+  if (!resolution) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
+  const { session, keyCapabilities } = resolution;
 
-  const admin = await resolveAdmin(session.user.id);
-  await nameAuditActor(admin);
+  const admin = narrowToKey(await resolveAdmin(session.user.id), keyCapabilities);
+  await nameAuditActor(admin, keyCapabilities !== null);
 
   if (!admin) {
     return {

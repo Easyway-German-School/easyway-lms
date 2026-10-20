@@ -24,7 +24,7 @@ export default function SignupBlocked() {
             <LockIcon className="h-6 w-6" />
           </span>
           <p className="mt-5 text-xs font-semibold uppercase tracking-[0.36em] text-white/70">
-            Enrolment · EasyWay German
+            Enrolment · Easyway German
           </p>
           <h1 className="mt-3 text-2xl font-semibold leading-tight sm:text-3xl">
             Let&rsquo;s start with the enrolment form

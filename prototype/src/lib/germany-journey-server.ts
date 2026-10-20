@@ -327,7 +327,7 @@ async function buildTribeStanding(journey: Journey, branchId: string | null): Pr
     }
 
     const atOrBeyond = journey.awaitingStart ? cohortSize : started;
-    const place = journey.branchName ?? "EasyWay";
+    const place = journey.branchName ?? "Easyway";
 
     const line = journey.awaitingStart
       ? `${started} of the ${cohortSize} students at ${place} have already sat in their first class. The seat is the easy part.`

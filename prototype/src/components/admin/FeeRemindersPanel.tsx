@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -57,6 +58,78 @@ const GROUPS: Array<{ id: Category; focus: string; label: string; hint: string }
   { id: "legacy", focus: "chase_legacy", label: "Old balance only", hint: "Owes on an earlier level; current level is clear" },
 ];
 
+/**
+ * WHO THIS DIALOG REACHES — not just a category any more.
+ *
+ * `filters` are the same `RosterFilters` keys the Students roster, its call
+ * sheet and the audience endpoint already share (see student-roster-query.ts
+ * and fee-chase-send.ts). `label` is what the dialog's "To ___" line says.
+ */
+type SendScope = { filters: Record<string, string>; label: string };
+
+/** Mirrors FOCUS_PRESETS' `chase_*` labels in lib/finance/receivables.ts. */
+const FOCUS_LABELS: Record<string, string> = {
+  chase_all: "everyone who owes",
+  chase_nothing: GROUPS[0].label.toLowerCase(),
+  chase_under_deposit: GROUPS[1].label.toLowerCase(),
+  chase_balance: GROUPS[2].label.toLowerCase(),
+  chase_legacy: GROUPS[3].label.toLowerCase(),
+  chase_on_hold: "access on hold",
+};
+
+/** Readable names for the other roster filters a "Send a reminder…" link can carry over. */
+const FILTER_LABELS: Record<string, string> = {
+  branchId: "Branch",
+  level: "Level",
+  batch: "Batch",
+  classType: "Class type",
+  sessionSlot: "Session",
+  status: "Status",
+  paymentStatus: "Payment status",
+  tutorId: "Tutor",
+  search: "Search",
+  agingBucket: "Aging",
+  tag: "Tag",
+  year: "Year",
+  ids: "Selected students",
+};
+
+/** The known `RosterFilters` keys — same set the audience endpoint accepts. */
+const FILTER_KEYS = [
+  "branchId",
+  "level",
+  "batch",
+  "classType",
+  "sessionSlot",
+  "status",
+  "paymentStatus",
+  "tutorId",
+  "search",
+  "focus",
+  "agingBucket",
+  "ids",
+  "tag",
+  "year",
+] as const;
+
+/** `chase_nothing` → `"nothing"`, etc. Anything else (chase_all, chase_on_hold, no focus) is null — the filters alone carry the narrowing. */
+function categoryFromFocus(focus: string | undefined): Category | null {
+  const hit = GROUPS.find((g) => g.focus === focus);
+  return hit ? hit.id : null;
+}
+
+/** One short line describing a filtered scope, for the banner and the dialog's "To ___". */
+function describeFilters(filters: Record<string, string>): string {
+  const parts: string[] = [];
+  if (filters.focus) parts.push(FOCUS_LABELS[filters.focus] ?? filters.focus);
+  for (const key of FILTER_KEYS) {
+    if (key === "focus" || !filters[key]) continue;
+    const value = key === "ids" ? `${filters[key].split(",").filter(Boolean).length} students` : filters[key];
+    parts.push(`${FILTER_LABELS[key] ?? key}: ${value}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "everyone who owes";
+}
+
 const SWITCHES: Array<{ key: "emails" | "notifications" | "becca"; title: string; body: string }> = [
   {
     key: "emails",
@@ -88,8 +161,25 @@ export default function FeeRemindersPanel() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  /** `null` = closed; "all" = everyone on the list; otherwise one group. */
-  const [sending, setSending] = useState<Category | "all" | null>(null);
+  /** `null` = closed; otherwise who the open dialog would reach. */
+  const [sending, setSending] = useState<SendScope | null>(null);
+
+  /**
+   * CARRIED OVER FROM THE STUDENTS ROSTER.
+   *
+   * "Send a reminder…" on /admin/students links here with the exact filters
+   * that view was narrowed to (batch, the chase chip, branch, search, …) —
+   * see `reminderUrl()` there. Landing on the generic four-category panel and
+   * dropping that narrowing silently is the bug this fixes: a reminder aimed
+   * at "October, paid nothing" must not reach November's paid-nothing too.
+   */
+  const searchParams = useSearchParams();
+  const incomingFilters: Record<string, string> = {};
+  for (const key of FILTER_KEYS) {
+    const value = searchParams.get(key);
+    if (value) incomingFilters[key] = value;
+  }
+  const hasIncomingFilters = Object.keys(incomingFilters).length > 0;
 
   const load = useCallback(async () => {
     try {
@@ -217,6 +307,36 @@ export default function FeeRemindersPanel() {
         )}
       </section>
 
+      {/* ---------------------------------------- carried over from Students */}
+      {hasIncomingFilters && (
+        <section
+          className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-5 py-4"
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">Filtered from Students</p>
+            <p className="mt-1 text-sm text-[var(--foreground)]">
+              You came here filtered to <span className="font-semibold">{describeFilters(incomingFilters)}</span>. The
+              mass reminder below only reaches that same group — the four cards further down still cover everyone.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Link
+              href="/admin/finance?tab=reminders"
+              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+            >
+              Clear filter
+            </Link>
+            <button
+              type="button"
+              onClick={() => setSending({ filters: incomingFilters, label: describeFilters(incomingFilters) })}
+              className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Send to this filtered list…
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* ------------------------------------------------------- who owes */}
       <section>
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -246,7 +366,7 @@ export default function FeeRemindersPanel() {
             <button
               type="button"
               disabled={data.chaseAll.students === 0}
-              onClick={() => setSending("all")}
+              onClick={() => setSending({ filters: { focus: "chase_all" }, label: FOCUS_LABELS.chase_all })}
               className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
             >
               Send reminder to everyone
@@ -284,7 +404,7 @@ export default function FeeRemindersPanel() {
                   <button
                     type="button"
                     disabled={row.students === 0}
-                    onClick={() => setSending(g.id)}
+                    onClick={() => setSending({ filters: { focus: g.focus }, label: g.label.toLowerCase() })}
                     className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                   >
                     Send reminder
@@ -317,11 +437,6 @@ export default function FeeRemindersPanel() {
         <SendDialog
           scope={sending}
           emailConfigured={data.emailConfigured}
-          awaitingInScope={
-            sending === "all"
-              ? GROUPS.reduce((sum, g) => sum + (data.awaiting[g.id] ?? 0), 0)
-              : data.awaiting[sending] ?? 0
-          }
           onClose={() => {
             setSending(null);
             void load();
@@ -337,14 +452,13 @@ export default function FeeRemindersPanel() {
 function SendDialog({
   scope,
   emailConfigured,
-  awaitingInScope,
   onClose,
 }: {
-  scope: Category | "all";
+  scope: SendScope;
   emailConfigured: boolean;
-  awaitingInScope: number;
   onClose: () => void;
 }) {
+  const { filters, label } = scope;
   const [email, setEmail] = useState(emailConfigured);
   const [includeAwaiting, setIncludeAwaiting] = useState(false);
   const [skipRecent, setSkipRecent] = useState(true);
@@ -355,9 +469,11 @@ function SendDialog({
   const [progress, setProgress] = useState(0);
   const [totals, setTotals] = useState<SendTotals | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  /** How many this scope would add if "include waiting for a future intake" were ticked — learned from the first (unticked) audience fetch and held steady after that, so the checkbox doesn't vanish once checked. */
+  const [awaitingBaseline, setAwaitingBaseline] = useState<number | null>(null);
   const cancelled = useRef(false);
 
-  const category = scope === "all" ? null : scope;
+  const category = categoryFromFocus(filters.focus);
 
   useEffect(() => {
     let alive = true;
@@ -366,18 +482,20 @@ function SendDialog({
     fetch("/api/admin/fee-reminders/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "audience", category, includeAwaitingBatch: includeAwaiting, skipRecent }),
+      body: JSON.stringify({ action: "audience", filters, category, includeAwaitingBatch: includeAwaiting, skipRecent }),
     })
       .then(async (res) => {
         const json = await res.json().catch(() => null);
         if (!res.ok) throw new Error(json?.error ?? "Could not work out who this reaches");
-        if (alive) setAudience(json);
+        if (!alive) return;
+        setAudience(json);
+        if (!includeAwaiting) setAwaitingBaseline(json.excluded.awaitingBatch);
       })
       .catch((e) => alive && setLoadError(e instanceof Error ? e.message : "Could not load the audience"));
     return () => {
       alive = false;
     };
-  }, [category, includeAwaiting, skipRecent]);
+  }, [filters, category, includeAwaiting, skipRecent]);
 
   async function start() {
     if (!audience || audience.members.length === 0) return;
@@ -411,7 +529,8 @@ function SendDialog({
   }
 
   const count = audience?.members.length ?? 0;
-  const scopeLabel = scope === "all" ? "everyone who owes" : GROUPS.find((g) => g.id === scope)?.label.toLowerCase();
+  const scopeLabel = label;
+  const awaitingInScope = awaitingBaseline ?? 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">

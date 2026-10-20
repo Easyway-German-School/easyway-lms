@@ -192,6 +192,8 @@ export type PromotionOptions = {
    * `admission.classesStartedAtBeforePromotion` so the move can be undone.
    */
   placement?: "next-intake";
+  /** For scheduled progression, do not place the learner before this date. */
+  notBefore?: Date;
   /** Atomic compare-and-set for a scheduled transition; prevents duplicate cron moves. */
   expectedLevel?: string;
 };
@@ -331,49 +333,29 @@ export async function promoteStudents(
         level: next,
         // The batch they picked on the next-level journey, if it was for this level.
         preferredMonth: chosenBatch(admission, next),
+        notBefore: options.notBefore,
       });
     }
     const landingMonth = place?.month ?? monthName;
 
-    const studentUpdate = {
-        level: next,
-        admission: {
-          ...admission,
-          batch: landingMonth,
-          ...(place && student.classesStartedAt
-            ? { classesStartedAtBeforePromotion: student.classesStartedAt.toISOString() }
-            : {}),
-        } as any,
-        ...(place
-          ? {
-              classesStartedAt: place.startsOn,
-              startConfirmedAt: now,
-              startConfirmedVia: "promotion",
-              startPromptSnoozedUntil: null,
-            }
-          : {}),
-      };
-    if (options.expectedLevel) {
-      const moved = await prisma.student.updateMany({
-        where: { id: studentId, level: options.expectedLevel },
-        data: studentUpdate,
-      });
-      if (moved.count !== 1) {
-        result.skipped.push({ studentId, reason: "Level changed while promotion was being processed" });
-        continue;
-      }
-    } else {
-      await prisma.student.update({ where: { id: studentId }, data: studentUpdate });
-    }
-
-    // Raise the ordinary tuition charge for the level they just moved into.
-    // Travel Package keeps one whole-program charge and moves that charge to
-    // the new current level instead. Best-effort: a missing charge is repaired
-    // by the backfill and receivables falls back to the per-level figure meanwhile.
     let charge: { chargeId: string; amount: number } | null = null;
     try {
       charge = await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
-      if (isTravelPackagePathway(student.pathway) && charge) {
+    } catch (chargeError) {
+      console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
+    }
+    if (!charge) {
+      result.skipped.push({
+        studentId,
+        reason: `Could not prepare the ${next} tuition charge; the level was not changed. Retry the promotion or repair the charge in Mission Control.`,
+      });
+      continue;
+    }
+
+    // Travel Package keeps one whole-program charge and moves that charge to
+    // the new current level instead of raising a fresh one.
+    if (isTravelPackagePathway(student.pathway)) {
+      try {
         const currentCharge = await prisma.tuitionCharge.findFirst({
           where: { id: charge.chargeId, studentId, deletedAt: null },
           select: { note: true, amount: true, waivedAmount: true, waivedReason: true },
@@ -405,9 +387,40 @@ export async function promoteStudents(
             data: { level: next, note },
           });
         }
+      } catch (chargeError) {
+        console.error("Travel Package charge move failed on promotion", { studentId, next, chargeError });
       }
-    } catch (chargeError) {
-      console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
+    }
+
+    const studentUpdate = {
+        level: next,
+        admission: {
+          ...admission,
+          batch: landingMonth,
+          ...(place && student.classesStartedAt
+            ? { classesStartedAtBeforePromotion: student.classesStartedAt.toISOString() }
+            : {}),
+        } as any,
+        ...(place
+          ? {
+              classesStartedAt: place.startsOn,
+              startConfirmedAt: now,
+              startConfirmedVia: "promotion",
+              startPromptSnoozedUntil: null,
+            }
+          : {}),
+      };
+    if (options.expectedLevel) {
+      const moved = await prisma.student.updateMany({
+        where: { id: studentId, level: options.expectedLevel },
+        data: studentUpdate,
+      });
+      if (moved.count !== 1) {
+        result.skipped.push({ studentId, reason: "Level changed while promotion was being processed" });
+        continue;
+      }
+    } else {
+      await prisma.student.update({ where: { id: studentId }, data: studentUpdate });
     }
 
     // Close the level they just left and open the one they are moving into —

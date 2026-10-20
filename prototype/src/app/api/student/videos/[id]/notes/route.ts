@@ -24,10 +24,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     const session = await requireAuthSession();
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const student = await prisma.student.findUnique({ where: { userId: session.user.id } });
+    const student = await prisma.student.findUnique({
+      where: { userId: session.user.id },
+      include: { coTutors: { select: { lecturerId: true } } },
+    });
     if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
 
-    const material = await findOwnedRecordingMaterial(id, student);
+    const material = await findOwnedRecordingMaterial(id, {
+      ...student,
+      coTutorIds: student.coTutors.map((link) => link.lecturerId),
+    });
     if (!material) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const transcript = material.recording?.transcript;

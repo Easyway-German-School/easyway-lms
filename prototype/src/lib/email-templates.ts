@@ -108,7 +108,7 @@ export function feeReminderEmailTemplate(
 
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The EasyWay team
+          The Easyway team
         </p>
       </div>
     `,

@@ -48,7 +48,7 @@ export default function NextLevelCheckout() {
     };
   }, []);
 
-  async function startCheckout(stage: Stage) {
+  async function startCheckout(stage: Stage, forPriorBalance = false) {
     setBusy(stage);
     setCheckoutError(null);
     try {
@@ -56,7 +56,12 @@ export default function NextLevelCheckout() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentStage: stage, forNextLevel: true }),
+        body: JSON.stringify({
+          paymentStage: stage,
+          ...(forPriorBalance
+            ? { forNextLevel: true, forPriorBalance: true }
+            : { forNextLevel: true }),
+        }),
       });
       const json = await safeJson(res);
       if (!res.ok || !json?.authorization_url) {
@@ -131,37 +136,46 @@ export default function NextLevelCheckout() {
         {offer.currentLevelOutstanding > 0 ? (
           <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p className="font-semibold">
-              {naira(offer.currentLevelOutstanding)} is still open on {offer.currentLevel}.
+              {naira(offer.currentLevelOutstanding)} is still open on your previous level(s).
             </p>
             <p className="mt-1">
-              Paying here clears that first, then your {offer.nextLevel} amount — so you would pay{" "}
-              <strong>{naira(offer.currentLevelOutstanding + offer.requiredDeposit)}</strong> for the deposit option, or{" "}
-              <strong>{naira(offer.currentLevelOutstanding + offer.tuitionFee)}</strong> to settle {offer.nextLevel} in full.
+              Settle this balance separately first. The {offer.nextLevel} tuition checkout opens after the previous-level debt is cleared.
             </p>
           </div>
         ) : null}
 
-        <button
-          type="button"
-          onClick={() => startCheckout("full")}
-          disabled={busy !== null}
-          className="w-full rounded-2xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy === "full"
-            ? "Opening secure checkout…"
-            : `Pay ${naira(offer.currentLevelOutstanding + offer.tuitionFee)}${offer.currentLevelOutstanding > 0 ? "" : " in full"}`}
-        </button>
+        {offer.currentLevelOutstanding > 0 ? (
+          <button
+            type="button"
+            onClick={() => startCheckout("full", true)}
+            disabled={busy !== null}
+            className="w-full rounded-2xl bg-amber-700 px-6 py-4 text-lg font-bold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === "full" ? "Opening secure checkout…" : `Pay previous-level balance · ${naira(offer.currentLevelOutstanding)}`}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => startCheckout("full")}
+            disabled={busy !== null}
+            className="w-full rounded-2xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === "full" ? "Opening secure checkout…" : `Pay ${naira(offer.tuitionFee)} in full`}
+          </button>
+        )}
 
-        <button
-          type="button"
-          onClick={() => startCheckout("deposit")}
-          disabled={busy !== null}
-          className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-4 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]/70 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy === "deposit"
-            ? "Opening…"
-            : `Pay ${naira(offer.currentLevelOutstanding + offer.requiredDeposit)} deposit and start class now`}
-        </button>
+        {offer.currentLevelOutstanding <= 0 ? (
+          <button
+            type="button"
+            onClick={() => startCheckout("deposit")}
+            disabled={busy !== null}
+            className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-4 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]/70 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === "deposit"
+              ? "Opening…"
+              : `Pay ${naira(offer.requiredDeposit)} deposit and start class now`}
+          </button>
+        ) : null}
 
         {checkoutError ? (
           <p className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">{checkoutError}</p>

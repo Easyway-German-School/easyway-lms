@@ -40,13 +40,25 @@ export const MONTH_NAMES = [
  * "August" → 7. Case- and space-tolerant, because this reads month names that
  * came from a signup form, a spreadsheet import and an admin edit box.
  *
+ * Also tolerates a trailing year — "September 2026" — which is exactly what
+ * `resolveBatchWindow` below prints back out as a teaching month label, and
+ * what a bulk import or an admin typing the label back in produces. Without
+ * stripping it this returned null for anything written that way, which
+ * silently zeroed out `batchOfAdmission` for the student: on production this
+ * was 229 of 789 active students with a batch set, each invisibly dropped out
+ * of every batch-pinned material, notification and live-room check that reads
+ * their own admission record (see /api/student/materials, belongsToLecturer).
+ * The admission JSON itself is left alone — this only widens what the reader
+ * accepts.
+ *
  * Lives here rather than in `schedule.ts` (where it used to) so that every
  * batch question has one home and `schedule.ts` can depend on this file
  * instead of the other way round.
  */
 export function monthNameToIndex(name: unknown): number | null {
   if (typeof name !== "string") return null;
-  const index = MONTH_NAMES.findIndex((m) => m.toLowerCase() === name.trim().toLowerCase());
+  const cleaned = name.trim().replace(/\s+\d{4}$/, "");
+  const index = MONTH_NAMES.findIndex((m) => m.toLowerCase() === cleaned.toLowerCase());
   return index >= 0 ? index : null;
 }
 
@@ -96,7 +108,34 @@ export function resolveBatchAbsolute(
     // July, not the July that had already gone when they walked in.
     const year =
       monthIndex >= registeredAt.getMonth() ? registeredAt.getFullYear() : registeredAt.getFullYear() + 1;
-    return year * 12 + monthIndex;
+    let absolute = year * 12 + monthIndex;
+
+    /**
+     * STALE-REGISTRATION GUARD.
+     *
+     * The rule above only looks at the MONTH a student registered in, never
+     * at how long ago that was. Correct for a brand-new signup (registeredAt
+     * is basically `now`). Wrong for anyone whose account predates the batch
+     * label now on their record by a year or more — every A2+ student, since
+     * their account carries their ORIGINAL registration date (from A1, or
+     * earlier), not when they were placed in their current batch. Without
+     * this guard, a student who paid for "October" this year could resolve
+     * to October of whatever year she originally registered — a batch the
+     * system then believes ended long ago, producing exactly the "my
+     * dashboard says I've completed a level I haven't started" complaint.
+     *
+     * A batch label never means something more than about a year stale (the
+     * same ceiling `batch-reservation.ts`'s MAX_BARE_MONTH_LEAD_MONTHS applies
+     * looking the other way, into the future). Once the naive result falls
+     * more than 11 months behind `now`, roll it forward by whole years until
+     * it lands within one cycle of today — the occurrence the label plainly
+     * means right now, not the one nearest a long-past registration date.
+     */
+    const nowAbsolute = now.getFullYear() * 12 + now.getMonth();
+    if (nowAbsolute - absolute > 11) {
+      absolute += 12 * Math.ceil((nowAbsolute - absolute - 11) / 12);
+    }
+    return absolute;
   }
 
   // No registration date to anchor on. Fall back to the most recent occurrence

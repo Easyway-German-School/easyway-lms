@@ -3,7 +3,7 @@ import { cached } from "@/lib/ai-cache";
 import { callModel, activeModelName } from "@/lib/ai";
 import { receivedPaymentFilter } from "@/lib/payment";
 import { firstReachable } from "@/lib/admin-routes";
-import { schoolDayStart } from "@/lib/school-time";
+import { schoolDayStart, zonedDateKey, SCHOOL_TIMEZONE } from "@/lib/school-time";
 import type { Capability } from "@/lib/admin-roles";
 
 /**
@@ -56,6 +56,15 @@ export type AdminBrief = {
   period: AdminBriefPeriod;
   rangeLabel: string;
   comparedTo: string;
+  /**
+   * The exact wall-clock span the figures below were pulled from, in the
+   * school's own timezone — e.g. "6 Oct, 00:00 – 12 Oct, 10:43". Exists so a
+   * rolling window never has to be taken on faith: "This week" is a trailing
+   * 7 days ending now, not the calendar week since Monday, and the one thing
+   * that defuses "it's Monday, why does this look like last week" is showing
+   * the actual dates rather than just the word "week".
+   */
+  windowLabel: string;
   generatedAt: string;
   headline: string;
   metrics: AdminBriefMetric[];
@@ -71,24 +80,40 @@ const DAY_MS = 86_400_000;
 
 const RANGE_LABEL: Record<AdminBriefPeriod, string> = {
   daily: "today",
-  weekly: "this week",
+  // Not "this week" — the window is a rolling trailing 7 days ending now, not
+  // the calendar week since Monday. Calling it "this week" is what made a
+  // Monday-morning owner read a normal rolling window as "stuck on last
+  // week"; see the `windowLabel` field for the literal dates.
+  weekly: "in the last 7 days",
   monthly: "this month",
 };
 const COMPARE_LABEL: Record<AdminBriefPeriod, string> = {
-  daily: "yesterday",
-  weekly: "the previous 7 days",
+  daily: "yesterday, same time of day",
+  weekly: "the 7 days before that",
   monthly: "the same point last month",
 };
 
 /**
  * The window for the current period and the comparable one before it.
  *
- *   daily   — midnight today → now,        vs the whole of yesterday
- *   weekly  — a rolling 7 days → now,      vs the 7 days before that
+ *   daily   — midnight today → now,        vs yesterday, UP TO THE SAME
+ *             WALL-CLOCK TIME (not the whole of yesterday)
+ *   weekly  — a rolling 7 days → now,      vs the 7 days before that, ending
+ *             at the SAME POINT the current window ends at (not a full clean
+ *             7 days)
  *   monthly — the 1st of THIS month → now, vs the same elapsed span of last
- *             month (month-to-date vs month-to-date), so it lines up with the
- *             dashboard's own "This month" figure rather than reading as a
- *             second, contradictory one.
+ *             month (month-to-date vs month-to-date)
+ *
+ * All three compare an elapsed span against an EQUALLY elapsed span — never a
+ * partial "so far" window against a complete prior one. That asymmetry used
+ * to be exactly the daily/weekly bug here: at 10am the "today" window had
+ * covered 10 of its 24 hours, but it was being measured against the whole of
+ * yesterday (24 of 24) and the whole of the previous 7 days — so the delta%
+ * read as a decline every single morning regardless of the real trend, worst
+ * right after the window rolls onto a new day. Lining both ends up the same
+ * way monthly already did removes that bias; it does not touch the CURRENT
+ * period's own totals (registrations, cash collected), only the baseline
+ * they are compared against.
  */
 function windows(period: AdminBriefPeriod, now: Date) {
   if (period === "monthly") {
@@ -100,8 +125,24 @@ function windows(period: AdminBriefPeriod, now: Date) {
   const start = schoolDayStart(now);
   const span = period === "daily" ? 1 : 7;
   if (period === "weekly") start.setTime(start.getTime() - (span - 1) * DAY_MS);
+  const elapsed = now.getTime() - start.getTime();
   const prevStart = new Date(start.getTime() - span * DAY_MS);
-  return { start, end: now, prevStart, prevEnd: start };
+  const prevEnd = new Date(prevStart.getTime() + elapsed);
+  return { start, end: now, prevStart, prevEnd };
+}
+
+/** "6 Oct, 00:00 – 12 Oct, 10:43" — the literal span a window covers, in the
+ *  school's own timezone, so a rolling window never has to be taken on faith. */
+function windowLabel(start: Date, end: Date): string {
+  const fmt = (d: Date) =>
+    d.toLocaleString("en-GB", {
+      timeZone: SCHOOL_TIMEZONE,
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  return `${fmt(start)} – ${fmt(end)}`;
 }
 
 const naira = (n: number) => `₦${Math.round(n).toLocaleString("en-NG")}`;
@@ -117,12 +158,18 @@ function deltaPct(value: number, prev: number | null): number | null {
   return Math.round(((value - prev) / prev) * 100);
 }
 
-function sameUtcDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
+/**
+ * Same CALENDAR day in the school's own timezone — not UTC. A registration
+ * at 23:50 WAT and a payment 15 minutes later at 00:05 WAT are a different
+ * school day (and should NOT count as "paid same day"), but both land in the
+ * same UTC calendar day (23:05 UTC the day before), so the old UTC-based
+ * comparison called that a match. Africa/Lagos has no DST, so the reverse
+ * mistake (same WAT day, different UTC day) happens too, in the mirror hour.
+ * One hour wide, once a day, but it is the exact figure this brief is built
+ * to get right — see push("paidSameDay", ...) below.
+ */
+function sameSchoolDay(a: Date, b: Date): boolean {
+  return zonedDateKey(a, SCHOOL_TIMEZONE) === zonedDateKey(b, SCHOOL_TIMEZONE);
 }
 
 type BriefAdmin = { can: (c: Capability) => boolean; capabilities: readonly string[] };
@@ -261,14 +308,14 @@ export async function buildAdminBrief(
         }
         paidInWindow += 1;
         paidInWindowIds.push(s.id);
-        if (pays.some((p) => sameUtcDay(p.createdAt, s.createdAt))) {
+        if (pays.some((p) => sameSchoolDay(p.createdAt, s.createdAt))) {
           paidSameDay += 1;
           paidSameDayIds.push(s.id);
         }
       }
       for (const s of lastWindow as Registrant[]) {
         const pays = s.payments ?? [];
-        if (pays.some((p) => sameUtcDay(p.createdAt, s.createdAt))) prevPaidSameDay += 1;
+        if (pays.some((p) => sameSchoolDay(p.createdAt, s.createdAt))) prevPaidSameDay += 1;
       }
     }
 
@@ -329,7 +376,21 @@ export async function buildAdminBrief(
     ]);
     const collected = thisPays.reduce((s, p) => s + p.amount, 0);
     const prevCollected = prevPays.reduce((s, p) => s + p.amount, 0);
-    push("tuitionCollected", "Tuition collected", collected, prevCollected, "naira", true, undefined, cashHref());
+    push(
+      "tuitionCollected",
+      "Tuition in, school-wide",
+      collected,
+      prevCollected,
+      "naira",
+      true,
+      // This sums EVERY payment in the window, from any student — existing
+      // students paying an installment included, not only today's new
+      // sign-ups. It used to just say "Tuition collected" sitting right next
+      // to "1 registered", which read as "this is that one person's money"
+      // even on a day when it was several unrelated students paying.
+      "All tuition received in this window, from any student — not only today's new sign-ups.",
+      cashHref(),
+    );
     push("paymentsCount", "Payments received", thisPays.length, prevPays.length, "count", true, undefined, cashHref());
   }
 
@@ -377,6 +438,7 @@ export async function buildAdminBrief(
     period,
     rangeLabel: RANGE_LABEL[period],
     comparedTo: COMPARE_LABEL[period],
+    windowLabel: windowLabel(start, end),
     generatedAt: now.toISOString(),
     headline,
     metrics,
@@ -428,25 +490,48 @@ function deriveHeadline(
 ): string {
   const range = RANGE_LABEL[period];
   const cap = range.charAt(0).toUpperCase() + range.slice(1);
-  const parts: string[] = [];
 
+  /**
+   * Two separate sentences on purpose, not one comma-separated run-on.
+   * "1 registered, 1 paid tuition same day and ₦1,008,000 in" used to read
+   * as one continuous fact about one person — the school owner's actual
+   * complaint was exactly this, a single new sign-up next to a six-figure
+   * naira total that looked like it was describing them. The sign-up cohort
+   * (registered / paid same day / still owing) is one sentence; the
+   * school-wide cash figure is its own, explicitly labelled "school-wide" so
+   * it cannot be misread as belonging to the sign-up count beside it.
+   */
+  const signupParts: string[] = [];
   const regs = metricValue(metrics, "registrations");
-  if (caps.canStudents && regs !== null) {
-    parts.push(`${regs} registered`);
-  }
+  if (caps.canStudents && regs !== null) signupParts.push(`${regs} registered`);
   if (caps.canMoney) {
     const paid = metricValue(metrics, "paidSameDay");
-    const collected = metrics.find((m) => m.key === "tuitionCollected");
-    if (paid !== null) parts.push(`${paid} paid tuition same day`);
-    if (collected) parts.push(`${collected.display} in`);
+    if (paid !== null) signupParts.push(`${paid} paid tuition same day`);
     const owing = metricValue(metrics, "stillUnpaid");
-    if (owing && owing > 0) parts.push(`${owing} still owe`);
+    if (owing && owing > 0) signupParts.push(`${owing} still owe`);
   }
 
-  if (parts.length === 0) return `${cap}: nothing logged yet.`;
-  return `${cap}: ${parts.slice(0, -1).join(", ")}${parts.length > 1 ? " and " : ""}${
-    parts[parts.length - 1]
-  }.`;
+  const cashParts: string[] = [];
+  if (caps.canMoney) {
+    const collected = metrics.find((m) => m.key === "tuitionCollected");
+    if (collected) cashParts.push(`${collected.display} collected school-wide`);
+  }
+
+  if (signupParts.length === 0 && cashParts.length === 0) return `${cap}: nothing logged yet.`;
+
+  const sentences: string[] = [];
+  if (signupParts.length > 0) {
+    sentences.push(
+      `${cap}: ${signupParts.slice(0, -1).join(", ")}${
+        signupParts.length > 1 ? " and " : ""
+      }${signupParts[signupParts.length - 1]}.`,
+    );
+  }
+  if (cashParts.length > 0) {
+    const lead = sentences.length > 0 ? "" : `${cap}: `;
+    sentences.push(`${lead}${cashParts.join(", ")}.`);
+  }
+  return sentences.join(" ");
 }
 
 function deriveFlags(
@@ -471,7 +556,10 @@ function deriveFlags(
     if (conv < 60) {
       flags.push({
         level: "bad",
-        text: `Only ${conv}% of ${range}'s ${regs} sign-ups have paid tuition${
+        // Not a possessive ("${range}'s N sign-ups") — "in the last 7 days'
+        // N sign-ups" doesn't parse. Every RANGE_LABEL value reads cleanly
+        // as a trailing adverbial instead.
+        text: `Only ${conv}% of ${regs} sign-ups ${range} have paid tuition${
           unpaid ? ` — ${unpaid} to chase` : ""
         }.`,
       });

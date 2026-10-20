@@ -30,13 +30,25 @@ export async function POST(req: NextRequest) {
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, classType: true, tutorId: true, userId: true, user: { select: { name: true } }, tenantId: true },
+      select: {
+        id: true,
+        classType: true,
+        tutorId: true,
+        coTutors: { select: { lecturerId: true } },
+        userId: true,
+        user: { select: { name: true } },
+        tenantId: true,
+      },
     });
     if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
     if (student.classType !== "private") {
       return NextResponse.json({ error: "That student is on a group class. Switch them to private first." }, { status: 400 });
     }
-    if (auth.role === "lecturer" && student.tutorId !== auth.lecturerId) {
+    if (
+      auth.role === "lecturer" &&
+      student.tutorId !== auth.lecturerId &&
+      !student.coTutors.some((link) => link.lecturerId === auth.lecturerId)
+    ) {
       return NextResponse.json({ error: "That student is not assigned to you" }, { status: 403 });
     }
 
@@ -92,10 +104,24 @@ export async function PATCH(req: NextRequest) {
 
     const series = await prisma.privateClassSeries.findUnique({
       where: { id: seriesId },
-      include: { student: { select: { userId: true, tutorId: true } } },
+      include: {
+        student: {
+          select: {
+            userId: true,
+            tutorId: true,
+            coTutors: { select: { lecturerId: true } },
+          },
+        },
+      },
     });
     if (!series) return NextResponse.json({ error: "Series not found" }, { status: 404 });
-    if (auth.role === "lecturer" && series.lecturerId !== auth.lecturerId && series.student.tutorId !== auth.lecturerId) {
+    if (
+      auth.role === "lecturer" &&
+      series.lecturerId !== auth.lecturerId &&
+      (series.lecturerId !== null ||
+        (series.student.tutorId !== auth.lecturerId &&
+          !series.student.coTutors.some((link) => link.lecturerId === auth.lecturerId)))
+    ) {
       return NextResponse.json({ error: "That series is not assigned to you" }, { status: 403 });
     }
 

@@ -16,10 +16,16 @@ export const dynamic = "force-dynamic";
 const MAX_CONTENT_CHARS = 20_000;
 
 async function requireOwnedMaterial(materialId: string, userId: string) {
-  const student = await prisma.student.findUnique({ where: { userId } });
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    include: { coTutors: { select: { lecturerId: true } } },
+  });
   if (!student) return { error: NextResponse.json({ error: "Student not found" }, { status: 404 }) } as const;
 
-  const material = await findOwnedRecordingMaterial(materialId, student);
+  const material = await findOwnedRecordingMaterial(materialId, {
+    ...student,
+    coTutorIds: student.coTutors.map((link) => link.lecturerId),
+  });
   if (!material) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) } as const;
 
   return { student, material } as const;

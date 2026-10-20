@@ -22,6 +22,7 @@ import {
   BranchIcon,
   BriefcaseIcon,
   BroadcastIcon,
+  StarIcon,
   CalendarIcon,
   CertificateIcon,
   ChevronLeftIcon,
@@ -84,6 +85,11 @@ const capabilityOf = (item: NavItem) => capabilityForAdminPath(item.href);
 // grouping headers were doing all the work.
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <DashboardIcon />, group: 'Main' },
+  // No capability prefix registered for this in admin-routes.ts on purpose —
+  // an unmapped path is reachable by every admin role (see
+  // canReachAdminPath), which is exactly right for something meant to
+  // include Admin staff as one of its own channels.
+  { label: 'Staff Channels', href: '/admin/channels', icon: <SendIcon />, group: 'Main' },
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
@@ -98,6 +104,14 @@ const navItems: NavItem[] = [
   // as a conversion opportunity.
   { label: 'Enquiries', href: '/admin/enquiries', icon: <InboxIcon />, group: 'Academics' },
   { label: 'Lead funnel', href: '/admin/leads', icon: <TicketIcon />, group: 'Academics' },
+  // A rep's own desk on top of the lead funnel above: the daily task queue
+  // and the pipeline notes/stage changes. Separate capability (`growth`)
+  // because a rep should see this without seeing the rest of Academics.
+  { label: 'Growth Desk', href: '/admin/growth', icon: <TrendingUpIcon />, group: 'Academics' },
+  // An influencer's own view of their own code, sign-ups and payouts —
+  // separate capability (`influencer`) so it carries nothing else this group
+  // would otherwise pull in.
+  { label: 'Influencer Program', href: '/admin/influencer', icon: <BroadcastIcon />, group: 'Academics' },
   { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
   { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
   { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },
@@ -143,6 +157,13 @@ const navItems: NavItem[] = [
   // transaction list is what you open from it rather than the other way round.
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
+  { label: 'Referrals', href: '/admin/referrals', icon: <UserPlusIcon />, group: 'Billing' },
+  // The admin door into the Influencer Program — the list of every partner
+  // and a remote view into each one's own dashboard (same component the
+  // partner sees at 'Influencer Program' above, under Academics). Gated on
+  // `payments`, so only the desk that already owns the whole promo-code
+  // system sees this; a partner's own `influencer`-only account never does.
+  { label: 'Partner dashboard', href: '/admin/influencer-program', icon: <StarIcon />, group: 'Billing' },
   { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
   // Money going OUT to tutors — its own capability, separate from `payments`
   // (money coming in from students). See the note in admin-roles.ts.

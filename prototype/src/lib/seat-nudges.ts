@@ -92,7 +92,7 @@ export function reserveMessage(row: SeatRow, daysUntil: number, secured: number)
   return {
     title,
     message,
-    emailBody: `${message}\n\nClasses open ${opens}. Your portal is a waiting room until then, and it opens on its own the moment the day arrives — but only for learners whose seat is held.\n\nReserve your seat: open the EasyWay portal → Payments.`,
+    emailBody: `${message}\n\nClasses open ${opens}. Your portal is a waiting room until then, and it opens on its own the moment the day arrives — but only for learners whose seat is held.\n\nReserve your seat: open the Easyway portal → Payments.`,
   };
 }
 
@@ -116,12 +116,12 @@ export function openingMessage(name: string, month: string, open: boolean): Draf
     ? {
         title: `The doors are open, ${firstName(name)}!`,
         message: `Becca here — ${month} classes have begun and your classroom is open. Sign in and take your seat.`,
-        emailBody: `Becca here — ${month} classes have begun and your classroom is open. Sign in to the EasyWay portal and take your seat.`,
+        emailBody: `Becca here — ${month} classes have begun and your classroom is open. Sign in to the Easyway portal and take your seat.`,
       }
     : {
         title: `${month} classes have begun`,
         message: `Becca here — ${month} classes are under way. Pay your deposit from the Payments page and your classroom opens straight away.`,
-        emailBody: `Becca here — ${month} classes are under way. Your classroom opens the moment your deposit is paid: open the EasyWay portal → Payments.`,
+        emailBody: `Becca here — ${month} classes are under way. Your classroom opens the moment your deposit is paid: open the Easyway portal → Payments.`,
       };
 }
 

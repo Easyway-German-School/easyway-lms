@@ -62,7 +62,7 @@ const STATUS_TONE: Record<ResultRow["status"], string> = {
 function messageFor(row: ResultRow): string {
   const firstName = (row.name || "there").split(/\s+/)[0];
   return (
-    `Hi ${firstName}, here is your EasyWay School portal login:\n` +
+    `Hi ${firstName}, here is your Easyway School portal login:\n` +
     `Website: ${LOGIN_URL}\n` +
     `Email: ${row.loginEmail}\n` +
     `Password: ${row.password}\n` +

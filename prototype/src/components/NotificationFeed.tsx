@@ -2,7 +2,8 @@
 
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { resolveNotificationHop } from "@/lib/notification-destinations";
 import {
   AlertIcon,
   BellIcon,
@@ -85,6 +86,8 @@ function when(iso: string): string {
 
 export default function NotificationFeed() {
   const router = useRouter();
+  const pathname = usePathname();
+  const [noteAckId, setNoteAckId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -201,19 +204,33 @@ export default function NotificationFeed() {
           notifications.map((notification, index) => {
             const tone = TONES[notification.severity] ?? TONES.info;
             const unread = !notification.readAt;
+            const hop = resolveNotificationHop({
+              kind: notification.kind,
+              link: notification.link,
+              currentPath: pathname,
+            });
 
             return (
               <motion.div
                 key={notification.id}
+                role="button"
+                tabIndex={0}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: Math.min(index * 0.03, 0.3) }}
                 className={`flex gap-4 rounded-3xl border border-[var(--border)] border-l-4 ${tone.rail} bg-[var(--surface-alt)] p-5 shadow-sm transition ${
-                  notification.link ? "cursor-pointer hover:shadow-md" : ""
+                  hop.clickable ? "cursor-pointer hover:shadow-md" : "cursor-default"
                 } ${unread ? "" : "opacity-75"}`}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.currentTarget.click();
+                  }
+                }}
                 onClick={() => {
                   void markRead(notification.id);
-                  if (notification.link) router.push(notification.link);
+                  if (hop.clickable && hop.href) router.push(hop.href);
+                  else setNoteAckId(notification.id);
                 }}
               >
                 <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${tone.chip}`}>
@@ -230,6 +247,15 @@ export default function NotificationFeed() {
                     )}
                   </div>
                   <p className="mt-1.5 text-sm leading-relaxed text-[var(--muted)]">{notification.message}</p>
+                  {hop.clickable ? (
+                    <p className="mt-2 text-xs font-semibold text-[var(--accent)]">{hop.cta} →</p>
+                  ) : (
+                    <p className="mt-2 rounded-xl bg-[var(--background)] px-3 py-2 text-xs leading-relaxed text-[var(--muted)]">
+                      {noteAckId === notification.id
+                        ? "Yep — that's the whole thing. Nothing else to open."
+                        : hop.hint}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-[var(--muted)]">
                     {when(notification.createdAt)}
                     {notification.senderName ? ` · ${notification.senderName}` : ""}

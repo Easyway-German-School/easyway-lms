@@ -151,7 +151,7 @@ export const ROSTER_INCLUDE = {
   },
   tuitionCharges: {
     where: { deletedAt: null },
-    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
   },
   attendances: {
     where: { date: { gte: new Date(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000) } },

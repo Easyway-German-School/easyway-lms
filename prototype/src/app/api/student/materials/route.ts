@@ -7,6 +7,7 @@ import { toPlayableUrl } from "@/lib/video-library";
 import { notExpiredForStudents } from "@/lib/retention";
 import { driveDownloadUrl, DRIVE_LINK_FILE_TYPE } from "@/lib/drive-import";
 import { studentSeesBatch } from "@/lib/class-batch";
+import { loadPreviousLevelPreview } from "@/lib/previous-level-preview";
 
 export async function GET() {
   try {
@@ -39,7 +40,15 @@ export async function GET() {
     }
     const { tuitionFee, totalPaid, requiredDeposit } = access;
 
-    if (!access.hasAccess) {
+    const preview = !access.hasAccess && access.previousLevelOutstanding <= 0
+      ? await loadPreviousLevelPreview({
+          studentId: student.id,
+          level: student.level,
+          branchId: student.branchId,
+          sessionSlot: student.sessionSlot,
+        })
+      : null;
+    if (!access.hasAccess && !preview) {
       return NextResponse.json(
         {
           materials: [],
@@ -48,8 +57,10 @@ export async function GET() {
           tuitionFee,
           totalPaid,
           message:
-            access.lockReason === "unsettled_balance"
-              ? `Settle your tuition balance of ${access.outstandingBalance.toLocaleString()} NGN to unlock course materials.`
+            access.lockReason === "previous_level_balance"
+              ? `Settle your previous-level tuition balance of ${access.previousLevelOutstanding.toLocaleString()} NGN before paying for this level.`
+              : access.lockReason === "unsettled_balance"
+              ? `Settle your current-level tuition balance of ${access.currentLevelOutstanding.toLocaleString()} NGN to unlock course materials.`
               : `Pay the deposit of ${requiredDeposit.toLocaleString()} NGN (${Math.round((requiredDeposit / tuitionFee) * 100)}%) to unlock course materials.`,
         },
         { status: 403 }
@@ -85,10 +96,10 @@ export async function GET() {
      * level exactly as before. Batch lives in the admission JSON and is applied
      * in memory below.
      */
-    const records = await prisma.material.findMany({
+    const records = preview?.materials ?? await prisma.material.findMany({
       where: {
         AND: [
-          { OR: [{ level: student.level }, { course: { level: student.level } }] },
+          { OR: [{ level: preview?.level ?? student.level }, { course: { level: preview?.level ?? student.level } }] },
           { OR: [{ branchId: null }, { branchId: student.branchId }] },
           { OR: [{ sessionSlot: null }, { sessionSlot: student.sessionSlot }] },
           { visibleToStudents: true },
@@ -108,7 +119,9 @@ export async function GET() {
 
     // Same rule as the Watch shelf (lib/class-batch.ts): something aimed at one
     // batch is for that batch's students only.
-    const visible = records.filter((material) => studentSeesBatch(material.batch, student.admission));
+    const visible = preview
+      ? records
+      : records.filter((material) => studentSeesBatch(material.batch, student.admission));
 
     /**
      * The client reads `fileUrl`; the column is `filePath`. Expose both so the
@@ -151,7 +164,15 @@ export async function GET() {
       return { ...rest, fileUrl, sentBy };
     });
 
-    return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });
+    return NextResponse.json({
+      materials,
+      locked: false,
+      totalPaid,
+      tuitionFee,
+      preview: Boolean(preview),
+      previewLevel: preview?.level ?? null,
+      previewTotal: preview?.total ?? null,
+    });
   } catch (error) {
     console.error("Error fetching materials:", error);
     return NextResponse.json(

@@ -19,6 +19,15 @@ import type { TutorialStep } from "@/lib/tutorials";
  */
 const TARGET_TIMEOUT_MS = 8000;
 
+function targetForViewport(selector: string | undefined, width: number): string | undefined {
+  if (!selector || width >= 1024) return selector;
+  const match = selector.match(/\[data-tour="nav:([^"]+)"\]/);
+  if (!match) return selector;
+  const href = match[1];
+  const tab = href === "/community" ? href : href === "/campus" ? href : "/learn";
+  return `[data-tour="tab:${tab}"]`;
+}
+
 /**
  * The visible half of a tutorial step: Becca, a spotlight on the real DOM
  * target (via the same primitives PhotoUnlockGuide already uses), an arrow
@@ -61,20 +70,21 @@ export default function TutorialOverlay({
     return () => window.removeEventListener("resize", measure);
   }, []);
 
-  const rect = useTargetRect(step.target, step.id);
+  const target = targetForViewport(step.target, viewport.width);
+  const rect = useTargetRect(target, step.id);
   const [targetMissing, setTargetMissing] = useState(false);
   useEffect(() => {
     setTargetMissing(false);
-    if (!step.target) return;
+    if (!target) return;
     const timer = window.setTimeout(() => setTargetMissing(true), TARGET_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [step.id, step.target]);
+  }, [step.id, target]);
 
   const hole = rect && !targetMissing ? inflate(rect, 8) : null;
 
   // Ready = there is something real to show: a target that has been found, a
   // step that has no target at all, or a target we have waited long enough for.
-  const ready = !step.target || Boolean(rect) || targetMissing;
+  const ready = !target || Boolean(rect) || targetMissing;
   useEffect(() => {
     if (ready) onShown?.(step.id);
   }, [ready, step.id, onShown]);

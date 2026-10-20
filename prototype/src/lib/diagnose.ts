@@ -41,6 +41,7 @@ import type { Capability } from "@/lib/admin-roles";
 // The ONE definition of "this payment counts as received money". Re-deriving it here is exactly
 // how the paywall drifted apart in thirteen places.
 import { isReceivedPayment } from "@/lib/payment";
+import { studentMayJoinBatch } from "@/lib/class-batch";
 
 // ---------------------------------------------------------------------------
 // Facts — everything the rules may look at. Plain data; no Prisma, no fetch.
@@ -75,21 +76,83 @@ export type Facts = {
     studentCode: string | null;
     tenantId: string | null;
     level: string;
+    status?: string;
+    branchId?: string | null;
+    tutorId?: string | null;
+    sessionSlot?: string;
+    hybridOnlineSlot?: string | null;
+    classType?: string;
+    deliveryMode?: string;
+    createdAt?: string;
+    classesStartedAt?: string | null;
+    admission?: unknown;
+  };
+  classSetup?: {
+    hybridOnlineSlot: string | null;
+    tutors: Array<{ id: string; status: string; role: "primary" | "online" | "other" }>;
+    upcomingPrivateClasses: Array<{
+      id: string;
+      lecturerId: string | null;
+      scheduledAt: string;
+      durationMinutes: number;
+      deliveryMode: string | null;
+    }>;
+    liveSessions: Array<{
+      id: string;
+      kind: string;
+      title: string;
+      level: string | null;
+      sessionSlot: string | null;
+      batch: string | null;
+      lecturerId: string | null;
+      privateClassId: string | null;
+    }>;
   };
   user: { id: string; email: string; name: string | null; tenantId: string | null };
   access: {
     hasAccess: boolean;
     lockReason: string | null;
     totalPaid: number;
+    /**
+     * What the ledger actually credits to the CURRENT level (see
+     * StudentAccess.currentLevelPaid) — optional only so older call sites /
+     * fixtures that predate this field still type-check; every real caller
+     * now supplies it.
+     */
+    currentLevelPaid?: number;
     tuitionFee: number;
     requiredDeposit: number;
     outstanding: number;
+    currentLevelOutstanding?: number;
     graceUntil: string | null;
     batchLabel: string | null;
+  };
+  levelAlignment?: {
+    currentLevelChargeExists: boolean;
+    currentChargeId: string | null;
+    currentChargeAmount: number | null;
+    currentChargeWaivedAmount?: number | null;
+    currentChargeAllocated?: number;
+    expectedCurrentChargeAmount?: number | null;
+    ongoingEnrolment: {
+      id: string;
+      level: string;
+      tuitionChargeId: string | null;
+      feeSnapshot: number | null;
+      batchMonth: string | null;
+      batchYear: number | null;
+    } | null;
+    expectedBatchMonth: string | null;
+    expectedBatchYear: number | null;
   };
   hasPhoto: boolean;
   verdict: PortalVerdict;
   payments: PaymentFact[];
+  /** Confirmed open tuition on earlier levels, which can hold portal access. */
+  priorLevelArrears: Array<{ chargeId: string; level: string; outstanding: number }>;
+  registrationFeePayments?: Array<{ amount: number; description: string }>;
+  /** Inferred backfill charges that need a staff decision before collection. */
+  unreviewedPriorLevels?: Array<{ level: string; potentialOutstanding: number }>;
   /** What the student's own browser last reported (Phase 2's witness), if it ever has. */
   snapshot: { verdictKey: string; changedAt: string; lastWitnessAt: string | null; lastWitnessRendered: string | null } | null;
   /** Present only when the deep check (which asks Paystack) was run. */
@@ -102,7 +165,11 @@ export type Facts = {
 
 export type Severity = "problem" | "warning" | "info";
 
-export type RepairId = "record_paystack_payment" | "assign_student_code";
+export type RepairId =
+  | "record_paystack_payment"
+  | "assign_student_code"
+  | "sync_tuition_charge"
+  | "reprice_current_tuition";
 
 export type RepairOffer = {
   id: RepairId;
@@ -135,7 +202,7 @@ export type Diagnosis = {
   ruleErrors: Array<{ rule: string; error: string }>;
 };
 
-const naira = (n: number) => `₦${Math.round(n).toLocaleString("en-NG")}`;
+export const naira = (n: number) => `₦${Math.round(n).toLocaleString("en-NG")}`;
 const kobo = (n: number) => naira(n / 100);
 const when = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "never");
 
@@ -255,6 +322,263 @@ const rulePortalLocked: Rule = {
   },
 };
 
+/**
+ * THE "PAID IN FULL BUT LOCKED" DRIFT.
+ *
+ * A student's CURRENT level has no TuitionCharge the ledger can match — most
+ * often because `Student.level` was changed somewhere that never calls
+ * `ensureChargeForLevel` (an ad-hoc level correction, a returning student
+ * re-added by hand). The ledger then has nowhere to allocate their money for
+ * this level: it reads as 0 paid toward it, however much they actually sent,
+ * and src/lib/finance/ledger.ts's FIFO logic faithfully reports the fee as
+ * outstanding. The portal locks them out; the checkout screen (once it also
+ * reads the ledger — see access.ts's `currentLevelPaid`) stops lying about
+ * being settled, but nobody is actually better off until the missing charge
+ * is raised. That is this repair: it does not move any money, it only makes
+ * sure the debit side of the ledger exists so the credit side (their real
+ * payments) has somewhere to land.
+ */
+const ruleMissingLevelCharge: Rule = {
+  id: "missing-level-charge",
+  run(facts) {
+    const { access } = facts;
+    if (access.currentLevelPaid === undefined) return null;
+    if (access.tuitionFee <= 0) return null;
+    if (facts.levelAlignment?.currentLevelChargeExists === true) return null;
+    if (facts.levelAlignment === undefined) {
+      // Compatibility for older test fixtures/callers without charge facts.
+      if (access.totalPaid < access.tuitionFee || access.currentLevelPaid >= access.tuitionFee) return null;
+    }
+
+    return {
+      rule: "missing-level-charge",
+      severity: "problem",
+      title: `${facts.student.level} has no current tuition charge`,
+      detail:
+        `The student's current level is ${facts.student.level}, but there is no TuitionCharge for that level. ` +
+        `The ledger therefore cannot reliably track this level's ${naira(access.tuitionFee)} fee or allocate ` +
+        `payments against it. This commonly follows a level change that did not finish syncing its finance records.`,
+      evidence: [
+        { label: "Current level", value: facts.student.level },
+        { label: "Paid in total", value: naira(access.totalPaid) },
+        { label: `Credited to ${facts.student.level}`, value: naira(access.currentLevelPaid) },
+        { label: `${facts.student.level} tuition fee`, value: naira(access.tuitionFee) },
+        { label: "Current-level charge", value: "missing" },
+        { label: "Portal", value: access.hasAccess ? "open" : `locked (${access.lockReason ?? "unknown"})` },
+      ],
+      offers: [
+        {
+          id: "sync_tuition_charge",
+          label: `Sync ${facts.student.level} tuition records`,
+          preview:
+            `Create the missing ${facts.student.level} charge and align the ongoing enrolment's level and fee snapshot. ` +
+            "No payment is created or changed.",
+          needs: "payments" as Capability,
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
+const ruleCurrentEnrolmentMismatch: Rule = {
+  id: "current-enrolment-mismatch",
+  run(facts) {
+    const alignment = facts.levelAlignment;
+    if (!alignment || facts.student.status !== "active") return null;
+    const enrolment = alignment.ongoingEnrolment;
+    const mismatches = [
+      !enrolment ? "no ongoing enrolment" : null,
+      enrolment && enrolment.level.trim().toUpperCase() !== facts.student.level.trim().toUpperCase()
+        ? `enrolment level is ${enrolment.level}`
+        : null,
+      enrolment &&
+      alignment.currentLevelChargeExists &&
+      (enrolment.tuitionChargeId !== alignment.currentChargeId ||
+        enrolment.feeSnapshot !== alignment.currentChargeAmount)
+        ? "enrolment fee snapshot does not match the current tuition charge"
+        : null,
+      enrolment &&
+      alignment.expectedBatchMonth !== null &&
+      (enrolment.batchMonth !== alignment.expectedBatchMonth ||
+        enrolment.batchYear !== alignment.expectedBatchYear)
+        ? "enrolment batch does not match the student's current batch"
+        : null,
+    ].filter((issue): issue is string => issue !== null);
+    if (mismatches.length === 0) return null;
+
+    return {
+      rule: "current-enrolment-mismatch",
+      severity: "problem",
+      title: "Current level, batch and enrolment records do not match",
+      detail:
+        `The student record says ${facts.student.level}, but the ongoing enrolment or its saved fee/batch details ` +
+        `are out of sync (${mismatches.join("; ")}). This can make the roster, payment desk and student portal ` +
+        "show different current-level information.",
+      evidence: [
+        { label: "Student record level", value: facts.student.level },
+        { label: "Ongoing enrolment level", value: enrolment?.level ?? "missing" },
+        {
+          label: "Ongoing enrolment fee snapshot",
+          value: enrolment?.feeSnapshot === null || enrolment?.feeSnapshot === undefined
+            ? "missing"
+            : naira(enrolment.feeSnapshot),
+        },
+        {
+          label: "Current tuition charge",
+          value: alignment.currentLevelChargeExists
+            ? naira(alignment.currentChargeAmount ?? 0)
+            : "missing",
+        },
+        {
+          label: "Current batch",
+          value: alignment.expectedBatchMonth
+            ? `${alignment.expectedBatchMonth}${alignment.expectedBatchYear ? ` ${alignment.expectedBatchYear}` : ""}`
+            : "not set",
+        },
+      ],
+      offers: [
+        {
+          id: "sync_tuition_charge",
+          label: "Sync current level and enrolment records",
+          preview:
+            "Align the current tuition charge and ongoing enrolment with the student's saved level and batch. " +
+            "No payment is created or changed.",
+          needs: "payments",
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
+const ruleCurrentTuitionUnderpricedByRegistrationFee: Rule = {
+  id: "current-tuition-underpriced-by-registration-fee",
+  run(facts) {
+    const alignment = facts.levelAlignment;
+    const expected = alignment?.expectedCurrentChargeAmount;
+    const actual = alignment?.currentChargeAmount;
+    if (
+      !alignment?.currentLevelChargeExists ||
+      expected === null ||
+      expected === undefined ||
+      actual === null ||
+      actual === undefined ||
+      alignment.currentChargeAllocated !== 0 ||
+      (alignment.currentChargeWaivedAmount ?? 0) !== 0 ||
+      expected - actual !== 5_000
+    ) {
+      return null;
+    }
+
+    return {
+      rule: "current-tuition-underpriced-by-registration-fee",
+      severity: "problem",
+      title: `${facts.student.level} tuition is ₦5,000 below the current price`,
+      detail:
+        `The unpaid ${facts.student.level} charge is ${naira(actual)}, exactly ₦5,000 below the current ` +
+        `price of ${naira(expected)}. A registration fee must never be deducted from returning-student tuition.`,
+      evidence: [
+        { label: "Current level", value: facts.student.level },
+        { label: "Saved tuition charge", value: naira(actual) },
+        { label: "Current price-book tuition", value: naira(expected) },
+        { label: "Applied to this charge", value: naira(alignment.currentChargeAllocated ?? 0) },
+      ],
+      offers: [
+        {
+          id: "reprice_current_tuition",
+          label: `Correct ${facts.student.level} tuition to ${naira(expected)}`,
+          preview:
+            `Correct the unpaid ${facts.student.level} charge from ${naira(actual)} to ${naira(expected)} ` +
+            "and sync the current enrolment. No payment or registration fee will be changed.",
+          needs: "payments",
+          params: {},
+        },
+      ],
+    };
+  },
+};
+
+const ruleRegistrationFeeCountedTowardTuition: Rule = {
+  id: "registration-fee-counted-toward-tuition",
+  run(facts) {
+    const fee = Math.max(0, Math.round(facts.access.tuitionFee));
+    const outstanding = facts.access.currentLevelOutstanding;
+    if (
+      outstanding === undefined ||
+      fee <= outstanding ||
+      (facts.levelAlignment?.currentChargeWaivedAmount ?? 0) > 0
+    ) {
+      return null;
+    }
+    const apparentCredit = fee - outstanding;
+    const registrationCredit = (facts.registrationFeePayments ?? [])
+      .filter((payment) => payment.amount > 0)
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    if (apparentCredit !== registrationCredit || registrationCredit === 0) return null;
+
+    return {
+      rule: "registration-fee-counted-toward-tuition",
+      severity: "problem",
+      title: "A registration fee appears to have reduced the tuition balance",
+      detail:
+        `The ${facts.student.level} balance is ${naira(apparentCredit)} below its ${naira(fee)} tuition fee, ` +
+        "matching registration-fee payments. Registration fees are separate and must not count toward tuition.",
+      evidence: [
+        { label: "Tuition fee", value: naira(fee) },
+        { label: "Current-level balance", value: naira(outstanding) },
+        { label: "Registration-fee payments", value: naira(registrationCredit) },
+      ],
+      offers: [],
+    };
+  },
+};
+
+const rulePriorLevelBalance: Rule = {
+  id: "prior-level-balance",
+  run(facts) {
+    if (facts.access.lockReason !== "previous_level_balance") return null;
+    if (facts.priorLevelArrears.length === 0) return null;
+    const total = facts.priorLevelArrears.reduce((sum, c) => sum + c.outstanding, 0);
+    const levels = [...new Set(facts.priorLevelArrears.map((c) => c.level))].join(", ");
+    return {
+      rule: "prior-level-balance",
+      severity: "problem",
+      title: `Access is held by a confirmed ${naira(total)} balance on an earlier level (${levels})`,
+      detail:
+        "The earlier-level balance is classified as confirmed owing, so the debt-first access rule is applying. " +
+        "If the student did not take that level here or already paid, use Prior-level history review below to correct the record; " +
+        "do not mark a genuine balance as settled just to unlock the portal.",
+      evidence: facts.priorLevelArrears.map((c) => ({ label: c.level, value: naira(c.outstanding) })),
+      offers: [],
+    };
+  },
+};
+
+const ruleUnreviewedPriorLevelHistory: Rule = {
+  id: "unreviewed-prior-level-history",
+  run(facts) {
+    const levels = facts.unreviewedPriorLevels ?? [];
+    if (levels.length === 0) return null;
+    return {
+      rule: "unreviewed-prior-level-history",
+      severity: "warning",
+      title: `Staff history review needed for ${levels.map((row) => row.level).join(", ")}`,
+      detail:
+        "These lower-level charges were inferred during ledger backfill, not verified from this student's actual enrolment history. " +
+        "They are excluded from collectible debt and portal locks until a staff member records whether the level was completed and paid, " +
+        "is genuinely owing, or was not taken at this school.",
+      evidence: levels.map((row) => ({
+        label: row.level,
+        value: row.potentialOutstanding > 0
+          ? `${naira(row.potentialOutstanding)} potential balance · not collectible`
+          : "No confirmed balance · history still needs review",
+      })),
+      offers: [],
+    };
+  },
+};
+
 const ruleMissingCode: Rule = {
   id: "missing-student-code",
   run(facts) {
@@ -333,8 +657,251 @@ const ruleStaleScreen: Rule = {
   },
 };
 
+const VALID_PHYSICAL_SLOTS = new Set(["morning", "afternoon", "evening", "weekend"]);
+const VALID_ONLINE_SLOTS = new Set(["morning", "evening"]);
+
+const ruleClassScheduleSetup: Rule = {
+  id: "class-schedule-setup",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (facts.student.status !== "active" || !setup) return null;
+
+    const problems: string[] = [];
+    if (
+      facts.student.deliveryMode === "hybrid" &&
+      (!setup.hybridOnlineSlot || !VALID_ONLINE_SLOTS.has(setup.hybridOnlineSlot.toLowerCase()))
+    ) {
+      problems.push(
+        setup.hybridOnlineSlot
+          ? `online sitting "${setup.hybridOnlineSlot}" is not a supported hybrid sitting`
+          : "online sitting has not been chosen",
+      );
+    }
+    if (
+      facts.student.classType !== "private" &&
+      !VALID_PHYSICAL_SLOTS.has(String(facts.student.sessionSlot ?? "").toLowerCase())
+    ) {
+      problems.push(`class sitting "${facts.student.sessionSlot ?? ""}" is not recognised`);
+    }
+    if (problems.length === 0) return null;
+
+    return {
+      rule: "class-schedule-setup",
+      severity: "problem",
+      title: "The student's class sitting is missing or invalid",
+      detail:
+        `The saved class schedule cannot reliably identify this student's ${facts.student.deliveryMode ?? "class"} ` +
+        `seat (${problems.join("; ")}). This can leave the portal showing the wrong sitting or make the right live class hard to find. ` +
+        "Correct the student's schedule in the student record, then refresh the diagnosis.",
+      evidence: [
+        { label: "Class type", value: facts.student.classType ?? "unknown" },
+        { label: "Delivery mode", value: facts.student.deliveryMode ?? "unknown" },
+        { label: "Campus/primary sitting", value: facts.student.sessionSlot ?? "missing" },
+        { label: "Hybrid online sitting", value: setup.hybridOnlineSlot ?? "missing" },
+      ],
+      offers: [],
+    };
+  },
+};
+
+const ruleTutorAssignmentHealth: Rule = {
+  id: "class-tutor-assignment",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (facts.student.status !== "active" || !setup) return null;
+
+    const activeTutors = setup.tutors.filter((tutor) => tutor.status === "active" || tutor.status === "probation");
+    const hasUpcomingPrivateTutor = setup.upcomingPrivateClasses.some((session) => session.lecturerId);
+    const needsNamedTutor =
+      facts.student.classType === "private" ||
+      facts.student.deliveryMode === "online" ||
+      facts.student.deliveryMode === "hybrid";
+    if (!needsNamedTutor || activeTutors.length > 0 || (facts.student.classType === "private" && hasUpcomingPrivateTutor)) {
+      return null;
+    }
+
+    const inactive = setup.tutors.length > 0;
+    return {
+      rule: "class-tutor-assignment",
+      severity: "problem",
+      title: inactive ? "The assigned class tutor is inactive" : "No active tutor is assigned to this class",
+      detail: inactive
+        ? "Every tutor linked to this student's online/private class is marked inactive. Reassign an active tutor before relying on live-class access."
+        : "This student's online or private class has no named active tutor. The roster and live-class routing use tutor assignments to identify the correct class.",
+      evidence: [
+        { label: "Class type", value: facts.student.classType ?? "unknown" },
+        { label: "Delivery mode", value: facts.student.deliveryMode ?? "unknown" },
+        {
+          label: "Assigned tutors",
+          value: setup.tutors.length
+            ? setup.tutors.map((tutor) => `${tutor.id} (${tutor.status})`).join(", ")
+            : "none",
+        },
+        {
+          label: "Private sessions with a named tutor",
+          value: String(setup.upcomingPrivateClasses.filter((session) => session.lecturerId).length),
+        },
+      ],
+      offers: [],
+    };
+  },
+};
+
+const rulePrivateClassCoverage: Rule = {
+  id: "private-class-coverage",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (facts.student.status !== "active" || facts.student.classType !== "private" || !setup) return null;
+
+    const now = Date.now();
+    const scheduled = setup.upcomingPrivateClasses.filter((session) => new Date(session.scheduledAt).getTime() >= now);
+    if (scheduled.length === 0) {
+      return {
+        rule: "private-class-coverage",
+        severity: "warning",
+        title: "No upcoming private session is booked",
+        detail:
+          "This student is marked as private, but there is no future scheduled one-to-one session. Their private-class calendar and live notifications depend on a booking being present.",
+        evidence: [
+          { label: "Class type", value: "private" },
+          { label: "Upcoming scheduled sessions", value: "0" },
+          { label: "Assigned tutor", value: setup.tutors.find((tutor) => tutor.role === "primary")?.id ?? "none" },
+        ],
+        offers: [],
+      };
+    }
+
+    const primaryTutorId = setup.tutors.find((tutor) => tutor.role === "primary")?.id;
+    const conflicts = scheduled.filter(
+      (session) => primaryTutorId && session.lecturerId && session.lecturerId !== primaryTutorId,
+    );
+    if (conflicts.length === 0) return null;
+
+    return {
+      rule: "private-class-coverage",
+      severity: "warning",
+      title: "A private booking uses a different tutor than the student record",
+      detail:
+        "The booking has its own tutor, which can be an intentional one-session override. Confirm the difference is expected so the tutor roster, live-room host and student notification all point to the intended person.",
+      evidence: conflicts.map((session) => ({
+        label: `Booking ${session.id} · ${new Date(session.scheduledAt).toLocaleDateString()}`,
+        value: `booking tutor ${session.lecturerId}; student tutor ${primaryTutorId}`,
+      })),
+      offers: [],
+    };
+  },
+};
+
+const rulePrivateLiveSessionMissing: Rule = {
+  id: "private-live-session-missing",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (!setup || facts.student.classType !== "private" || facts.student.status !== "active") return null;
+
+    const now = Date.now();
+    const onlineAppointments = setup.upcomingPrivateClasses.filter((session) => {
+      const startsAt = new Date(session.scheduledAt).getTime();
+      const isOnline = ["online", "hybrid"].includes(
+        String(session.deliveryMode ?? facts.student.deliveryMode ?? "").toLowerCase(),
+      );
+      return isOnline && startsAt <= now && startsAt + session.durationMinutes * 60_000 > now;
+    });
+    const missingRooms = onlineAppointments.filter(
+      (booking) => !setup.liveSessions.some((session) => session.privateClassId === booking.id),
+    );
+    if (missingRooms.length === 0) return null;
+
+    return {
+      rule: "private-live-session-missing",
+      severity: "warning",
+      title: "An online private appointment is in progress without an active live room",
+      detail:
+        "The booking is within its scheduled time, but Mission Control cannot find an active live session attached to it. Check that the tutor started the correct private booking and that the session heartbeat is current.",
+      evidence: missingRooms.map((booking) => ({
+        label: `Private booking ${booking.id}`,
+        value: `${new Date(booking.scheduledAt).toLocaleString()} · ${booking.deliveryMode ?? facts.student.deliveryMode ?? "online"}`,
+      })),
+      offers: [],
+    };
+  },
+};
+
+const ruleLiveTutorRoomMismatch: Rule = {
+  id: "live-tutor-room-mismatch",
+  run(facts) {
+    const setup = facts.classSetup;
+    if (
+      !setup ||
+      setup.liveSessions.length === 0 ||
+      facts.student.classType === "private" ||
+      facts.student.status !== "active"
+    ) {
+      return null;
+    }
+
+    const liveTutorIds = new Set(setup.liveSessions.map((session) => session.lecturerId).filter(Boolean));
+    const assignedLiveTutors = setup.tutors.filter((tutor) => liveTutorIds.has(tutor.id));
+    if (assignedLiveTutors.length === 0) return null;
+
+    const sameLevelSessions = setup.liveSessions.filter(
+      (session) =>
+        session.kind === "cohort" &&
+        session.level?.trim().toLowerCase() === facts.student.level.trim().toLowerCase(),
+    );
+    if (sameLevelSessions.length === 0) return null;
+
+    const expectedSlots = new Set(
+      assignedLiveTutors
+        .map((tutor) =>
+          tutor.role === "online" && facts.student.deliveryMode === "hybrid"
+            ? setup.hybridOnlineSlot
+            : facts.student.sessionSlot,
+        )
+        .filter((slot): slot is string => Boolean(slot))
+        .map((slot) => slot.toLowerCase()),
+    );
+    const hasMatchingRoom = sameLevelSessions.some(
+      (session) =>
+        Boolean(session.sessionSlot) &&
+        expectedSlots.has(session.sessionSlot?.toLowerCase() ?? "") &&
+        studentMayJoinBatch(session.batch, facts.student.admission),
+    );
+    if (hasMatchingRoom) return null;
+
+    return {
+      rule: "live-tutor-room-mismatch",
+      severity: "warning",
+      title: "The assigned tutor is live, but not in this student's sitting or intake",
+      detail:
+        "A live session for this student's level is running under one of their assigned tutors, but its sitting or batch does not match this student's saved class details. It may be another group; confirm the tutor started the intended class before asking the student to join.",
+      evidence: sameLevelSessions.map((session) => ({
+        label: session.title,
+        value: `sitting ${session.sessionSlot ?? "not set"} · intake ${session.batch ?? "not pinned"} · room ${session.id}`,
+      })),
+      offers: [],
+    };
+  },
+};
+
 /** The order is the order findings are computed in; severity decides display order. */
-export const RULES: Rule[] = [ruleUnrecordedPayment, ruleTenantMismatch, ruleStaleScreen, ruleMissingCode, rulePortalLocked];
+export const RULES: Rule[] = [
+  ruleUnrecordedPayment,
+  ruleUnreviewedPriorLevelHistory,
+  rulePriorLevelBalance,
+  ruleTenantMismatch,
+  ruleClassScheduleSetup,
+  ruleTutorAssignmentHealth,
+  rulePrivateClassCoverage,
+  rulePrivateLiveSessionMissing,
+  ruleLiveTutorRoomMismatch,
+  ruleStaleScreen,
+  ruleMissingLevelCharge,
+  ruleCurrentEnrolmentMismatch,
+  ruleCurrentTuitionUnderpricedByRegistrationFee,
+  ruleRegistrationFeeCountedTowardTuition,
+  ruleMissingCode,
+  rulePortalLocked,
+];
 
 const SEVERITY_RANK: Record<Severity, number> = { problem: 0, warning: 1, info: 2 };
 

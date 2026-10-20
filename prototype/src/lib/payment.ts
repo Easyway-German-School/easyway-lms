@@ -45,12 +45,15 @@ export const RECEIVED_PAYMENT_STATUSES: string[] = ["completed", "partial"];
 export function receivedPaymentFilter() {
   return {
     status: { in: [...RECEIVED_PAYMENT_STATUSES] },
-    // NULL-safe exclusion: `{ not: { startsWith } }` alone drops rows with a
-    // NULL description (front-desk cash entries often have none), which would
-    // wrongly un-count real tuition. The explicit `null` arm keeps them.
+    // NULL-safe, case-insensitive exclusion: the explicit `null` arm keeps
+    // genuine tuition payments whose front-desk description is blank.
     OR: [
       { description: null },
-      { description: { not: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } } },
+      {
+        NOT: {
+          description: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" as const },
+        },
+      },
     ],
   };
 }
@@ -85,20 +88,24 @@ export function isValidPaymentStatus(status: unknown): status is TransactionStat
  * has an LMS account, then mirrored into the LMS as a `completed` Payment so the
  * portal never asks for it again (`recordRegistrationFeeFromRef`, and the
  * `registration` branch of `persistPaystackTransaction` — both in
- * src/lib/paystack-verify.ts). Every one of those writers sets `description` to
- * exactly `Registration fee for <pathway>`.
+ * src/lib/paystack-verify.ts). Those writers set `description` to
+ * `Registration fee for <pathway>`.
  *
  * That row must never net down a tuition balance, move the "paid in full" line,
  * or count toward the 60% deposit gate. Before this guard existed, a
  * ref-signup student showed ₦145,000 outstanding on a ₦150,000 fee and ₦5,000
  * "toward the deposit" the moment they signed up. So every sum of what a
  * student has paid TOWARD TUITION excludes these rows, via the `where` fragment
- * or the in-memory predicate below.
+ * or the in-memory predicate below. Both exclude the phrase regardless of
+ * case or surrounding text so old/manual variants cannot count as tuition.
  */
 export const REGISTRATION_PAYMENT_DESCRIPTION_PREFIX = "Registration fee";
 
 export function isRegistrationFeePayment(description?: string | null): boolean {
-  return String(description ?? "").startsWith(REGISTRATION_PAYMENT_DESCRIPTION_PREFIX);
+  return String(description ?? "")
+    .trim()
+    .toLocaleLowerCase()
+    .includes(REGISTRATION_PAYMENT_DESCRIPTION_PREFIX.toLocaleLowerCase());
 }
 
 /**
@@ -111,7 +118,11 @@ export function excludeRegistrationFeeWhere() {
   return {
     OR: [
       { description: null },
-      { description: { not: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } } },
+      {
+        NOT: {
+          description: { contains: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX, mode: "insensitive" as const },
+        },
+      },
     ],
   };
 }

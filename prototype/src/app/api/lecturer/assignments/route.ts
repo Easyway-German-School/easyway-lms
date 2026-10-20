@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
         kind: KIND.assignmentDue,
         severity: "info" as const,
         title: kind === "quiz" ? "New quiz to take" : "New assignment to submit",
-        link: "/assignment",
+        link: `/assignment?id=${created.id}`,
         dedupeKey: `assignment-created:${created.id}`,
         push: true,
       };
