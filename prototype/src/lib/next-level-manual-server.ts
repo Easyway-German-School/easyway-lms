@@ -5,8 +5,10 @@ import { issueCertificateForStudent } from "@/lib/certificates";
 import { promoteStudents } from "@/lib/promotion";
 import { KIND, notify } from "@/lib/notify";
 import { normaliseDeliveryMode } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isTravelPackagePathway, requiredDepositFor, travelPackagePrice, tuitionFeeFor } from "@/lib/payment";
 import { buildInvite } from "@/lib/next-level-invite";
+import { loadStudentLedger } from "@/lib/tuition-charges";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import {
   INVITE_KEY_PREFIX,
   REMIND_AFTER_DAYS,
@@ -44,6 +46,8 @@ export type MoveUpPreview = {
   level: string;
   targetLevel: string | null;
   branchName: string | null;
+  travelPackage: boolean;
+  travelPackageBalance: number;
   tuitionFee: number;
   requiredDeposit: number;
   priorOwed: number;
@@ -149,11 +153,18 @@ export async function previewMoveUp(studentId: string): Promise<MoveUpPreview | 
   const target = nextLevelAfter(student.level);
   const admission = asRecord(student.admission);
   const branchName = student.branch?.name ?? null;
+  const travelPackage = isTravelPackagePathway(student.pathway);
 
   let priorOwed = 0;
+  let travelPackageBalance = 0;
   let opensLabel: string | null = null;
   if (target) {
-    priorOwed = (await seatAndOwed(student.id, target)).priorOwed;
+    const money = await seatAndOwed(student.id, target);
+    priorOwed = travelPackage ? 0 : money.priorOwed;
+    if (travelPackage) {
+      const ledger = await loadStudentLedger(student.id);
+      travelPackageBalance = Math.max(0, travelPackagePrice() - ledger.lifetimePaid);
+    }
     // The real opening day for THIS student's level (per-level overrides included).
     const overrides = await readIntakeStartDayOverrides(student.tenantId ?? null);
     opensLabel = opensFor(student, { state: "invited", finishedLevel: student.level, targetLevel: target }, overrides, new Date()).opensLabel;
@@ -167,8 +178,12 @@ export async function previewMoveUp(studentId: string): Promise<MoveUpPreview | 
     level: student.level,
     targetLevel: target,
     branchName,
+    travelPackage,
+    travelPackageBalance,
     tuitionFee: target ? tuitionFeeFor({ level: target, branch: branchName, pathway: student.pathway }) : 0,
-    requiredDeposit: target ? requiredDepositFor({ level: target, branch: branchName }) : 0,
+    requiredDeposit: target
+      ? requiredDepositFor({ level: target, branch: branchName, pathway: student.pathway })
+      : 0,
     priorOwed,
     opensLabel,
     current: {
@@ -185,6 +200,9 @@ export async function previewMoveUp(studentId: string): Promise<MoveUpPreview | 
 export type ApplyMoveUpInput = {
   mode: "invite" | "move";
   details?: unknown;
+  byUserId: string;
+  /** Required explanation when an admin moves a Travel Package student with a remaining package balance. */
+  travelPackageApproval?: string;
   /** Send Becca's message (bell, push, email). The pop shows on the dashboard regardless. */
   notify: boolean;
 };
@@ -193,6 +211,7 @@ export type ApplyMoveUpResult =
   | {
       ok: true;
       moved: boolean;
+      travelPackageBalanceApproved?: boolean;
       certificate: "issued" | "pending" | "not-applicable";
       notified: boolean;
       targetLevel: string;
@@ -205,6 +224,44 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
   if (!before) return { ok: false, reason: "Student not found" };
   const target = nextLevelAfter(before.level);
   if (!target) return { ok: false, reason: `${before.level} is the top of the ladder — there is no next level` };
+
+  let travelPackageBalanceApproved = false;
+  let feeOverride: { by: string; reason: string } | undefined;
+  if (input.mode === "move") {
+    const travelPackage = isTravelPackagePathway(before.pathway);
+    if (travelPackage) {
+      const reason = String(input.travelPackageApproval ?? "").trim();
+      const beforeReconcile = await loadStudentLedger(studentId, now);
+      const estimatedBalance = Math.max(0, travelPackagePrice() - beforeReconcile.lifetimePaid);
+      if (estimatedBalance > 0 && reason.length < 10) {
+        return {
+          ok: false,
+          reason: "Explain why this Travel Package balance should not block the move-up (at least 10 characters).",
+        };
+      }
+      if (estimatedBalance > 0) {
+        travelPackageBalanceApproved = true;
+        feeOverride = {
+          by: input.byUserId,
+          reason: `Travel Package level coverage approved: ${reason}`,
+        };
+      }
+      await reconcileTravelPackageStudent({ studentId });
+    }
+    const ledger = await loadStudentLedger(studentId, now);
+    const priorOwedLines = ledger.lines.filter(
+      (line) => line.outstanding > 0 && !line.legacyArrears && line.level !== target,
+    );
+    const priorOwed = priorOwedLines.reduce((sum, line) => sum + line.outstanding, 0);
+
+    if (priorOwed > 0 && !feeOverride) {
+      const owedOn = priorOwedLines[0]?.level ?? before.level;
+      return {
+        ok: false,
+        reason: `Owes ₦${priorOwed.toLocaleString("en-NG")} on ${owedOn} — settle the balance before moving them up.`,
+      };
+    }
+  }
 
   const details = cleanDetails(input.details);
   let certificate: "issued" | "pending" | "not-applicable" = "not-applicable";
@@ -221,7 +278,11 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
     );
     certificate = cert.issued ? "issued" : "pending";
 
-    const promotion = await promoteStudents([studentId], { now, placement: "next-intake" });
+    const promotion = await promoteStudents([studentId], {
+      now,
+      placement: "next-intake",
+      ...(feeOverride ? { override: feeOverride } : {}),
+    });
     if (promotion.skipped.length > 0) {
       // The level IS signed off by now; say so, and why the move did not happen
       // (typically an unpaid balance on a level they were already in).
@@ -297,6 +358,7 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
   return {
     ok: true,
     moved,
+    travelPackageBalanceApproved,
     certificate,
     notified,
     targetLevel: target,
