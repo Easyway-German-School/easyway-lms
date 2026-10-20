@@ -32,7 +32,6 @@ import {
   type RepairId,
 } from "@/lib/diagnose";
 import { buildLedger } from "@/lib/finance/ledger";
-import { isTravelPackagePathway } from "@/lib/payment";
 import { guardedFetch, isCircuitOpen } from "@/lib/guarded-fetch";
 import { LIVE_STALE_AFTER_MS } from "@/lib/live-presence";
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
