@@ -262,7 +262,8 @@ export async function promoteStudents(
       continue;
     }
 
-    if (isTravelPackagePathway(student.pathway)) {
+    const travelPackage = isTravelPackagePathway(student.pathway);
+    if (travelPackage) {
       try {
         await reconcileTravelPackageStudent({ studentId });
       } catch (error) {
@@ -276,13 +277,26 @@ export async function promoteStudents(
     // been in — not on the normal post-deposit balance of the level they are
     // moving into (its charge, if the next-level checkout created it early, is
     // the balance the 30-day lock covers, not a promotion blocker). Legacy
-    // arrears never block.
+    // arrears never block. Travel Package is a flat, pay-as-you-go price: its
+    // one whole-programme charge never blocks progression either — it carries
+    // forward with the student automatically instead of needing an override.
     const ledger = await loadStudentLedger(studentId, now);
     const priorOwedLines = ledger.lines.filter(
       (line) => line.outstanding > 0 && !line.legacyArrears && line.level !== next,
     );
     const priorOwed = priorOwedLines.reduce((sum, line) => sum + line.outstanding, 0);
-    if (priorOwed > 0) {
+    if (priorOwed > 0 && travelPackage) {
+      await writeAudit(unguardedPrisma, {
+        action: "promotion.travel_package_carry_forward",
+        model: "Student",
+        recordId: studentId,
+        severity: "notice",
+        summary: `Promoted ${student.level} → ${next} with ${naira(priorOwed)} still owed on the Travel Package — carried forward automatically, pay-as-you-go.`,
+        after: { fromLevel: student.level, toLevel: next, priorOwed },
+      }).catch((auditError) => {
+        console.error("promotion.travel_package_carry_forward audit write failed", { studentId, auditError });
+      });
+    } else if (priorOwed > 0) {
       if (!override) {
         const owedOn = priorOwedLines[0]?.level ?? student.level;
         result.skipped.push({

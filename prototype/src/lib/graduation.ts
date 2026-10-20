@@ -22,6 +22,9 @@ import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 /** How far ahead of a batch's last day the office may already graduate it. */
 export const GRADUATE_LEAD_DAYS = 14;
 
+/** Past this day of the month, a late move-up rolls to next month instead of the current one. */
+export const LATE_PLACEMENT_CUTOFF_DAY = 20;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type CohortTiming = {
@@ -121,6 +124,13 @@ export function nextPlacement(input: {
   const today = instantToZonedParts(now);
   const currentAbsolute = today.year * 12 + (today.month - 1);
   let absolute = Math.max(window.absolute + sessionDurationMonths(input.sessionSlot), currentAbsolute);
+  // The "late graduation lands in the current month" fallback above is only
+  // useful while there is meaningfully more of that month left to teach. Past
+  // the 20th there are barely one or two classes before it closes anyway, so
+  // a move that late rolls straight to next month instead.
+  if (absolute === currentAbsolute && today.day >= LATE_PLACEMENT_CUTOFF_DAY) {
+    absolute += 1;
+  }
   if (input.notBefore) {
     const earliest = instantToZonedParts(input.notBefore);
     absolute = Math.max(absolute, earliest.year * 12 + (earliest.month - 1));

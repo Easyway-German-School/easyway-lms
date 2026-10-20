@@ -4,6 +4,7 @@ import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
 import { applyMoveUp, previewMoveUp } from "@/lib/next-level-manual-server";
+import { isTravelPackagePathway } from "@/lib/payment";
 
 /**
  * The Graduate dialog on the Students table.
@@ -60,11 +61,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const body = await request.json().catch(() => ({}));
   const mode = body?.mode === "move" ? "move" : body?.mode === "invite" ? "invite" : null;
   if (!mode) return NextResponse.json({ error: "Choose invite or move" }, { status: 400 });
-  const travelPackageApproval =
-    typeof body?.travelPackageApproval === "string" ? body.travelPackageApproval.trim() : "";
-  if (mode === "move" && travelPackageApproval) {
-    const financeGate = await requireCapability("payments");
-    if (!financeGate.ok) return financeGate.response;
+
+  // Travel Package pays as it goes: the flat package balance never needs a typed
+  // justification to carry forward across a move-up, but it is still money, so
+  // moving one of these students stays restricted to whoever can touch payments.
+  if (mode === "move") {
+    const student = await prisma.student.findUnique({ where: { id }, select: { pathway: true } });
+    if (student && isTravelPackagePathway(student.pathway)) {
+      const financeGate = await requireCapability("payments");
+      if (!financeGate.ok) return financeGate.response;
+    }
   }
 
   try {
@@ -72,8 +78,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       mode,
       details: body?.details,
       byUserId: gate.session.user.id as string,
-      travelPackageApproval:
-        typeof body?.travelPackageApproval === "string" ? body.travelPackageApproval : undefined,
       notify: body?.notify !== false,
     });
     if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
@@ -86,7 +90,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       summary:
         mode === "move"
           ? `Moved up to ${result.targetLevel} by hand from the Students table${
-              result.travelPackageBalanceApproved ? ` — Travel Package coverage approved: ${travelPackageApproval}` : ""
+              result.travelPackageBalanceApproved ? ` — Travel Package balance carried forward automatically` : ""
             }`
           : `Invited to ${result.targetLevel} by hand from the Students table`,
     }).catch((error) => console.error("next-level audit write failed", error));
