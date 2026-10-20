@@ -201,8 +201,6 @@ export type ApplyMoveUpInput = {
   mode: "invite" | "move";
   details?: unknown;
   byUserId: string;
-  /** Required explanation when an admin moves a Travel Package student with a remaining package balance. */
-  travelPackageApproval?: string;
   /** Send Becca's message (bell, push, email). The pop shows on the dashboard regardless. */
   notify: boolean;
 };
@@ -226,26 +224,9 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
   if (!target) return { ok: false, reason: `${before.level} is the top of the ladder — there is no next level` };
 
   let travelPackageBalanceApproved = false;
-  let feeOverride: { by: string; reason: string } | undefined;
   if (input.mode === "move") {
     const travelPackage = isTravelPackagePathway(before.pathway);
     if (travelPackage) {
-      const reason = String(input.travelPackageApproval ?? "").trim();
-      const beforeReconcile = await loadStudentLedger(studentId, now);
-      const estimatedBalance = Math.max(0, travelPackagePrice() - beforeReconcile.lifetimePaid);
-      if (estimatedBalance > 0 && reason.length < 10) {
-        return {
-          ok: false,
-          reason: "Explain why this Travel Package balance should not block the move-up (at least 10 characters).",
-        };
-      }
-      if (estimatedBalance > 0) {
-        travelPackageBalanceApproved = true;
-        feeOverride = {
-          by: input.byUserId,
-          reason: `Travel Package level coverage approved: ${reason}`,
-        };
-      }
       await reconcileTravelPackageStudent({ studentId });
     }
     const ledger = await loadStudentLedger(studentId, now);
@@ -254,12 +235,17 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
     );
     const priorOwed = priorOwedLines.reduce((sum, line) => sum + line.outstanding, 0);
 
-    if (priorOwed > 0 && !feeOverride) {
-      const owedOn = priorOwedLines[0]?.level ?? before.level;
-      return {
-        ok: false,
-        reason: `Owes ₦${priorOwed.toLocaleString("en-NG")} on ${owedOn} — settle the balance before moving them up.`,
-      };
+    if (priorOwed > 0) {
+      if (!travelPackage) {
+        const owedOn = priorOwedLines[0]?.level ?? before.level;
+        return {
+          ok: false,
+          reason: `Owes ₦${priorOwed.toLocaleString("en-NG")} on ${owedOn} — settle the balance before moving them up.`,
+        };
+      }
+      // Travel Package pays as it goes: the flat package balance carries
+      // forward with the student instead of blocking their progression.
+      travelPackageBalanceApproved = true;
     }
   }
 
@@ -281,7 +267,6 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
     const promotion = await promoteStudents([studentId], {
       now,
       placement: "next-intake",
-      ...(feeOverride ? { override: feeOverride } : {}),
     });
     if (promotion.skipped.length > 0) {
       // The level IS signed off by now; say so, and why the move did not happen

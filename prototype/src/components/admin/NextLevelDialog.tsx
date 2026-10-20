@@ -49,8 +49,6 @@ export default function NextLevelDialog({
   const [mode, setMode] = useState<Mode>("move");
   const [notifyStudent, setNotifyStudent] = useState(true);
   const [form, setForm] = useState({ sessionSlot: "morning", deliveryMode: "physical", phone: "", parentPhone: "", note: "" });
-  const [packageBalanceConfirmed, setPackageBalanceConfirmed] = useState(false);
-  const [packageBalanceReason, setPackageBalanceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
 
@@ -85,7 +83,6 @@ export default function NextLevelDialog({
           mode,
           notify: notifyStudent,
           details: form,
-          travelPackageApproval: packageBalanceConfirmed ? packageBalanceReason : "",
         }),
       });
       const json = await res.json();
@@ -163,32 +160,12 @@ export default function NextLevelDialog({
               </p>
             )}
             {preview.travelPackage && preview.travelPackageBalance > 0 && (
-              <div className="mt-2 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                 <p>
                   {naira(preview.travelPackageBalance)} remains on the whole-program Travel Package. It is not a separate
-                  {` ${preview.level} `}tuition charge, so the office can approve a move without clearing it.
+                  {` ${preview.level} `}tuition charge, so it carries forward with them to {target} automatically — the
+                  move is not blocked on it.
                 </p>
-                <label className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={packageBalanceConfirmed}
-                    onChange={(event) => setPackageBalanceConfirmed(event.target.checked)}
-                    className="mt-1"
-                    disabled={mode !== "move"}
-                  />
-                  <span>I confirm the package payment covers this completed level and approve moving them up with the remaining package balance.</span>
-                </label>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide">Reason for approval</label>
-                  <textarea
-                    className={input}
-                    rows={2}
-                    value={packageBalanceReason}
-                    onChange={(event) => setPackageBalanceReason(event.target.value)}
-                    placeholder="Record the payment/coverage decision for the audit trail"
-                    disabled={mode !== "move" || !packageBalanceConfirmed}
-                  />
-                </div>
               </div>
             )}
 
@@ -259,12 +236,6 @@ export default function NextLevelDialog({
               </button>
               <button
                 onClick={() => setStep("review")}
-                disabled={
-                  mode === "move" &&
-                  preview.travelPackage &&
-                  preview.travelPackageBalance > 0 &&
-                  (!packageBalanceConfirmed || packageBalanceReason.trim().length < 10)
-                }
                 className="rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
               >
                 Review
@@ -290,9 +261,9 @@ export default function NextLevelDialog({
                       ? ` Their existing Travel Package charge follows them; the ${naira(preview.travelPackageBalance)} package balance stays on the account.`
                       : ` Their ${target} fee (${naira(preview.tuitionFee)}) is raised.`} Their portal access follows the applicable deposit and intake-opening rules.
                   </li>
-                  {packageBalanceConfirmed && preview.travelPackageBalance > 0 ? (
+                  {preview.travelPackageBalance > 0 ? (
                     <li>
-                      Travel Package coverage approved: <strong>{packageBalanceReason.trim()}</strong>
+                      {naira(preview.travelPackageBalance)} Travel Package balance carries forward automatically.
                     </li>
                   ) : null}
                 </>
@@ -321,13 +292,7 @@ export default function NextLevelDialog({
               </button>
               <button
                 onClick={confirm}
-                disabled={
-                  busy ||
-                  (mode === "move" &&
-                    preview.travelPackage &&
-                    preview.travelPackageBalance > 0 &&
-                    (!packageBalanceConfirmed || packageBalanceReason.trim().length < 10))
-                }
+                disabled={busy}
                 className="rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-bold text-white disabled:opacity-60"
               >
                 {busy ? "Working…" : mode === "move" ? `Yes, move up to ${target}` : `Yes, invite to ${target}`}
