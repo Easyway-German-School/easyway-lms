@@ -98,6 +98,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/settings", capability: "staff" },
 
   { prefix: "/admin/security", capability: "security" },
+  { prefix: "/admin/db-infra", capability: "security" },
 
   // The staff file store. Its own capability, hand-granted for now — see
   // docs/WORK_DRIVE.md. The API routes under /api/admin/work-drive enforce the
