@@ -286,6 +286,16 @@ function contentSecurityPolicy(): string {
     process.env.RECORDING_PUBLIC_BASE_URL,
     process.env.STORAGE_S3_ENDPOINT,
   ].filter(Boolean) as string[];
+  const embeddedMedia = [
+    "https://www.youtube-nocookie.com",
+    "https://www.youtube.com",
+    "https://player.vimeo.com",
+    "https://drive.google.com",
+    "https://docs.google.com",
+    "https://www.loom.com",
+    "https://w.soundcloud.com",
+    "https://open.spotify.com",
+  ];
 
   const livekit = liveKitConnectSrc();
 
@@ -297,10 +307,12 @@ function contentSecurityPolicy(): string {
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://checkout.paystack.com",
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${media.join(" ")}`,
-    `media-src 'self' blob: ${media.join(" ")}`,
+    // Tutors can link directly to hosted video/audio files as well as upload
+    // them, so permit HTTPS media while keeping scripts and connections scoped.
+    `media-src 'self' blob: https: ${media.join(" ")}`,
     "font-src 'self' data:",
     `connect-src 'self' https://api.paystack.co ${livekit.join(" ")} ${media.join(" ")}`,
-    "frame-src 'self' https://checkout.paystack.com",
+    `frame-src 'self' https://checkout.paystack.com ${embeddedMedia.join(" ")}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

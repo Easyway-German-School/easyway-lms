@@ -279,7 +279,9 @@ everybody at once.
 2. Watch the browser console for `Content-Security-Policy-Report-Only`
    violations.
 3. Add any legitimate origin to `contentSecurityPolicy()` in
-   [`src/middleware.ts`](../src/middleware.ts).
+   [`src/proxy.ts`](../src/proxy.ts). The frame allowlist includes the
+   providers supported by `src/lib/media-embed.ts`; direct hosted video/audio
+   files need HTTPS in `media-src`.
 4. When a full pass produces no violations, set `CSP_ENFORCE=true` in Vercel.
 
 ---
