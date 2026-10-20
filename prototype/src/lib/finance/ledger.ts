@@ -236,13 +236,16 @@ export function buildLedger(
             line.historyStatus !== "unreviewed" && line.level.toUpperCase() === level ? [index] : [],
           )
         : [];
+      const hasChargeAtLevel = level
+        ? lines.some((line) => line.level.toUpperCase() === level)
+        : false;
       const afterLevel = allocate(matchingIndices, amount);
       // A level-tagged payment cannot be reconciled against a different level
       // just because its charge row is missing (common on older returning
       // student records). Keep that amount as credit until the intended charge
-      // exists; payments with a matching charge still flow FIFO after settling
-      // their intended level.
-      if (!level || matchingIndices.length > 0) allocate(fifoIndices, afterLevel);
+      // exists. If only an unreviewed row matches, route the payment to a
+      // recognized charge rather than allocating it to that unreviewed row.
+      if (!level || matchingIndices.length > 0 || hasChargeAtLevel) allocate(fifoIndices, afterLevel);
     }
   }
   remaining = allocate(fifoIndices, remaining);
