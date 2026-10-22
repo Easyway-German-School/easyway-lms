@@ -41,7 +41,7 @@ type Code = {
   code: string;
   label: string | null;
   status: "active" | "paused" | "revoked";
-  partnerType: "influencer" | "travel_agent" | "other" | null;
+  partnerType: "influencer" | "travel_agent" | "ambassador" | "other" | null;
   discountPercent: number | null;
   discountFlat: number | null;
   commissionPercent: number | null;
@@ -62,6 +62,7 @@ const firstName = (name: string | null) => (name ? name.trim().split(/\s+/)[0] :
 const PARTNER_TYPE_LABEL: Record<string, string> = {
   influencer: "Influencer",
   travel_agent: "Travel agent",
+  ambassador: "Easyway ambassador",
   other: "Partner",
 };
 
@@ -434,6 +435,7 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
                       >
                         <option value="influencer">Influencer</option>
                         <option value="travel_agent">Travel agent</option>
+                        <option value="ambassador">Easyway ambassador</option>
                         <option value="other">Other partner</option>
                       </select>
                       <button

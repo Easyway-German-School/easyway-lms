@@ -70,6 +70,12 @@ const ROLE_SUMMARY: Record<string, string> = {
   // payment they made so their classes open. No fee book, no reports, no setup.
   support: "Student help desk: student files, enquiries, attendance, and recording a payment to unlock classes. No fee book.",
   growth: "The sales pipeline, daily task queue, partners and fund requests. Pick a job below for the right dashboard.",
+  // An external partner's own view of their referral code and earnings —
+  // influencers, travel agents and Easyway ambassadors all use this same
+  // restricted role. Create them from /admin/influencer-program instead of
+  // here: that page links the account to a promo code in one step, which
+  // this form alone cannot do.
+  influencer: "An external partner's own dashboard — their code, sign-ups and earnings. No student records, no other partner's figures. Add partners from Growth Desk → Influencer Program, not here.",
 };
 
 export default function AdminStaffPage() {

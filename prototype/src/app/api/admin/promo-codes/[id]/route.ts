@@ -51,8 +51,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if ("partnerType" in body) {
     const partnerType = (body as Record<string, unknown>).partnerType;
-    if (partnerType !== "influencer" && partnerType !== "travel_agent" && partnerType !== "other") {
-      return NextResponse.json({ error: "partnerType must be influencer, travel_agent or other" }, { status: 400 });
+    if (partnerType !== "influencer" && partnerType !== "travel_agent" && partnerType !== "ambassador" && partnerType !== "other") {
+      return NextResponse.json({ error: "partnerType must be influencer, travel_agent, ambassador or other" }, { status: 400 });
     }
     data.partnerType = partnerType;
   }

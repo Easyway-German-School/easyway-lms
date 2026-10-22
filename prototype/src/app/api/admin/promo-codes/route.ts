@@ -37,7 +37,7 @@ export async function GET() {
   return NextResponse.json({ codes });
 }
 
-const PARTNER_TYPES = ["influencer", "travel_agent", "other"] as const;
+const PARTNER_TYPES = ["influencer", "travel_agent", "ambassador", "other"] as const;
 
 /**
  * Add a partner to the Influencer Program: one submission creates BOTH the
