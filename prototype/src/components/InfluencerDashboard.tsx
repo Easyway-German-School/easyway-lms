@@ -196,15 +196,19 @@ function HelpCard() {
   );
 }
 
-function GrowthCard() {
+function GrowthCard({ isAmbassador }: { isAmbassador: boolean }) {
   return (
     <div className="rounded-xl border border-[var(--accent)]/30 bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-4">
-      <p className="text-sm font-bold">Grow your side income with EasyWay</p>
+      <p className="text-sm font-bold">{isAmbassador ? "Spread the word for EasyWay" : "Grow your side income with EasyWay"}</p>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--muted)]">
         <li>Put your link where people are already deciding — your bio, your WhatsApp status, pinned on your page.</li>
         <li>Lead with the outcome, not the course: "I'm learning German to work in Germany" beats "German classes."</li>
         <li>A short story from one of your sign-ups (their progress, their excitement) converts better than a flyer.</li>
-        <li>Every new sign-up compounds — the students you bring in today are commission on repeat for as long as they study here.</li>
+        {isAmbassador ? (
+          <li>Every sign-up with your link is counted here — the school sees exactly who you've brought in.</li>
+        ) : (
+          <li>Every new sign-up compounds — the students you bring in today are commission on repeat for as long as they study here.</li>
+        )}
       </ul>
     </div>
   );
@@ -263,6 +267,11 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
       creditedAmount: payouts.filter((p) => p.status === "credited").reduce((s, p) => s + p.amount, 0),
     };
   }, [codes]);
+
+  // Ambassadors are unpaid: no commission, no bank details, no payout
+  // tracking — just their link and who signed up with it. A partner mixing
+  // an ambassador code with a paid one still gets the full money view.
+  const allAmbassador = !!codes?.length && codes.every((c) => (c.partnerType ?? "influencer") === "ambassador");
 
   async function copyLink(code: string) {
     const link = `${window.location.origin}/auth/signup?promo=${encodeURIComponent(code)}`;
@@ -361,7 +370,9 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
           <p className="mt-1 text-sm text-[var(--muted)]">
             {mode === "admin"
               ? `Viewing as the admin desk — ${codes?.[0]?.ownerUser.email ?? ""}`
-              : "Your code, who signed up with it, and what you've earned."}
+              : allAmbassador
+                ? "Your code, and who signed up with it."
+                : "Your code, who signed up with it, and what you've earned."}
           </p>
         </div>
         <button
@@ -378,13 +389,16 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
       {notice ? <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p> : null}
 
-      <section className="grid gap-3 sm:grid-cols-4">
-        {[
-          { label: "Sign-ups", value: totals.signups.toLocaleString() },
-          { label: "Pending to pay", value: totals.pendingToPay.toLocaleString() },
-          { label: "Paid", value: totals.paid.toLocaleString() },
-          { label: "Credit earned (paid only)", value: naira(totals.pendingAmount + totals.approvedAmount + totals.creditedAmount) },
-        ].map((m) => (
+      <section className={allAmbassador ? "grid gap-3 sm:max-w-xs" : "grid gap-3 sm:grid-cols-4"}>
+        {(allAmbassador
+          ? [{ label: "Sign-ups", value: totals.signups.toLocaleString() }]
+          : [
+              { label: "Sign-ups", value: totals.signups.toLocaleString() },
+              { label: "Pending to pay", value: totals.pendingToPay.toLocaleString() },
+              { label: "Paid", value: totals.paid.toLocaleString() },
+              { label: "Credit earned (paid only)", value: naira(totals.pendingAmount + totals.approvedAmount + totals.creditedAmount) },
+            ]
+        ).map((m) => (
           <div key={m.label} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <p className="text-sm text-[var(--muted)]">{m.label}</p>
             <p className="mt-1 text-2xl font-bold tabular-nums">{loading ? "…" : m.value}</p>
@@ -400,6 +414,7 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
         </p>
       ) : (
         codes.map((code) => {
+          const isAmbassador = (code.partnerType ?? "influencer") === "ambassador";
           const pending = code.redemptions.filter((r) => r.payouts.length === 0);
           const paid = code.redemptions.filter((r) => r.payouts.length > 0);
           return (
@@ -451,97 +466,126 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              {isAmbassador ? (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
                   <p className="text-sm font-bold">For your audience</p>
                   <p className="mt-1 text-sm text-[var(--muted)]">{discountLabel(code)}</p>
                 </div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-                  <p className="text-sm font-bold">For you</p>
-                  <p className="mt-1 text-sm text-[var(--muted)]">{commissionLabel(code)}</p>
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                      <p className="text-sm font-bold">For your audience</p>
+                      <p className="mt-1 text-sm text-[var(--muted)]">{discountLabel(code)}</p>
+                    </div>
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                      <p className="text-sm font-bold">For you</p>
+                      <p className="mt-1 text-sm text-[var(--muted)]">{commissionLabel(code)}</p>
+                    </div>
+                  </div>
 
-              <BankDetailsCard code={code} editable onSave={(v) => saveBankDetails(code.id, v)} />
+                  <BankDetailsCard code={code} editable onSave={(v) => saveBankDetails(code.id, v)} />
+                </>
+              )}
 
-              <div>
-                <h3 className="text-sm font-bold text-amber-700">Pending — waiting to pay ({pending.length})</h3>
-                {!pending.length ? (
-                  <p className="py-3 text-sm text-[var(--muted)]">Nobody waiting right now.</p>
-                ) : (
-                  <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
-                    {pending.map((r) => (
-                      <li key={r.id} className="flex items-center justify-between gap-2 py-2">
-                        <span>{mode === "admin" ? r.redeemedByStudent.user.name || "Student" : firstName(r.redeemedByStudent.user.name)}</span>
-                        <span className="text-xs text-[var(--muted)]">signed up {date(r.createdAt)} — no credit yet</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div>
-                <h3 className="text-sm font-bold text-emerald-700">Paid ({paid.length})</h3>
-                {!paid.length ? (
-                  <p className="py-3 text-sm text-[var(--muted)]">Nobody's paid yet — credit only counts once they do.</p>
-                ) : (
-                  <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
-                    {paid.map((r) => {
-                      const payout = r.payouts[0];
-                      return (
-                        <li key={r.id} className="space-y-1.5 py-2.5">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="font-semibold">{mode === "admin" ? r.redeemedByStudent.user.name || "Student" : firstName(r.redeemedByStudent.user.name)}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold tabular-nums">{naira(payout.amount)}</span>
-                              <span
-                                className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${
-                                  payout.status === "credited" ? "bg-emerald-100 text-emerald-900" : payout.status === "approved" ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"
-                                }`}
-                              >
-                                {payout.status}
-                              </span>
-                              {mode === "admin" && payout.status === "pending" ? (
-                                <button type="button" disabled={busyId === payout.id} onClick={() => void approvePayout(payout.id)} className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-bold disabled:opacity-50">
-                                  Approve
-                                </button>
-                              ) : null}
-                              {mode === "admin" && payout.status === "approved" ? (
-                                <button
-                                  type="button"
-                                  disabled={busyId === payout.id}
-                                  onClick={() => {
-                                    setCreditingId(creditingId === payout.id ? null : payout.id);
-                                    setCreditNote("");
-                                  }}
-                                  className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
-                                >
-                                  Credit
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
-                          {mode === "admin" && creditingId === payout.id ? (
-                            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-alt)] p-3">
-                              <input
-                                value={creditNote}
-                                onChange={(e) => setCreditNote(e.target.value)}
-                                placeholder="How was this paid out, e.g. bank transfer 12 Oct"
-                                className="min-w-[14rem] flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
-                              />
-                              <button type="button" disabled={busyId === payout.id} onClick={() => void creditPayout(payout.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50">
-                                <CheckIcon className="h-4 w-4" />
-                                Mark credited
-                              </button>
-                            </div>
-                          ) : null}
-                          {payout.creditedNote ? <p className="text-xs text-[var(--muted)]">{payout.creditedNote}</p> : null}
+              {isAmbassador ? (
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--foreground)]">Sign-ups ({code.redemptions.length})</h3>
+                  {!code.redemptions.length ? (
+                    <p className="py-3 text-sm text-[var(--muted)]">Nobody has signed up with this link yet.</p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
+                      {code.redemptions.map((r) => (
+                        <li key={r.id} className="flex items-center justify-between gap-2 py-2">
+                          <span>{mode === "admin" ? r.redeemedByStudent.user.name || "Student" : firstName(r.redeemedByStudent.user.name)}</span>
+                          <span className="text-xs text-[var(--muted)]">signed up {date(r.createdAt)}</span>
                         </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <h3 className="text-sm font-bold text-amber-700">Pending — waiting to pay ({pending.length})</h3>
+                    {!pending.length ? (
+                      <p className="py-3 text-sm text-[var(--muted)]">Nobody waiting right now.</p>
+                    ) : (
+                      <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
+                        {pending.map((r) => (
+                          <li key={r.id} className="flex items-center justify-between gap-2 py-2">
+                            <span>{mode === "admin" ? r.redeemedByStudent.user.name || "Student" : firstName(r.redeemedByStudent.user.name)}</span>
+                            <span className="text-xs text-[var(--muted)]">signed up {date(r.createdAt)} — no credit yet</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 className="text-sm font-bold text-emerald-700">Paid ({paid.length})</h3>
+                    {!paid.length ? (
+                      <p className="py-3 text-sm text-[var(--muted)]">Nobody's paid yet — credit only counts once they do.</p>
+                    ) : (
+                      <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
+                        {paid.map((r) => {
+                          const payout = r.payouts[0];
+                          return (
+                            <li key={r.id} className="space-y-1.5 py-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="font-semibold">{mode === "admin" ? r.redeemedByStudent.user.name || "Student" : firstName(r.redeemedByStudent.user.name)}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold tabular-nums">{naira(payout.amount)}</span>
+                                  <span
+                                    className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${
+                                      payout.status === "credited" ? "bg-emerald-100 text-emerald-900" : payout.status === "approved" ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"
+                                    }`}
+                                  >
+                                    {payout.status}
+                                  </span>
+                                  {mode === "admin" && payout.status === "pending" ? (
+                                    <button type="button" disabled={busyId === payout.id} onClick={() => void approvePayout(payout.id)} className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-bold disabled:opacity-50">
+                                      Approve
+                                    </button>
+                                  ) : null}
+                                  {mode === "admin" && payout.status === "approved" ? (
+                                    <button
+                                      type="button"
+                                      disabled={busyId === payout.id}
+                                      onClick={() => {
+                                        setCreditingId(creditingId === payout.id ? null : payout.id);
+                                        setCreditNote("");
+                                      }}
+                                      className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
+                                    >
+                                      Credit
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {mode === "admin" && creditingId === payout.id ? (
+                                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-alt)] p-3">
+                                  <input
+                                    value={creditNote}
+                                    onChange={(e) => setCreditNote(e.target.value)}
+                                    placeholder="How was this paid out, e.g. bank transfer 12 Oct"
+                                    className="min-w-[14rem] flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm"
+                                  />
+                                  <button type="button" disabled={busyId === payout.id} onClick={() => void creditPayout(payout.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50">
+                                    <CheckIcon className="h-4 w-4" />
+                                    Mark credited
+                                  </button>
+                                </div>
+                              ) : null}
+                              {payout.creditedNote ? <p className="text-xs text-[var(--muted)]">{payout.creditedNote}</p> : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </>
+              )}
             </section>
           );
         })
@@ -550,7 +594,7 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
       {mode === "self" ? (
         <>
           <HelpCard />
-          <GrowthCard />
+          <GrowthCard isAmbassador={allAmbassador} />
         </>
       ) : null}
     </main>
