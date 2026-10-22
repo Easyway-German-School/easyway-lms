@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RefreshIcon, CheckIcon, HelpIcon } from "@/components/icons";
+import { RefreshIcon, CheckIcon, HelpIcon, SparklesIcon, StarIcon } from "@/components/icons";
 
 /**
  * ONE dashboard, two doors in — see /api/admin/influencer's GET comment.
@@ -362,28 +362,51 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
 
   return (
     <main className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--foreground)]">
-            {mode === "admin" ? (codes?.[0]?.ownerUser.name || "Partner") + "'s dashboard" : "Your dashboard"}
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            {mode === "admin"
-              ? `Viewing as the admin desk — ${codes?.[0]?.ownerUser.email ?? ""}`
-              : allAmbassador
-                ? "Your code, and who signed up with it."
-                : "Your code, who signed up with it, and what you've earned."}
-          </p>
+      {/* A fixed dark/gold look, deliberately not following the site theme —
+          see PremiumPrivateClasses for why. A partner's dashboard got
+          lighter in content (ambassadors especially); this keeps it from
+          reading as a downgrade by making the one thing every partner has
+          — their standing with the school — feel like something worth
+          having. */}
+      <header className="relative overflow-hidden rounded-[28px] p-[1px] shadow-[0_24px_70px_-28px_rgba(212,175,55,0.45)]" style={{ background: "linear-gradient(135deg, rgba(212,175,55,0.7), rgba(255,102,0,0.3), rgba(212,175,55,0.15))" }}>
+        <div className="relative overflow-hidden rounded-[27px] bg-[radial-gradient(circle_at_15%_0%,_#1c1917_0%,_#0b0a09_55%,_#000000_100%)] px-5 py-6 sm:px-8 sm:py-7">
+          <div aria-hidden className="animate-blob pointer-events-none absolute left-1/4 top-0 h-56 w-56 rounded-full bg-[#D4AF37] opacity-[0.16] blur-3xl" />
+          <div aria-hidden className="animate-pulse-slow pointer-events-none absolute bottom-0 right-0 h-64 w-64 rounded-full bg-[#FF6600] opacity-[0.12] blur-3xl" />
+          <div className="relative flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#E8C766]">
+                <SparklesIcon className="h-3.5 w-3.5" />
+                Easyway Partner Program
+              </span>
+              <h1 className="mt-3 bg-gradient-to-r from-white via-[#F4E3B2] to-[#D4AF37] bg-clip-text text-2xl font-bold leading-tight text-transparent sm:text-3xl">
+                {mode === "admin" ? (codes?.[0]?.ownerUser.name || "Partner") + "'s dashboard" : "Your dashboard"}
+              </h1>
+              <p className="mt-2 max-w-md text-sm leading-6 text-white/55">
+                {mode === "admin"
+                  ? `Viewing as the admin desk — ${codes?.[0]?.ownerUser.email ?? ""}`
+                  : allAmbassador
+                    ? "Your code, and who signed up with it."
+                    : "Your code, who signed up with it, and what you've earned."}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1 text-[#E8C766]/80" aria-hidden>
+                {[0, 1, 2].map((i) => (
+                  <StarIcon key={i} className="h-3.5 w-3.5" strokeWidth={1.4} />
+                ))}
+              </span>
+              <button
+                type="button"
+                onClick={() => refresh()}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 backdrop-blur-sm transition-colors hover:bg-white/10 disabled:opacity-50"
+              >
+                <RefreshIcon className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => refresh()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold disabled:opacity-50"
-        >
-          <RefreshIcon className="h-4 w-4" />
-          Refresh
-        </button>
       </header>
 
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
@@ -423,7 +446,8 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-mono text-2xl font-black tracking-wide text-[var(--accent-ink)]">{code.code}</p>
-                    <span className="rounded-full bg-[var(--surface-alt)] px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300/70">
+                      <StarIcon className="h-3 w-3" strokeWidth={1.8} />
                       {PARTNER_TYPE_LABEL[code.partnerType ?? "influencer"]}
                     </span>
                   </div>
@@ -467,10 +491,16 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
               </div>
 
               {isAmbassador ? (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-                  <p className="text-sm font-bold">For your audience</p>
-                  <p className="mt-1 text-sm text-[var(--muted)]">{discountLabel(code)}</p>
-                </div>
+                <>
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-300/60 bg-gradient-to-r from-amber-50 to-white px-4 py-3">
+                    <SparklesIcon className="h-4 w-4 flex-none text-amber-600" />
+                    <p className="text-sm font-semibold text-amber-900">A valued voice for EasyWay — thank you for sharing us.</p>
+                  </div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                    <p className="text-sm font-bold">For your audience</p>
+                    <p className="mt-1 text-sm text-[var(--muted)]">{discountLabel(code)}</p>
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2">

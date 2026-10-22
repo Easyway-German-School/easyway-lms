@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
-import { PlusIcon, RefreshIcon } from "@/components/icons";
+import { PlusIcon, RefreshIcon, StarIcon } from "@/components/icons";
 
 /**
  * The admin door into the Influencer Program: every partner (influencer,
@@ -256,7 +256,8 @@ export default function InfluencerProgramHubPage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-[var(--surface-alt)] px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300/70">
+                          <StarIcon className="h-3 w-3" strokeWidth={1.8} />
                           {PARTNER_TYPE_LABEL[c.partnerType ?? "influencer"]}
                         </span>
                         <span
