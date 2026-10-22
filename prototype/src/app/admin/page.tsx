@@ -262,6 +262,15 @@ export default function AdminHomePage() {
     setLoading(true);
     setError(null);
     try {
+      const meResponse = await fetch("/api/admin/me", { cache: "no-store" });
+      if (!meResponse.ok) throw new Error("Could not verify admin access");
+      const me = (await meResponse.json()) as { adminRole: string };
+      if (me.adminRole === "influencer") {
+        setRedirecting(true);
+        router.replace("/admin/influencer");
+        return;
+      }
+
       const response = await fetch("/api/admin/overview", { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load the admin overview");
       const overview = (await response.json()) as Overview;

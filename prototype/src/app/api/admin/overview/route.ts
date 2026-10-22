@@ -32,6 +32,9 @@ export async function GET() {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const admin = auth.admin;
+  if (admin.adminRole === "influencer") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);

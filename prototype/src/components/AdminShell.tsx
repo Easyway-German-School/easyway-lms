@@ -377,13 +377,16 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     .sort((a, b) => b.href.length - a.href.length)[0];
 
   const currentCapability = currentArea ? capabilityOf(currentArea) : null;
+  const influencerOnly = capabilities?.length === 1 && capabilities[0] === 'influencer';
   const blocked = Boolean(
-    currentCapability && capabilities !== null && !capabilities.includes(currentCapability),
+    (influencerOnly && pathname !== '/admin/influencer') ||
+    (currentCapability && capabilities !== null && !capabilities.includes(currentCapability)),
   );
 
   // An item is offered only if this admin's sub-role covers it — the same test
   // the grouped nav uses below, pulled out so the search results honour it too.
   const maySee = (item: NavItem) => {
+    if (influencerOnly) return item.href === '/admin/influencer';
     const capability = capabilityOf(item);
     return !capability || capabilities === null || capabilities.includes(capability);
   };

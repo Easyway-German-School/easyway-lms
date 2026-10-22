@@ -25,7 +25,7 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   data_comm: "Data & Communications Manager",
   support: "Customer Care",
   growth: "Growth Desk (Sales & Business Development)",
-  influencer: "Influencer / Affiliate Partner",
+  influencer: "Partner / Ambassador",
 };
 
 export const CAPABILITIES = [
@@ -207,7 +207,22 @@ export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments", "security", "p
 
 /** An admin with no sub-role set is treated as super — nobody loses access. */
 export function normalizeAdminRole(value: unknown): AdminRole {
-  const v = String(value ?? "").toLowerCase();
+  const v = String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (
+    [
+      "partner",
+      "ambassador",
+      "easyway ambassador",
+      "partner ambassador",
+      "ambassador partner",
+      "partner / ambassador",
+      "partner/ambassador",
+      "affiliate partner",
+      "influencer / affiliate partner",
+    ].includes(v)
+  ) {
+    return "influencer";
+  }
   return (ADMIN_ROLES as readonly string[]).includes(v) ? (v as AdminRole) : "super";
 }
 
