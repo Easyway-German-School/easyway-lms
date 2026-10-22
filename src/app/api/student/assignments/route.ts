@@ -76,6 +76,20 @@ export async function GET() {
       const attribution =
         student.deliveryMode === "hybrid" ? await attributeTutorAction(student.id, a.lecturerId) : null;
 
+      /**
+       * One re-hand-in, before a tutor has marked it. Covers "wrong file" and
+       * "I spotted a mistake" without turning a hand-in into an open-ended
+       * draft. A quiz that finished auto-marking itself (no written part left
+       * needsReview) is excluded — its clock already ran out, and letting it
+       * reopen would be a second attempt at a timed test, not a correction.
+       */
+      const canEdit = Boolean(
+        mine?.submittedAt &&
+          !mine.markedById &&
+          mine.editCount < 1 &&
+          (a.type !== "quiz" || mine.needsReview),
+      );
+
       return {
         id: a.id,
         title: a.title,
@@ -98,6 +112,11 @@ export async function GET() {
               startedAt: mine.startedAt,
               deadline,
               expired: isExpired(mine.startedAt, a.timeLimitMinutes, now),
+              canEdit,
+              // Only for a document's own text, to prefill a re-edit — never
+              // another question's answer key, and never once marked.
+              text: a.type !== "quiz" ? mine.text : null,
+              fileName: a.type !== "quiz" ? mine.fileName : null,
             }
           : null,
       };
@@ -143,8 +162,29 @@ export async function POST(req: NextRequest) {
       where: { assignmentId_studentId: { assignmentId, studentId: student.id } },
     });
 
-    if (existing?.submittedAt) {
-      return NextResponse.json({ error: "You have already submitted this." }, { status: 409 });
+    // A resubmission (editing an already-handed-in paper) rather than a first
+    // hand-in — allowed once, and only before a tutor has touched it. See the
+    // `canEdit` note in GET for why a fully auto-marked quiz is excluded.
+    const isResubmission = Boolean(existing?.submittedAt);
+    if (isResubmission && action === "submit") {
+      if (existing!.markedById) {
+        return NextResponse.json(
+          { error: "Your tutor has already marked this, so it can no longer be changed." },
+          { status: 409 },
+        );
+      }
+      if (existing!.editCount >= 1) {
+        return NextResponse.json(
+          { error: "You've already used your one resubmission for this." },
+          { status: 409 },
+        );
+      }
+      if (assignment.type === "quiz" && !existing!.needsReview) {
+        return NextResponse.json(
+          { error: "This quiz has already been marked and can no longer be changed." },
+          { status: 409 },
+        );
+      }
     }
 
     const now = new Date();
@@ -228,6 +268,7 @@ export async function POST(req: NextRequest) {
           questionScores,
           needsReview,
           submittedAt: now,
+          ...(isResubmission ? { editCount: { increment: 1 } } : {}),
         },
       });
 
@@ -263,9 +304,16 @@ export async function POST(req: NextRequest) {
           kind: KIND.assignmentSubmitted,
           severity: "info",
           title: needsReview ? "A submission needs marking" : "A submission came in",
-          message: `${session.user?.name ?? "A student"} handed in "${assignment.title}".`,
-          link: "/lecturer/assignments/mark",
-          dedupeKey: `assignment-submitted:${assignmentId}:${student.id}`,
+          message: isResubmission
+            ? `${session.user?.name ?? "A student"} resubmitted "${assignment.title}" — their one edit.`
+            : `${session.user?.name ?? "A student"} handed in "${assignment.title}".`,
+          // Straight to this one paper — not a generic marking page the tutor
+          // then has to search through.
+          link: `/lecturer/assignments?submission=${saved.id}`,
+          // A fresh dedupe key per attempt, not per assignment+student — a
+          // resubmission is new information and must raise a new notification,
+          // not get silently folded into the one the tutor already dismissed.
+          dedupeKey: `assignment-submitted:${assignmentId}:${student.id}:${isResubmission ? "resubmit" : "first"}`,
           push: true,
         }).catch((error) => console.error("Assignment submission notification failed", error));
       }

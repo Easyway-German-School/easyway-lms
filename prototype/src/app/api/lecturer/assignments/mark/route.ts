@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { notify, KIND } from "@/lib/notify";
 import { attributeTutorAction, tutorPhrase } from "@/lib/tutor-attribution";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
+import { readAssignment, studentWhereForLecturer } from "@/lib/lecturer-assignment";
 import {
   parseQuestions,
   finaliseScore,
@@ -48,12 +49,54 @@ export async function GET(req: NextRequest) {
   if ("error" in auth) return auth.error;
 
   const assignmentId = req.nextUrl.searchParams.get("assignmentId");
+  // Set when the tutor arrived here from a "submission needs marking"
+  // notification — jumps straight to that one paper instead of making them
+  // scroll past every other student's to find it.
+  const submissionId = req.nextUrl.searchParams.get("submissionId");
+
+  /**
+   * Scoped to the tutor's own students.
+   *
+   * This used to return every paper awaiting marking across the WHOLE school —
+   * a tutor with six students had to scroll past everyone else's to find
+   * theirs. `studentWhereForLecturer` is the same roster definition every
+   * other tutor screen (register, gradebook, live class) already trusts, so
+   * "my students" means the same thing here as everywhere else.
+   * Admins (no lecturerId) keep the unrestricted view — they mark for the
+   * whole school, not one class.
+   */
+  let studentWhere: Record<string, unknown> | null = null;
+  if (auth.lecturerId) {
+    const lecturer = await prisma.lecturer.findUnique({
+      where: { id: auth.lecturerId },
+      select: {
+        id: true,
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+        branchIds: true,
+        levels: true,
+        sessionSlots: true,
+        assignmentGroups: true,
+        classTypes: true,
+        batches: true,
+        pathways: true,
+      },
+    });
+    studentWhere = lecturer ? studentWhereForLecturer(readAssignment(lecturer), lecturer.id) : null;
+    // A tutor with no class and no named students has nobody to mark for —
+    // returning everyone else's papers would be worse than returning none.
+    if (!studentWhere) return NextResponse.json({ submissions: [] });
+  }
 
   const pending = await prisma.assignmentSubmission.findMany({
     where: {
-      needsReview: true,
       submittedAt: { not: null },
+      // A direct link to one paper shows it whatever its state — the
+      // notification that sent the tutor here already knows it needs marking.
+      ...(submissionId ? { id: submissionId } : { needsReview: true }),
       ...(assignmentId ? { assignmentId } : {}),
+      ...(studentWhere ? { student: studentWhere } : {}),
     },
     orderBy: { submittedAt: "asc" },
     include: {

@@ -39,7 +39,18 @@ type Pending = {
   document: DocumentWork | null;
 };
 
-export default function MarkingQueue({ assignmentId }: { assignmentId?: string }) {
+export default function MarkingQueue({
+  assignmentId,
+  submissionId,
+  onShowAll,
+}: {
+  assignmentId?: string;
+  /** Jump straight to one paper — set when the tutor arrived from a
+   *  "submission needs marking" notification, so they land on it directly
+   *  instead of scrolling the whole queue to find it. */
+  submissionId?: string;
+  onShowAll?: () => void;
+}) {
   const [pending, setPending] = useState<Pending[]>([]);
   const [loading, setLoading] = useState(true);
   const [marks, setMarks] = useState<Record<string, Record<number, string>>>({});
@@ -50,7 +61,10 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
 
   const load = useCallback(async () => {
     try {
-      const query = assignmentId ? `?assignmentId=${encodeURIComponent(assignmentId)}` : "";
+      const params = new URLSearchParams();
+      if (assignmentId) params.set("assignmentId", assignmentId);
+      if (submissionId) params.set("submissionId", submissionId);
+      const query = params.toString() ? `?${params.toString()}` : "";
       const response = await fetch(`/api/lecturer/assignments/mark${query}`, { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not load the marking queue");
@@ -61,7 +75,7 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
     } finally {
       setLoading(false);
     }
-  }, [assignmentId]);
+  }, [assignmentId, submissionId]);
 
   useEffect(() => {
     load();
@@ -105,10 +119,19 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
   if (pending.length === 0) {
     return (
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
-        <p className="text-sm font-semibold">Nothing waiting to be marked</p>
-        <p className="mt-1 text-xs text-[var(--muted)]">
-          Written answers appear here the moment a student hands one in.
+        <p className="text-sm font-semibold">
+          {submissionId ? "This paper has already been marked" : "Nothing waiting to be marked"}
         </p>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          {submissionId
+            ? "Someone must have gotten to it first."
+            : "Written answers appear here the moment a student hands one in."}
+        </p>
+        {submissionId && onShowAll && (
+          <button onClick={onShowAll} className="mt-3 text-sm font-semibold text-[var(--accent)]">
+            Show everything waiting
+          </button>
+        )}
       </div>
     );
   }
@@ -117,9 +140,18 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
     <div className="space-y-4">
       {error && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
-      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-        {pending.length} paper{pending.length === 1 ? "" : "s"} waiting
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          {submissionId
+            ? "From your notification"
+            : `${pending.length} paper${pending.length === 1 ? "" : "s"} waiting`}
+        </p>
+        {submissionId && onShowAll && (
+          <button onClick={onShowAll} className="text-xs font-semibold text-[var(--accent)]">
+            Show everything waiting
+          </button>
+        )}
+      </div>
 
       {pending.map((submission) => {
         const isDocument = submission.assignment.type !== "quiz";

@@ -24,6 +24,10 @@ type Submission = {
   startedAt: string | null;
   deadline: string | null;
   expired: boolean;
+  /** One resubmission allowed before a tutor has marked it — see the server's `canEdit` note. */
+  canEdit?: boolean;
+  text?: string | null;
+  fileName?: string | null;
 };
 
 type Assignment = {
@@ -187,6 +191,12 @@ export default function AssignmentsPanel() {
         setAnswers(new Array((data.questions ?? []).length).fill(null));
         setDeadline(data.deadline ? new Date(data.deadline).getTime() : null);
         if (data.deadline) setRemaining(new Date(data.deadline).getTime() - Date.now());
+      } else {
+        // Re-opening a document to use the one allowed edit — start from what
+        // was handed in rather than a blank box, since this is a correction,
+        // not a fresh essay.
+        setDocText(assignment.submission?.text ?? "");
+        setDocFile(null);
       }
       setActive(assignment);
     } catch (e) {
@@ -356,9 +366,15 @@ export default function AssignmentsPanel() {
 
   // ---- Handing in a document ----------------------------------------------
   if (active) {
+    const editing = Boolean(active.submission?.submittedAt);
     return (
       <div className="rounded-3xl cinematic-card p-6">
         <h2 className="text-lg font-bold">{active.title}</h2>
+        {editing && (
+          <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[var(--accent)]">
+            Fixing your submission — this replaces what you sent before
+          </p>
+        )}
         {active.description && <p className="mt-1 text-sm text-[var(--muted)]">{active.description}</p>}
 
         <textarea
@@ -397,7 +413,7 @@ export default function AssignmentsPanel() {
             disabled={busy || uploading || (!docText.trim() && !docFile)}
             className="rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {uploading ? "Uploading…" : busy ? "Submitting…" : "Hand in"}
+            {uploading ? "Uploading…" : busy ? "Submitting…" : editing ? "Resubmit" : "Hand in"}
           </button>
           <button
             onClick={() => { setActive(null); setDocFile(null); }}
@@ -424,14 +440,16 @@ export default function AssignmentsPanel() {
       ) : (
         assignments.map((a) => {
           const done = Boolean(a.submission?.submittedAt);
+          const canEdit = done && Boolean(a.submission?.canEdit);
+          const clickable = !done || canEdit;
           return (
             <div
               key={a.id}
-              role={done ? undefined : "button"}
-              tabIndex={done ? undefined : 0}
-              className={`rounded-3xl cinematic-card p-5 ${done ? "" : "cursor-pointer"}`}
+              role={clickable ? "button" : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              className={`rounded-3xl cinematic-card p-5 ${clickable ? "cursor-pointer" : ""}`}
               onKeyDown={(event) => {
-                if (done) return;
+                if (!clickable) return;
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
                   if (!busy) void open(a);
@@ -439,7 +457,7 @@ export default function AssignmentsPanel() {
               }}
               onClick={(event) => {
                 const fromButton = Boolean((event.target as HTMLElement | null)?.closest("button"));
-                if (!done && !busy && !fromButton) void open(a);
+                if (clickable && !busy && !fromButton) void open(a);
               }}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -496,8 +514,23 @@ export default function AssignmentsPanel() {
                       {a.type === "quiz" ? "Start" : "Open"}
                     </button>
                   )}
+                  {canEdit && (
+                    <button
+                      onClick={() => open(a)}
+                      disabled={busy}
+                      className="mt-2 block rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold disabled:opacity-60"
+                    >
+                      Fix a mistake
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {canEdit && (
+                <p className="mt-3 text-[11px] text-[var(--muted)]">
+                  Spotted an error? You can resubmit this once before your tutor marks it.
+                </p>
+              )}
 
               {done && a.submission?.feedback && (
                 <p className="mt-3 rounded-2xl bg-[var(--surface-alt)] p-3 text-sm text-[var(--muted)]">
