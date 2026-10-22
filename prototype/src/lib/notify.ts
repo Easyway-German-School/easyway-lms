@@ -287,15 +287,22 @@ export async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
     select: { id: true, role: true, adminRole: true, adminCapabilities: true },
   });
 
-  if (to.audience === "admin" && to.capability) {
+  if (to.audience === "admin" || to.audience === "all") {
     // Imported lazily: admin-roles imports prisma, and a top-level cycle
     // between the two would leave one of them half-initialised.
-    const { capabilitiesForUser } = await import("@/lib/admin-roles");
+    const { canReceiveAdminNotification, capabilitiesForUser } = await import("@/lib/admin-roles");
     return users
-      .filter((u) =>
-        capabilitiesForUser(u.adminRole, u.adminCapabilities).includes(to.capability as never),
-      )
-      .map((u) => u.id);
+      .filter((user) => {
+        if (user.role !== "ADMIN") return true;
+        if (!canReceiveAdminNotification(user.adminRole, to.audience === "admin" ? to.capability : undefined)) {
+          return false;
+        }
+        if (to.audience === "admin" && to.capability) {
+          return capabilitiesForUser(user.adminRole, user.adminCapabilities).includes(to.capability as never);
+        }
+        return true;
+      })
+      .map((user) => user.id);
   }
 
   return users.map((u) => u.id);
@@ -369,7 +376,12 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
         studentId: student?.id ?? null,
         branchId: student?.branchId ?? null,
         level: student?.level ?? null,
-        audience: "audience" in input.to ? input.to.audience : null,
+        audience:
+          "audience" in input.to
+            ? input.to.audience === "admin" && input.to.capability === "influencer"
+              ? null
+              : input.to.audience
+            : null,
         title: input.title,
         message: input.message,
         channel: "in-app",

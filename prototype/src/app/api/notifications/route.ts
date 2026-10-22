@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { rewriteNotificationLink } from "@/lib/notification-destinations";
+import { normalizeAdminRole } from "@/lib/admin-roles";
 
 /**
  * The bell, for whoever is signed in.
@@ -26,6 +27,7 @@ import { rewriteNotificationLink } from "@/lib/notification-destinations";
 type Viewer = {
   userId: string;
   role: string;
+  adminRole: string | null;
   studentId: string | null;
   branchId: string | null;
   level: string | null;
@@ -45,6 +47,7 @@ async function resolveViewer(): Promise<Viewer | null> {
     select: {
       id: true,
       role: true,
+      adminRole: true,
       student: { select: { id: true, branchId: true, level: true } },
       createdAt: true,
     },
@@ -54,6 +57,7 @@ async function resolveViewer(): Promise<Viewer | null> {
   return {
     userId: user.id,
     role: String(user.role).toLowerCase(),
+    adminRole: user.adminRole,
     studentId: user.student?.id ?? null,
     branchId: user.student?.branchId ?? null,
     level: user.student?.level ?? null,
@@ -69,6 +73,12 @@ async function resolveViewer(): Promise<Viewer | null> {
  * equality is what hid them from students for as long as they have existed.
  */
 function audienceFilter(viewer: Viewer): Prisma.NotificationWhereInput {
+  // Partner accounts are external to the office. They may see notifications
+  // addressed directly to their account, never admin or school broadcasts.
+  if (viewer.role === "admin" && normalizeAdminRole(viewer.adminRole) === "influencer") {
+    return { channel: { not: "email" }, userId: viewer.userId, audience: null };
+  }
+
   // Every fanned-out row carries the audience it came from, so an unqualified
   // `audience: "admin"` clause would hand this admin every OTHER admin's copy.
   // Broadcast clauses therefore all pin `userId: null`, which is what makes a

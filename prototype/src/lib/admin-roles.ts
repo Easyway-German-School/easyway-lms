@@ -226,6 +226,10 @@ export function normalizeAdminRole(value: unknown): AdminRole {
   return (ADMIN_ROLES as readonly string[]).includes(v) ? (v as AdminRole) : "super";
 }
 
+export function canReceiveAdminNotification(adminRole: unknown, capability?: string): boolean {
+  return normalizeAdminRole(adminRole) !== "influencer" || capability === "influencer";
+}
+
 export function adminCan(adminRole: unknown, capability: Capability): boolean {
   const role = normalizeAdminRole(adminRole);
   const grants = GRANTS[role];

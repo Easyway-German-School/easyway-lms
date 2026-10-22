@@ -5,6 +5,7 @@ import { resolveSpaceScope } from "@/lib/community-spaces";
 import { unreadByChannel, totalUnread } from "@/lib/community-unread";
 import { previewOf } from "@/lib/community-notify";
 import { storedNotificationLink } from "@/lib/notification-destinations";
+import { normalizeAdminRole } from "@/lib/admin-roles";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,13 @@ export async function GET(request: Request) {
   const now = new Date();
 
   try {
+    const isPartnerAccount =
+      String(session.user.role ?? "").toLowerCase() === "admin" &&
+      (await prisma.user.findUnique({
+        where: { id: userId },
+        select: { adminRole: true },
+      }).then((user) => normalizeAdminRole(user?.adminRole) === "influencer"));
+
     const sinceParam = request.url ? new URL(request.url).searchParams.get("since") : null;
     const parsed = sinceParam ? new Date(sinceParam) : null;
 
@@ -104,6 +112,7 @@ export async function GET(request: Request) {
       prisma.notification.findMany({
         where: {
           userId,
+          ...(isPartnerAccount ? { audience: null } : {}),
           channel: "in-app",
           readAt: null,
           createdAt: { gt: since },
