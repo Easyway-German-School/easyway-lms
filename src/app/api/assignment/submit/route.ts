@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
         severity: "info",
         title: "A submission needs marking",
         message: `${session.user?.name ?? "A student"} handed in work — it's pending review.`,
-        link: "/lecturer/assignments/mark",
+        link: "/lecturer/assignments",
         dedupeKey: `assignment-submitted:${lessonId}:${student.id}`,
       }).catch((error) => console.error("Legacy assignment notification failed", error));
     }

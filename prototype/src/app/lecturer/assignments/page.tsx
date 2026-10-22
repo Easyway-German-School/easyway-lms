@@ -2,12 +2,14 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
 import QuestionBuilder, { emptyQuestion, draftToQuestion, type QuestionDraft } from "@/components/QuestionBuilder";
 import StudentPicker from "@/components/StudentPicker";
 import MarkingQueue from "@/components/MarkingQueue";
 import { LEVELS } from "@/lib/levels";
+import { QUESTION_TYPE_LABELS, type Question } from "@/lib/assignments";
 
 /** Tutors set work here: a document to hand in, or a timed multiple-choice quiz. */
 
@@ -21,24 +23,49 @@ type Submission = {
 type Assignment = {
   id: string;
   title: string;
+  description: string | null;
   level: string;
   type: string;
   timeLimitMinutes: number | null;
   dueAt: string | null;
+  questions: Question[] | null;
   branch: { name: string } | null;
   _count: { submissions: number };
   submissions: Submission[];
+  awaitingMarking: number;
 };
 
-/* The question shape now lives with the builder, so the editor and the
-   thing that serialises it cannot drift apart. */
+/** A plain-language summary of one question's answer key, for a tutor
+ *  re-reading what they set — not shown anywhere a student can see it. */
+function answerSummary(q: Question): string {
+  switch (q.type) {
+    case "choice":
+      return `Correct: ${q.options[q.answerIndex] ?? "—"}`;
+    case "multi":
+      return `Correct: ${q.answerIndexes.map((i) => q.options[i]).filter(Boolean).join(", ") || "—"}`;
+    case "boolean":
+      return `Correct: ${q.answer ? "Richtig / True" : "Falsch / False"}`;
+    case "short":
+      return `Accepted: ${q.accepted.filter(Boolean).join(", ") || "—"}`;
+    case "paragraph":
+      return q.guidance ? `Your note: ${q.guidance}` : "Marked by hand — no note left";
+    default:
+      return "";
+  }
+}
 
-export default function LecturerAssignmentsPage() {
+function AssignmentsContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const submissionId = searchParams.get("submission");
+
+  const [tab, setTab] = useState<"mark" | "manage">(submissionId ? "mark" : "mark");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -65,6 +92,10 @@ export default function LecturerAssignmentsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  function clearNotificationFilter() {
+    router.replace("/lecturer/assignments");
+  }
 
   async function create() {
     setSaving(true);
@@ -95,153 +126,232 @@ export default function LecturerAssignmentsPage() {
     }
   }
 
+  const totalAwaiting = assignments.reduce((sum, a) => sum + (a.awaitingMarking ?? 0), 0);
+
   return (
     <LecturerShell>
       <div className="p-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-bold">Assignments</h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Set a document to hand in, or a timed quiz that marks itself.
-            </p>
-          </div>
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold">Assignments</h1>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Mark what your students handed in, or set something new.
+          </p>
+        </div>
+
+        {/* Two clearly separate jobs instead of one long scroll — marking is
+            urgent and happens often; setting new work is occasional. */}
+        <div className="mb-6 flex gap-2 border-b border-[var(--border)]">
           <button
-            onClick={() => setOpen((v) => !v)}
-            className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+            onClick={() => setTab("mark")}
+            className={`relative px-4 py-2.5 text-sm font-semibold transition ${
+              tab === "mark" ? "border-b-2 border-[var(--accent)] text-[var(--accent)]" : "text-[var(--muted)]"
+            }`}
           >
-            {open ? "Cancel" : "New assignment"}
+            To mark
+            {totalAwaiting > 0 && (
+              <span className="ml-2 rounded-full bg-[var(--accent)] px-2 py-0.5 text-[10px] font-bold text-white">
+                {totalAwaiting}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab("manage")}
+            className={`px-4 py-2.5 text-sm font-semibold transition ${
+              tab === "manage" ? "border-b-2 border-[var(--accent)] text-[var(--accent)]" : "text-[var(--muted)]"
+            }`}
+          >
+            My assignments
           </button>
         </div>
 
         {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
 
-        {/* Marking sits above the list on purpose: it is the thing with a
-            student waiting at the other end of it. */}
-        <div className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold">To mark</h2>
-          <MarkingQueue />
-        </div>
+        {tab === "mark" && (
+          <MarkingQueue
+            submissionId={submissionId ?? undefined}
+            onShowAll={submissionId ? clearNotificationFilter : undefined}
+          />
+        )}
 
-        {open && (
-          <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="sm:col-span-2">
-                <span className="text-xs font-medium text-[var(--foreground-soft)]">Title</span>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
-              </label>
-              <label className="sm:col-span-2">
-                <span className="text-xs font-medium text-[var(--foreground-soft)]">Instructions</span>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
-              </label>
-              <label>
-                <span className="text-xs font-medium text-[var(--foreground-soft)]">Level</span>
-                <select value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
-                  {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </label>
-              {/*
-                The sitting, because a level is not a class. One branch runs the
-                same level morning, afternoon and evening under three different
-                tutors — homework set here would otherwise land on all three
-                cohorts' dashboards, including the two this tutor never teaches.
-                "Every sitting" stays the default so nothing already set changes.
-              */}
-              <label>
-                <span className="text-xs font-medium text-[var(--foreground-soft)]">Class time</span>
-                <select
-                  value={sessionSlot}
-                  onChange={(e) => setSessionSlot(e.target.value)}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                >
-                  <option value="">Every sitting at this level</option>
-                  <option value="morning">Morning only</option>
-                  <option value="afternoon">Afternoon only</option>
-                  <option value="evening">Evening only</option>
-                </select>
-              </label>
-              <label>
-                <span className="text-xs font-medium text-[var(--foreground-soft)]">Type</span>
-                <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
-                  <option value="document">Document to hand in</option>
-                  <option value="quiz">Timed quiz</option>
-                </select>
-              </label>
-
-              {type === "quiz" && (
-                <label>
-                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Time limit (minutes)</span>
-                  <input type="number" min={1} value={timeLimit} onChange={(e) => setTimeLimit(Number(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
-                </label>
-              )}
+        {tab === "manage" && (
+          <>
+            <div className="mb-6 flex justify-end">
+              <button
+                onClick={() => setOpen((v) => !v)}
+                className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                {open ? "Cancel" : "New assignment"}
+              </button>
             </div>
 
-            {type === "quiz" && (
-              <div className="mt-6">
-                <p className="mb-3 text-sm font-semibold">Questions</p>
-                <QuestionBuilder questions={questions} onChange={setQuestions} />
+            {open && (
+              <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="sm:col-span-2">
+                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Title</span>
+                    <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                  </label>
+                  <label className="sm:col-span-2">
+                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Instructions</span>
+                    <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                  </label>
+                  <label>
+                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Level</span>
+                    <select value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                      {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </label>
+                  {/*
+                    The sitting, because a level is not a class. One branch runs the
+                    same level morning, afternoon and evening under three different
+                    tutors — homework set here would otherwise land on all three
+                    cohorts' dashboards, including the two this tutor never teaches.
+                    "Every sitting" stays the default so nothing already set changes.
+                  */}
+                  <label>
+                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Class time</span>
+                    <select
+                      value={sessionSlot}
+                      onChange={(e) => setSessionSlot(e.target.value)}
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    >
+                      <option value="">Every sitting at this level</option>
+                      <option value="morning">Morning only</option>
+                      <option value="afternoon">Afternoon only</option>
+                      <option value="evening">Evening only</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Type</span>
+                    <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                      <option value="document">Document to hand in</option>
+                      <option value="quiz">Timed quiz</option>
+                    </select>
+                  </label>
+
+                  {type === "quiz" && (
+                    <label>
+                      <span className="text-xs font-medium text-[var(--foreground-soft)]">Time limit (minutes)</span>
+                      <input type="number" min={1} value={timeLimit} onChange={(e) => setTimeLimit(Number(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                    </label>
+                  )}
+                </div>
+
+                {type === "quiz" && (
+                  <div className="mt-6">
+                    <p className="mb-3 text-sm font-semibold">Questions</p>
+                    <QuestionBuilder questions={questions} onChange={setQuestions} />
+                  </div>
+                )}
+
+                {/* Targeting applies to written work as much as to quizzes — a
+                    make-up essay for two students is the same idea. */}
+                <div className="mt-6">
+                  <StudentPicker level={level} sessionSlot={sessionSlot || null} selected={studentIds} onChange={setStudentIds} />
+                </div>
+
+                <button
+                  onClick={create}
+                  disabled={saving || !title.trim()}
+                  className="mt-6 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {saving ? "Creating…" : "Create assignment"}
+                </button>
               </div>
             )}
 
-            {/* Targeting applies to written work as much as to quizzes — a
-                make-up essay for two students is the same idea. */}
-            <div className="mt-6">
-              <StudentPicker level={level} sessionSlot={sessionSlot || null} selected={studentIds} onChange={setStudentIds} />
-            </div>
+            {loading ? (
+              <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
+            ) : assignments.length === 0 ? (
+              <div className="py-12 text-center text-[var(--muted)]">No assignments set yet.</div>
+            ) : (
+              <div className="space-y-3">
+                {assignments.map((a) => {
+                  const isOpen = expanded === a.id;
+                  return (
+                    <div key={a.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                      <button
+                        onClick={() => setExpanded(isOpen ? null : a.id)}
+                        className="flex w-full flex-wrap items-center justify-between gap-3 text-left"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${a.type === "quiz" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                              {a.type}
+                            </span>
+                            <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{a.level}</span>
+                            {a.timeLimitMinutes && <span className="text-xs text-amber-700">⏱ {a.timeLimitMinutes} min</span>}
+                            {a.awaitingMarking > 0 && (
+                              <span className="rounded bg-[var(--accent)] px-2 py-0.5 text-[10px] font-bold text-white">
+                                {a.awaitingMarking} to mark
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="mt-1.5 font-semibold">{a.title}</h3>
+                        </div>
+                        <p className="text-sm text-[var(--muted)]">
+                          {a.submissions.length} submitted · {isOpen ? "Hide" : "View"}
+                        </p>
+                      </button>
 
-            <button
-              onClick={create}
-              disabled={saving || !title.trim()}
-              className="mt-6 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
-            >
-              {saving ? "Creating…" : "Create assignment"}
-            </button>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
-        ) : assignments.length === 0 ? (
-          <div className="py-12 text-center text-[var(--muted)]">No assignments set yet.</div>
-        ) : (
-          <div className="space-y-3">
-            {assignments.map((a) => (
-              <div key={a.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${a.type === "quiz" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
-                        {a.type}
-                      </span>
-                      <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{a.level}</span>
-                      {a.timeLimitMinutes && <span className="text-xs text-amber-700">⏱ {a.timeLimitMinutes} min</span>}
-                    </div>
-                    <h3 className="mt-1.5 font-semibold">{a.title}</h3>
-                  </div>
-                  <p className="text-sm text-[var(--muted)]">
-                    {a.submissions.length} submitted
-                  </p>
-                </div>
-
-                {a.submissions.length > 0 && (
-                  <div className="mt-3 space-y-1 border-t pt-3">
-                    {a.submissions.slice(0, 5).map((s) => (
-                      <div key={s.id} className="flex items-center justify-between text-sm">
-                        <span>
-                          {s.student.user.name ?? "—"}
-                          {s.student.studentCode && (
-                            <span className="ml-2 font-mono text-xs text-[var(--muted)]">{s.student.studentCode}</span>
+                      {isOpen && (
+                        <div className="mt-4 space-y-3 border-t border-[var(--border)] pt-4">
+                          {a.description && (
+                            <p className="whitespace-pre-wrap text-sm text-[var(--foreground-soft)]">{a.description}</p>
                           )}
-                        </span>
-                        <span className="font-semibold">{s.score ?? "—"}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+
+                          {/* The thing tutors were losing — once a quiz was set and
+                              students had it, there was no way back to see what the
+                              questions and correct answers even were. */}
+                          {a.type === "quiz" && Array.isArray(a.questions) && a.questions.length > 0 && (
+                            <div className="space-y-2">
+                              {a.questions.map((q, i) => (
+                                <div key={i} className="rounded-lg bg-[var(--surface-alt)] p-3 text-sm">
+                                  <p className="font-medium">
+                                    {i + 1}. {q.prompt}
+                                    <span className="ml-2 text-[11px] font-normal text-[var(--muted)]">
+                                      {QUESTION_TYPE_LABELS[q.type]} · {q.points} mark{q.points === 1 ? "" : "s"}
+                                    </span>
+                                  </p>
+                                  <p className="mt-1 text-xs text-[var(--muted)]">{answerSummary(q)}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {a.submissions.length > 0 && (
+                            <div className="space-y-1 pt-1">
+                              {a.submissions.slice(0, 5).map((s) => (
+                                <div key={s.id} className="flex items-center justify-between text-sm">
+                                  <span>
+                                    {s.student.user.name ?? "—"}
+                                    {s.student.studentCode && (
+                                      <span className="ml-2 font-mono text-xs text-[var(--muted)]">{s.student.studentCode}</span>
+                                    )}
+                                  </span>
+                                  <span className="font-semibold">{s.score ?? "—"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
     </LecturerShell>
+  );
+}
+
+export default function LecturerAssignmentsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-[var(--muted)]">Loading…</div>}>
+      <AssignmentsContent />
+    </Suspense>
   );
 }
