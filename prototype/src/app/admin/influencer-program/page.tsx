@@ -20,15 +20,20 @@ type Code = {
   code: string;
   type: "student_referral" | "influencer";
   status: "active" | "paused" | "revoked";
-  partnerType: "influencer" | "travel_agent" | "other" | null;
+  partnerType: "influencer" | "travel_agent" | "ambassador" | "other" | null;
   label: string | null;
   ownerUser: { id: string; name: string | null; email: string } | null;
   ownerStudent: unknown;
   _count: { redemptions: number };
 };
 
-const PARTNER_TYPE_LABEL: Record<string, string> = { influencer: "Influencer", travel_agent: "Travel agent", other: "Partner" };
-const PARTNER_TYPES = ["influencer", "travel_agent", "other"] as const;
+const PARTNER_TYPE_LABEL: Record<string, string> = {
+  influencer: "Influencer",
+  travel_agent: "Travel agent",
+  ambassador: "Easyway ambassador",
+  other: "Partner",
+};
+const PARTNER_TYPES = ["influencer", "travel_agent", "ambassador", "other"] as const;
 
 export default function InfluencerProgramHubPage() {
   const [codes, setCodes] = useState<Code[] | null>(null);
@@ -128,8 +133,8 @@ export default function InfluencerProgramHubPage() {
           <div>
             <h1 className="text-2xl font-bold text-[var(--foreground)]">Influencer Program</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Every influencer, travel agent and other partner — click a name to open their own dashboard, exactly as
-              they see it.
+              Every influencer, travel agent, Easyway ambassador and other partner — click a name to open their own
+              dashboard, exactly as they see it.
             </p>
           </div>
           <div className="flex gap-2">
@@ -179,6 +184,7 @@ export default function InfluencerProgramHubPage() {
                 <select value={form.partnerType} onChange={(e) => setForm((f) => ({ ...f, partnerType: e.target.value as (typeof PARTNER_TYPES)[number] }))} className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
                   <option value="influencer">Influencer</option>
                   <option value="travel_agent">Travel agent</option>
+                  <option value="ambassador">Easyway ambassador</option>
                   <option value="other">Other partner</option>
                 </select>
               </label>

@@ -2432,10 +2432,10 @@ model PromoCode {
   /// Display name, e.g. the influencer's public handle.
   label String?
 
-  /// influencer | travel_agent | other — only meaningful when type is
-  /// "influencer"; null reads as "influencer" in application code (every
-  /// partner before this field existed). The Influencer Program is the
-  /// umbrella for all three; student_referral codes never set this.
+  /// influencer | travel_agent | ambassador | other — only meaningful when
+  /// type is "influencer"; null reads as "influencer" in application code
+  /// (every partner before this field existed). The Influencer Program is
+  /// the umbrella for all four; student_referral codes never set this.
   partnerType String?
 
   /// Where to send this partner's commission. Free text, entered by the
