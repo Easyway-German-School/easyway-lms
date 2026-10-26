@@ -30,10 +30,10 @@ export type { TermsBlock, TermsSection } from "@/lib/terms-content";
  * the current version and shows who is behind it, and the signup gate starts
  * asking for the new one on its next render.
  */
-export const TERMS_VERSION = "2026-08-24";
+export const TERMS_VERSION = "2026-10-26";
 
 /** The same version, for a human. Shown next to every consent record. */
-export const TERMS_VERSION_LABEL = "24 August 2026";
+export const TERMS_VERSION_LABEL = "26 October 2026";
 
 export const TERMS_TITLE = "Student Terms and Conditions";
 export const TERMS_SCHOOL = "Easyway German Language School";

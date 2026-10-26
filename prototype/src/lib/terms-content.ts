@@ -7,7 +7,7 @@
  * because this is the text a student is asked to agree to and a helpfully
  * shortened version of it is not the thing they agreed to.
  *
- * 58 sections, 242 paragraphs.
+ * 58 sections, 243 paragraphs.
  *
  * The structure (a numbered section holding paragraph/bullet blocks) exists
  * because two of the three surfaces that render this have to address ONE
@@ -516,6 +516,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
     title: "Refund Policy",
     blocks: [
       { kind: "text", text: "Tuition fees and service payments are made to reserve a place in a class or programme and to cover administrative, operational, academic costs and Learning System Management (LMS) Platform cost incurred by the school. Therefore, refunds are not automatic and shall ONLY be considered under the conditions stated below." },
+      { kind: "text", text: "The Registration fee is generally non-refundable. Only the Tuition fee may be considered for a refund, and only where applicable under this policy." },
       { kind: "text", text: "Refunds may NOT be granted because a student:" },
       { kind: "bullet", text: "Suddenly changes their mind after registration." },
       { kind: "bullet", text: "Is no longer interested in studying." },
