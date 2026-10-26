@@ -20,7 +20,22 @@ import { createPortal } from "react-dom";
 import Mascot from "@/components/Mascot";
 import TermsGate from "@/components/TermsGate";
 import { refundSections, TERMS_SECTIONS } from "@/lib/terms";
-import { CheckIcon, CrossIcon } from "@/components/icons";
+import { CheckIcon, CrossIcon, DownloadIcon } from "@/components/icons";
+
+/** Same personalised PDF as /terms — offered here too, since this is the other place section 24 asks a student to have seen the policy. */
+async function downloadTermsPdf() {
+  const response = await fetch("/api/student/terms/pdf", { cache: "no-store" });
+  if (!response.ok) return;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "Terms-and-Conditions.pdf";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 type TermsStatus = {
   accepted: boolean;
@@ -129,6 +144,13 @@ export default function RefundModal({ open, onClose }: { open: boolean; onClose:
               className="w-full rounded-xl px-6 py-2.5 text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
             >
               Skip to refund policy
+            </button>
+            <button
+              type="button"
+              onClick={downloadTermsPdf}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl px-6 py-2.5 text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
+            >
+              <DownloadIcon className="h-3.5 w-3.5" /> Download your copy (PDF)
             </button>
           </div>
         </div>
