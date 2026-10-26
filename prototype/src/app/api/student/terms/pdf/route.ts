@@ -11,6 +11,15 @@ import { ACCEPTANCE_WITHOUT_RECORD, TERMS_VERSION_LABEL } from "@/lib/terms";
  * The student's personal, downloadable copy of the Terms and Conditions
  * (Refund Policy included — sections 23–26), with their own photo and
  * acceptance record on it. Linked from /terms and the refund wall.
+ *
+ * egress-reviewed: `getFile()` below reads one student's own small headshot
+ * (a few hundred KB at most, compressed on upload — see lib/upload.ts) out of
+ * the bucket, server-side, purely to embed it into the generated PDF this
+ * route builds. The photo's bytes never pass straight through as a response
+ * body — they are consumed and re-encoded into a different file — so this is
+ * the "server-side read for processing" case the egress check's own doc
+ * calls out, not the per-request passthrough that caused the Sept 2026
+ * recording-replay overage this check exists to catch.
  */
 
 async function fetchPhoto(photoUrl: unknown): Promise<TermsCertificatePhoto | null> {
