@@ -24,6 +24,7 @@ import {
   CheckIcon,
   CrossIcon,
   DoorIcon,
+  DownloadIcon,
   ExamCentreIcon,
   FlagIcon,
   FlameIcon,
@@ -240,6 +241,7 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState("");
   const [formState, setFormState] = useState(EMPTY_FORM);
   const [terms, setTerms] = useState<TermsStatus | null>(null);
+  const [downloadingTerms, setDownloadingTerms] = useState(false);
   /** Null branch — the account came in on a sheet with the column blank. */
   const [needsBranch, setNeedsBranch] = useState(false);
   const [branchSetupAutoOpen, setBranchSetupAutoOpen] = useState(false);
@@ -384,6 +386,25 @@ export default function ProfilePage() {
       active = false;
     };
   }, []);
+
+  async function downloadTermsPdf() {
+    setDownloadingTerms(true);
+    try {
+      const response = await fetch("/api/student/terms/pdf", { cache: "no-store" });
+      if (!response.ok) return;
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "Terms-and-Conditions.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingTerms(false);
+    }
+  }
 
   /**
    * The photo saves on its own the moment it is taken, rather than waiting for
@@ -917,13 +938,24 @@ export default function ProfilePage() {
         ) : terms ? (
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">{terms.fallbackNotice}</p>
         ) : null}
-        <Link
-          href="/terms"
-          target="_blank"
-          className="mt-4 inline-flex items-center rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-bold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
-        >
-          Read the Terms and Conditions
-        </Link>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link
+            href="/terms"
+            target="_blank"
+            className="inline-flex items-center rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-bold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+          >
+            Read the Terms and Conditions
+          </Link>
+          <button
+            type="button"
+            onClick={downloadTermsPdf}
+            disabled={downloadingTerms}
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-strong)] px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <DownloadIcon className="h-4 w-4" />
+            {downloadingTerms ? "Preparing…" : "Download your copy (PDF)"}
+          </button>
+        </div>
       </section>
 
       {/* ---------- Edit sheet ---------- */}
