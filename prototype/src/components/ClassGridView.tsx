@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AttachmentIcon, LockIcon } from "@/components/icons";
 import MaterialQuestPanel from "@/components/materials/MaterialQuestPanel";
@@ -68,44 +68,64 @@ function monthStart(label: string): Date | null {
 }
 
 /**
- * Which edge the popover hangs from.
+ * Where the popover lands, in pixels relative to the month card.
  *
- * It is 224px wide and a day cell on a phone is about 40px. Centred on the
- * cell — which is what it used to do unconditionally — it hung 90px off the
- * side of the card for any class falling on a Sunday or a Saturday, which on a
- * Mon/Wed/Fri timetable is most of them. So the near-edge columns anchor to
- * their own edge instead of to their centre, and the arrow moves to match.
+ * It used to anchor with static Tailwind classes keyed off which column the
+ * day fell in (centre column vs. near an edge). That still let it spill past
+ * the card — and off the phone's screen — because the breakpoint guesses
+ * didn't match every card width. Measuring the actual cell and card and
+ * clamping the box between them can't drift out of frame, because the box's
+ * position is the available room, not a guess at it.
  */
-function anchorFor(col: number): { box: string; arrow: string } {
-  if (col <= 1) return { box: "left-0", arrow: "left-5" };
-  if (col >= 5) return { box: "right-0", arrow: "right-5" };
-  return { box: "left-1/2 -translate-x-1/2", arrow: "left-1/2 -translate-x-1/2" };
-}
-
 function DayPopover({
   node,
   below,
-  col,
+  cellEl,
+  cardEl,
   onOpenQuests,
 }: {
   node: ClassNode;
   below: boolean;
-  col: number;
+  cellEl: HTMLElement | null;
+  cardEl: HTMLElement | null;
   onOpenQuests: (material: { id: string; title: string }) => void;
 }) {
   const s = nodeSummary(node);
-  const anchor = anchorFor(col);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; arrowLeft: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!cellEl || !cardEl || !box) return;
+
+    const cellRect = cellEl.getBoundingClientRect();
+    const cardRect = cardEl.getBoundingClientRect();
+    const pad = 12;
+
+    const cellCenterX = cellRect.left - cardRect.left + cellRect.width / 2;
+    let left = cellCenterX - box.offsetWidth / 2;
+    left = Math.max(pad, Math.min(left, cardRect.width - box.offsetWidth - pad));
+    const arrowLeft = Math.max(16, Math.min(cellCenterX - left, box.offsetWidth - 16));
+
+    const top = below
+      ? cellRect.bottom - cardRect.top + 8
+      : cellRect.top - cardRect.top - box.offsetHeight - 8;
+
+    setPos({ left, top, arrowLeft });
+  }, [cellEl, cardEl, below]);
+
   return (
     <motion.div
+      ref={boxRef}
       initial={{ opacity: 0, y: below ? -6 : 6, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
+      animate={{ opacity: pos ? 1 : 0, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: below ? -6 : 6, scale: 0.96 }}
       transition={{ duration: 0.14 }}
-      // Opens downward for cells in the top row, otherwise upward — a popover
-      // above a first-row cell is clipped off the top of the card.
-      className={`absolute z-30 w-56 max-w-[calc(100vw-3rem)] rounded-2xl cinematic-card p-3 text-left shadow-xl ${anchor.box} ${
-        below ? "top-full mt-2" : "bottom-full mb-2"
-      }`}
+      // Measured and positioned in the effect above; invisible on the first
+      // frame it mounts (position:0,0) until that measurement lands, so there
+      // is never a visible jump from a guessed spot to the real one.
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
+      className="absolute z-30 w-56 max-w-[calc(100vw_-_3rem)] rounded-2xl cinematic-card p-3 text-left shadow-xl"
       role="tooltip"
     >
       <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
@@ -198,13 +218,140 @@ function DayPopover({
 
       {/* Arrow pointing back at the day cell, on whichever side it opened. */}
       <span
-        className={`absolute h-3 w-3 rotate-45 bg-[var(--surface)] ${anchor.arrow} ${
+        style={{ left: pos?.arrowLeft ?? 0 }}
+        className={`absolute h-3 w-3 rotate-45 bg-[var(--surface)] ${
           below
             ? "bottom-full translate-y-1/2 border-l border-t border-[var(--border)]"
             : "top-full -translate-y-1/2 border-b border-r border-[var(--border)]"
         }`}
       />
     </motion.div>
+  );
+}
+
+/**
+ * One month's card. It owns the positioning context the popover measures
+ * against (its own ref) plus a ref to every day button in it, so whichever
+ * day is open can find both ends of the measurement.
+ */
+function MonthCard({
+  month,
+  byDay,
+  openKey,
+  hoverKey,
+  setOpenKey,
+  setHoverKey,
+  onOpenQuests,
+}: {
+  month: Month;
+  byDay: Map<string, ClassNode>;
+  openKey: string | null;
+  hoverKey: string | null;
+  setOpenKey: (key: string | null) => void;
+  setHoverKey: (updater: (k: string | null) => string | null) => void;
+  onOpenQuests: (material: { id: string; title: string }) => void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cellRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  const start = monthStart(month.label);
+  if (!start) return null;
+
+  const year = start.getFullYear();
+  const monthIndex = start.getMonth();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  // Blank cells so the 1st lands under its real weekday.
+  const leadingBlanks = start.getDay();
+
+  return (
+    <div
+      ref={cardRef}
+      className="relative rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 sm:rounded-[28px] sm:p-6"
+    >
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-lg font-extrabold sm:text-xl">{month.label}</h3>
+        <span className="text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</span>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+        {WEEKDAY_INITIALS.map((initial, i) => (
+          <div key={i} className="pb-1 text-center text-[11px] font-bold uppercase text-[var(--muted)]">
+            {initial}
+          </div>
+        ))}
+
+        {Array.from({ length: leadingBlanks }).map((_, i) => (
+          <div key={`blank-${i}`} />
+        ))}
+
+        {Array.from({ length: daysInMonth }).map((_, i) => {
+          const day = i + 1;
+          const key = `${year}-${monthIndex}-${day}`;
+          const node = byDay.get(key);
+          const showing = openKey === key || hoverKey === key;
+          // Row 0 has no space above it inside the card.
+          const inTopRow = Math.floor((leadingBlanks + i) / 7) === 0;
+
+          if (!node) {
+            return (
+              <div
+                key={key}
+                className="flex aspect-square items-center justify-center rounded-xl text-sm text-[var(--muted)]/60"
+              >
+                {day}
+              </div>
+            );
+          }
+
+          return (
+            <div key={key}>
+              <button
+                ref={(el) => {
+                  if (el) cellRefs.current.set(key, el);
+                  else cellRefs.current.delete(key);
+                }}
+                onClick={() => setOpenKey(openKey === key ? null : key)}
+                onMouseEnter={() => setHoverKey(() => key)}
+                onMouseLeave={() => setHoverKey((k) => (k === key ? null : k))}
+                onFocus={() => setHoverKey(() => key)}
+                onBlur={() => setHoverKey((k) => (k === key ? null : k))}
+                aria-label={`${node.weekday} ${shortDate(new Date(node.date))}, ${node.startTime} to ${node.endTime}${
+                  node.zoneLabel ? ` ${node.zoneLabel}` : ""
+                }${node.movedFrom ? ", moved from another day" : ""}${node.state === "locked" ? ", topic locked" : ""}`}
+                className={`relative flex aspect-square w-full items-center justify-center rounded-xl border-2 text-sm font-extrabold shadow-sm transition hover:scale-105 ${
+                  STATE_STYLE[node.state] ?? STATE_STYLE.locked
+                } ${node.movedFrom ? MOVED_RING : ""}`}
+              >
+                {day}
+                {node.isNext && (
+                  <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full bg-slate-900 ring-2 ring-white" />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {showing && (
+                  <DayPopover
+                    node={node}
+                    below={inTopRow}
+                    cellEl={cellRefs.current.get(key) ?? null}
+                    cardEl={cardRef.current}
+                    onOpenQuests={onOpenQuests}
+                  />
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-[var(--muted)]">
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-emerald-500" /> Held</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-400" /> Today</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-slate-300" /> Locked</span>
+        <span className="flex items-center gap-1.5"><span className={`h-3 w-3 rounded bg-slate-300 ${MOVED_RING}`} /> Moved</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-red-200" /> Cancelled</span>
+      </div>
+    </div>
   );
 }
 
@@ -222,95 +369,18 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
 
   return (
     <div className="space-y-6">
-      {months.map((month) => {
-        const start = monthStart(month.label);
-        if (!start) return null;
-
-        const year = start.getFullYear();
-        const monthIndex = start.getMonth();
-        const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-        // Blank cells so the 1st lands under its real weekday.
-        const leadingBlanks = start.getDay();
-
-        return (
-          <div key={month.label} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 sm:rounded-[28px] sm:p-6">
-            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <h3 className="text-lg font-extrabold sm:text-xl">{month.label}</h3>
-              <span className="text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</span>
-            </div>
-
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-              {WEEKDAY_INITIALS.map((initial, i) => (
-                <div key={i} className="pb-1 text-center text-[11px] font-bold uppercase text-[var(--muted)]">
-                  {initial}
-                </div>
-              ))}
-
-              {Array.from({ length: leadingBlanks }).map((_, i) => (
-                <div key={`blank-${i}`} />
-              ))}
-
-              {Array.from({ length: daysInMonth }).map((_, i) => {
-                const day = i + 1;
-                const key = `${year}-${monthIndex}-${day}`;
-                const node = byDay.get(key);
-                const showing = openKey === key || hoverKey === key;
-                // Row 0 has no space above it inside the card.
-                const inTopRow = Math.floor((leadingBlanks + i) / 7) === 0;
-                const col = (leadingBlanks + i) % 7;
-
-                if (!node) {
-                  return (
-                    <div
-                      key={key}
-                      className="flex aspect-square items-center justify-center rounded-xl text-sm text-[var(--muted)]/60"
-                    >
-                      {day}
-                    </div>
-                  );
-                }
-
-                return (
-                  <div key={key} className="relative">
-                    <button
-                      onClick={() => setOpenKey(openKey === key ? null : key)}
-                      onMouseEnter={() => setHoverKey(key)}
-                      onMouseLeave={() => setHoverKey((k) => (k === key ? null : k))}
-                      onFocus={() => setHoverKey(key)}
-                      onBlur={() => setHoverKey((k) => (k === key ? null : k))}
-                      aria-label={`${node.weekday} ${shortDate(new Date(node.date))}, ${node.startTime} to ${node.endTime}${
-                        node.zoneLabel ? ` ${node.zoneLabel}` : ""
-                      }${node.movedFrom ? ", moved from another day" : ""}${node.state === "locked" ? ", topic locked" : ""}`}
-                      className={`relative flex aspect-square w-full items-center justify-center rounded-xl border-2 text-sm font-extrabold shadow-sm transition hover:scale-105 ${
-                        STATE_STYLE[node.state] ?? STATE_STYLE.locked
-                      } ${node.movedFrom ? MOVED_RING : ""}`}
-                    >
-                      {day}
-                      {node.isNext && (
-                        <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full bg-slate-900 ring-2 ring-white" />
-                      )}
-                    </button>
-
-                    <AnimatePresence>
-                      {showing && (
-                        <DayPopover node={node} below={inTopRow} col={col} onOpenQuests={setQuestMaterial} />
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-[var(--muted)]">
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-emerald-500" /> Held</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-400" /> Today</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-slate-300" /> Locked</span>
-              <span className="flex items-center gap-1.5"><span className={`h-3 w-3 rounded bg-slate-300 ${MOVED_RING}`} /> Moved</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-red-200" /> Cancelled</span>
-            </div>
-          </div>
-        );
-      })}
+      {months.map((month) => (
+        <MonthCard
+          key={month.label}
+          month={month}
+          byDay={byDay}
+          openKey={openKey}
+          hoverKey={hoverKey}
+          setOpenKey={setOpenKey}
+          setHoverKey={setHoverKey}
+          onOpenQuests={setQuestMaterial}
+        />
+      ))}
 
       <MaterialQuestPanel material={questMaterial} onClose={() => setQuestMaterial(null)} />
     </div>

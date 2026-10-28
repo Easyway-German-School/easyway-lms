@@ -206,7 +206,7 @@ export default function PaymentsPage() {
             </div>
 
             <div className="mt-10 overflow-hidden rounded-[32px] border border-[var(--border)] bg-[var(--surface-alt)] shadow-sm">
-              <div className="grid grid-cols-6 gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4 text-sm uppercase tracking-[0.24em] text-[var(--muted)]">
+              <div className="hidden border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4 text-sm uppercase tracking-[0.24em] text-[var(--muted)] sm:grid sm:grid-cols-6 sm:gap-4">
                 <span className="col-span-2">Payment</span>
                 <span>Status</span>
                 <span>Amount</span>
@@ -214,7 +214,7 @@ export default function PaymentsPage() {
                 <span></span>
               </div>
 
-              <div className="space-y-3 px-6 py-6 text-sm text-[var(--foreground)]">
+              <div className="space-y-3 px-4 py-6 text-sm text-[var(--foreground)] sm:px-6">
                 {loading ? (
                   <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-6 py-8 text-center text-sm text-[var(--muted)]">
                     Loading payment history…
@@ -231,30 +231,39 @@ export default function PaymentsPage() {
                   payments.map((payment) => {
                     const received = ["completed", "partial"].includes(payment.status.toLowerCase());
                     return (
-                      <div key={payment.id} className="grid grid-cols-6 gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm">
+                      <div
+                        key={payment.id}
+                        className="flex flex-col gap-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm sm:grid sm:grid-cols-6 sm:items-center sm:gap-4"
+                      >
                         <span
-                          className="col-span-2"
+                          className="font-semibold sm:col-span-2 sm:font-normal"
                           title="This note was recorded with the payment and does not change when your batch changes."
                         >
                           {payment.description || "Payment received"}
-                          <span className="ml-1 text-xs text-[var(--muted)]">· recorded payment note</span>
+                          <span className="ml-1 text-xs font-normal text-[var(--muted)]">· recorded payment note</span>
                         </span>
-                        <span className={payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"}>
-                          {payment.status}
-                        </span>
-                        <span>
-                          {payment.currency.toUpperCase()} {payment.amount.toLocaleString()}
-                        </span>
-                        <span>{new Date(payment.createdAt).toLocaleDateString()}</span>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)] sm:contents sm:text-sm">
+                          <span
+                            className={`font-semibold capitalize sm:font-normal sm:capitalize-none ${
+                              payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"
+                            }`}
+                          >
+                            {payment.status}
+                          </span>
+                          <span className="text-[var(--foreground)]">
+                            {payment.currency.toUpperCase()} {payment.amount.toLocaleString()}
+                          </span>
+                          <span>{new Date(payment.createdAt).toLocaleDateString()}</span>
+                        </div>
                         {received ? (
                           <a
                             href={`/api/student/payments/${payment.id}/receipt`}
-                            className="text-xs font-semibold text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+                            className="self-start text-xs font-semibold text-[var(--accent)] underline underline-offset-2 hover:opacity-80 sm:self-auto"
                           >
                             Receipt
                           </a>
                         ) : (
-                          <span />
+                          <span className="hidden sm:inline" />
                         )}
                       </div>
                     );
