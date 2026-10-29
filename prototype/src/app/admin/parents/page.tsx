@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
 import PasswordInput from "@/components/PasswordInput";
 
@@ -10,6 +11,7 @@ type LinkedChild = {
   student: {
     id: string;
     studentCode: string | null;
+    level: string;
     user: { name: string | null; email: string };
   };
 };
@@ -157,7 +159,7 @@ export default function AdminParentsPage() {
       if (!res.ok) throw new Error(data.error || "Unable to link child");
       setLinkedChildren((prev) => [
         ...prev,
-        { id: `pending-${student.id}`, studentId: student.id, student: { id: student.id, studentCode: student.studentCode, user: student.user } },
+        { id: `pending-${student.id}`, studentId: student.id, student: { id: student.id, studentCode: student.studentCode, level: student.level, user: student.user } },
       ]);
       setStudentQuery("");
       setStudentOptions([]);
@@ -518,12 +520,20 @@ export default function AdminParentsPage() {
                         {row.children.length ? (
                           <div className="flex flex-wrap gap-1.5">
                             {row.children.map((child) => (
-                              <span
+                              <div
                                 key={child.studentId}
                                 className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
                               >
-                                {child.student.user.name || child.student.user.email}
-                              </span>
+                                <Link
+                                  href={`/admin/students/${child.studentId}`}
+                                  className="hover:underline"
+                                >
+                                  {child.student.user.name || child.student.user.email}
+                                </Link>
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                                  {child.student.level || "Level unavailable"}
+                                </span>
+                              </div>
                             ))}
                           </div>
                         ) : row.childName || row.childEmail ? (
