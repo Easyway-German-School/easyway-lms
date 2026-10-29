@@ -35,6 +35,7 @@ const include = {
         select: {
           id: true,
           studentCode: true,
+          level: true,
           user: { select: { name: true, email: true } },
         },
       },
