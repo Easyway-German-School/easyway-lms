@@ -18,6 +18,7 @@ import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload
 import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import { describePhone, studentPhoneRaw } from "@/lib/phone-display";
+import { enrolmentYearOptions } from "@/lib/student-enrolment-years";
 
 /**
  * The chase list, as one-tap views. These ids are the `FOCUS_PRESETS` in
@@ -44,21 +45,6 @@ const BATCH_MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ] as const;
-
-/**
- * Years the "Enrolled in year" filter offers — the current year back through
- * when this school's earliest known batches sit, per lib/student-enrolment.ts.
- * A plain range rather than a fetched list: nobody needs a year with zero
- * students to be missing from the dropdown, and a live query for "which years
- * actually have a row" would be one more request for what is, at most, a
- * handful of options.
- */
-function enrolmentYearOptions(): number[] {
-  const currentYear = new Date().getFullYear();
-  const years: number[] = [];
-  for (let year = currentYear; year >= currentYear - 6; year -= 1) years.push(year);
-  return years;
-}
 
 type BranchOption = {
   id: string;
