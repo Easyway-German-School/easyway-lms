@@ -510,7 +510,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           ))}
-          <StudentClassConcernPrompt collapsed={collapsed} onOpen={() => setDrawerOpen(false)} />
+          <StudentClassConcernPrompt collapsed={collapsed} />
         </nav>
 
         {/* The way out. Phones get shared and cybercafé machines get walked away
