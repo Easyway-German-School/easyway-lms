@@ -35,6 +35,7 @@ import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
 import TutorialRuntime from "@/components/TutorialRuntime";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
+import StudentClassConcernPrompt from "@/components/StudentClassConcernPrompt";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
@@ -509,6 +510,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           ))}
+          <StudentClassConcernPrompt collapsed={collapsed} onOpen={() => setDrawerOpen(false)} />
         </nav>
 
         {/* The way out. Phones get shared and cybercafé machines get walked away
