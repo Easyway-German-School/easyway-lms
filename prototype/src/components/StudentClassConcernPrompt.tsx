@@ -28,7 +28,7 @@ export default function StudentClassConcernPrompt({
   onOpen,
 }: {
   collapsed: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -50,7 +50,7 @@ export default function StudentClassConcernPrompt({
         <button
           type="button"
           onClick={() => {
-            onOpen();
+            onOpen?.();
             setOpen(true);
           }}
           title={collapsed ? "Class concerns" : ""}
