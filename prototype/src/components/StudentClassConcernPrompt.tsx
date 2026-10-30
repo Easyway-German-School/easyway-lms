@@ -49,7 +49,7 @@ export default function StudentClassConcernPrompt({
   onOpen,
 }: {
   collapsed: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ConcernDraft>(EMPTY_DRAFT);
@@ -106,7 +106,7 @@ export default function StudentClassConcernPrompt({
         <button
           type="button"
           onClick={() => {
-            onOpen();
+            onOpen?.();
             setOpen(true);
             if (typeof window !== "undefined") {
               window.localStorage.setItem(REMINDER_KEY, String(Date.now()));
