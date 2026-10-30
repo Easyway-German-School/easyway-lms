@@ -1,45 +1,101 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Mascot from "@/components/Mascot";
 import { MailIcon } from "@/components/icons";
 
 const RECIPIENT = "precious.okoro@easywaylanguageschool.com";
-const SUBJECT = "Class concern from an Easyway student";
-const BODY = [
-  "Hello Precious,",
-  "",
-  "I would like to report a concern about one of my classes.",
-  "",
-  "My name:",
-  "Course or class:",
-  "Tutor's name:",
-  "Date(s) of the class(es):",
-  "What happened? (For example: a missed class without explanation, fewer classes than scheduled, or a concern about how the class is taught.)",
-  "",
-  "Thank you.",
-].join("\n");
+const REMINDER_MS = 1000 * 60 * 60 * 24 * 3;
+const REMINDER_KEY = "easyway-class-concern-reminder";
 
-const EMAIL_HREF = `mailto:${RECIPIENT}?subject=${encodeURIComponent(SUBJECT)}&body=${encodeURIComponent(BODY)}`;
+type ConcernDraft = {
+  name: string;
+  course: string;
+  tutor: string;
+  dates: string;
+  details: string;
+};
+
+const EMPTY_DRAFT: ConcernDraft = {
+  name: "",
+  course: "",
+  tutor: "",
+  dates: "",
+  details: "",
+};
+
+function buildMailHref(draft: ConcernDraft) {
+  const subject = draft.name ? `Class concern from ${draft.name}` : "Class concern from an Easyway student";
+  const body = [
+    "Hello Precious,",
+    "",
+    "I would like to report a concern about one of my classes.",
+    "",
+    `My name: ${draft.name}`,
+    `Course or class: ${draft.course}`,
+    `Tutor's name: ${draft.tutor}`,
+    `Date(s) of the class(es): ${draft.dates}`,
+    `What happened? ${draft.details || "(For example: a missed class without explanation, fewer classes than scheduled, or a concern about how the class is taught.)"}`,
+    "",
+    "Thank you.",
+  ].join("\n");
+
+  return `mailto:${RECIPIENT}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
 
 export default function StudentClassConcernPrompt({
   collapsed,
   onOpen,
 }: {
   collapsed: boolean;
-  onOpen?: () => void;
+  onOpen: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<ConcernDraft>(EMPTY_DRAFT);
+
+  const closePrompt = useCallback(() => {
+    setOpen(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REMINDER_KEY, String(Date.now()));
+    }
+  }, []);
+
+  const reminderMessage = useMemo(
+    () =>
+      "This is a valid class or tutor concern. Please include specific dates, the tutor or class name, and clear facts so the school can follow up properly.",
+    [],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const lastReminder = Number(window.localStorage.getItem(REMINDER_KEY) ?? "0");
+    const isDue = !lastReminder || Date.now() - lastReminder >= REMINDER_MS;
+    if (!isDue) return;
+
+    const timer = window.setTimeout(() => {
+      setOpen(true);
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closePrompt();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open]);
+  }, [closePrompt, open]);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const href = buildMailHref(draft);
+    closePrompt();
+    window.location.href = href;
+  };
 
   return (
     <>
@@ -50,8 +106,11 @@ export default function StudentClassConcernPrompt({
         <button
           type="button"
           onClick={() => {
-            onOpen?.();
+            onOpen();
             setOpen(true);
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem(REMINDER_KEY, String(Date.now()));
+            }
           }}
           title={collapsed ? "Class concerns" : ""}
           aria-haspopup="dialog"
@@ -70,20 +129,20 @@ export default function StudentClassConcernPrompt({
         ? createPortal(
             <div
               className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/60 p-4 backdrop-blur-sm"
-              onClick={() => setOpen(false)}
+              onClick={closePrompt}
               role="presentation"
             >
               <section
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="class-concern-title"
-                className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.5)]"
+                className="relative max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-[28px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.5)]"
                 onClick={(event) => event.stopPropagation()}
               >
                 <button
                   type="button"
                   aria-label="Close class concerns"
-                  onClick={() => setOpen(false)}
+                  onClick={closePrompt}
                   className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full text-xl text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
                 >
                   ×
@@ -100,27 +159,79 @@ export default function StudentClassConcernPrompt({
                     Concerned about your classes?
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-[var(--foreground-soft)]">
-                    If your tutor misses classes without explanation, holds fewer classes than scheduled—including a
-                    class scheduled three times a week—or you have concerns about their teaching, please email
-                    Precious directly. This goes to the school by email, not through Enquiries, so there is a written
-                    record.
+                    If your tutor misses classes without explanation, teaches fewer classes than scheduled, or there are
+                    serious concerns about the quality of teaching, please send a clear, factual complaint to Precious.
+                    This route is for legitimate class and tutor concerns. It does not go through general Enquiries.
                   </p>
-                  <p className="mt-3 text-center text-sm font-semibold text-[var(--foreground)]">{RECIPIENT}</p>
-                  <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-                    The email draft will prompt you for your name, tutor, class dates, and what happened. It will only
-                    be sent when you press Send in your email app.
-                  </p>
-                  <a
-                    href={EMAIL_HREF}
-                    onClick={() => setOpen(false)}
-                    className="mt-5 flex items-center justify-center gap-2 rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110"
-                  >
-                    <MailIcon className="h-4 w-4" />
-                    Email your class concern
-                  </a>
+                  <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-center text-sm font-semibold text-[var(--foreground)]">
+                    {RECIPIENT}
+                  </div>
+
+                  <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)] sm:col-span-2">
+                        Your name
+                        <input
+                          value={draft.name}
+                          onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                          placeholder="Your full name"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">
+                        Course / class
+                        <input
+                          value={draft.course}
+                          onChange={(event) => setDraft((current) => ({ ...current, course: event.target.value }))}
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                          placeholder="e.g. A1 German"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">
+                        Tutor name
+                        <input
+                          value={draft.tutor}
+                          onChange={(event) => setDraft((current) => ({ ...current, tutor: event.target.value }))}
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                          placeholder="Tutor's name"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)] sm:col-span-2">
+                        Class date(s)
+                        <input
+                          value={draft.dates}
+                          onChange={(event) => setDraft((current) => ({ ...current, dates: event.target.value }))}
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                          placeholder="e.g. 12 May 2026, 14 May 2026"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)] sm:col-span-2">
+                        What happened?
+                        <textarea
+                          value={draft.details}
+                          onChange={(event) => setDraft((current) => ({ ...current, details: event.target.value }))}
+                          className="mt-1 min-h-[110px] w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                          placeholder="Please include missed classes, fewer classes than scheduled, or concerns about how the class is being taught."
+                        />
+                      </label>
+                    </div>
+
+                    <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                      {reminderMessage}
+                    </p>
+
+                    <button
+                      type="submit"
+                      className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+                    >
+                      <MailIcon className="h-4 w-4" />
+                      Send complaint by email
+                    </button>
+                  </form>
+
                   <button
                     type="button"
-                    onClick={() => setOpen(false)}
+                    onClick={closePrompt}
                     className="mt-3 w-full py-2 text-sm font-medium text-[var(--muted)] transition hover:text-[var(--foreground)]"
                   >
                     Maybe later
