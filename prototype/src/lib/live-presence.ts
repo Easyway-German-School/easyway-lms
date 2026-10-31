@@ -296,12 +296,54 @@ export async function closeLiveSession(roomName: string): Promise<number> {
   return result.count;
 }
 
+/** A first live join is also proof the student has started classes. */
+async function ensureStudentStartedFromLiveJoin(studentId: string, sessionStartedAt: Date): Promise<void> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { classesStartedAt: true },
+  });
+  if (!student || student.classesStartedAt) return;
+
+  const confirmedAt = new Date(sessionStartedAt);
+  await prisma.student.update({
+    where: { id: studentId },
+    data: {
+      classesStartedAt: confirmedAt,
+      startConfirmedAt: confirmedAt,
+      startConfirmedVia: "attendance",
+      startPromptSnoozedUntil: null,
+    },
+  });
+
+  await prisma.journeyEvent.create({
+    data: {
+      studentId,
+      type: "started",
+      stage: "firstDay",
+      label: "Joined a live class",
+      detail: "Confirmed from the first live class join.",
+      source: "attendance",
+      occurredAt: confirmedAt,
+    },
+  });
+}
+
 /** Mark an invited student as having actually turned up. */
 export async function markInviteJoined(sessionId: string, studentId: string): Promise<void> {
-  await prisma.liveClassInvite.updateMany({
+  const updated = await prisma.liveClassInvite.updateMany({
     where: { sessionId, studentId },
     data: { status: "joined", joinedAt: new Date() },
   });
+
+  if (updated.count > 0) {
+    const session = await prisma.liveClassSession.findUnique({
+      where: { id: sessionId },
+      select: { startedAt: true },
+    });
+    if (session) {
+      await ensureStudentStartedFromLiveJoin(studentId, session.startedAt);
+    }
+  }
 }
 
 /**
@@ -335,6 +377,14 @@ export async function recordAttendance(sessionId: string, studentId: string): Pr
     // happened would make the ring button look broken.
     create: { sessionId, studentId, status: "joined", joinedAt: new Date(), ringCount: 0 },
   });
+
+  const session = await prisma.liveClassSession.findUnique({
+    where: { id: sessionId },
+    select: { startedAt: true },
+  });
+  if (session) {
+    await ensureStudentStartedFromLiveJoin(studentId, session.startedAt);
+  }
 }
 
 /** The student said no. Stops the popup ringing at them and tells the tutor. */
