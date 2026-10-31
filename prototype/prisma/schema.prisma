@@ -2372,6 +2372,10 @@ model Payment {
    * they sit A2 in October.
    */
   level              String?
+  /// Client-generated key that makes manual desk entries safe to retry.
+  idempotencyKey     String?   @unique
+  /// Hash of the normalized create request; rejects reuse of a key for changed data.
+  idempotencyFingerprint String?
   stripeSessionId    String?
   paymentIntentId    String?
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent

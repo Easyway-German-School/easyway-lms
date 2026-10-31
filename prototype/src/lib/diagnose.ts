@@ -40,7 +40,7 @@ import type { PortalVerdict } from "@/lib/portal-verdict";
 import type { Capability } from "@/lib/admin-roles";
 // The ONE definition of "this payment counts as received money". Re-deriving it here is exactly
 // how the paywall drifted apart in thirteen places.
-import { isReceivedPayment } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { studentMayJoinBatch } from "@/lib/class-batch";
 
 // ---------------------------------------------------------------------------
@@ -50,8 +50,11 @@ import { studentMayJoinBatch } from "@/lib/class-batch";
 export type PaymentFact = {
   id: string;
   amount: number;
+  currency: string;
   status: string;
   method: string;
+  description: string | null;
+  level: string | null;
   /** Paystack reference — stored in Payment.stripeSessionId (and paymentIntentId once settled). */
   references: string[];
   createdAt: string;
@@ -206,6 +209,54 @@ export const naira = (n: number) => `₦${Math.round(n).toLocaleString("en-NG")}
 const kobo = (n: number) => naira(n / 100);
 const when = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "never");
 
+const MANUAL_DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+
+function possibleDuplicateManualPayments(payments: PaymentFact[]): PaymentFact[][] {
+  const candidates = payments
+    .filter((payment) => {
+      const method = payment.method.trim().toLowerCase();
+      return (
+        isReceivedPayment(payment.status) &&
+        payment.references.length === 0 &&
+        method !== "paystack" &&
+        method !== "stripe" &&
+        !isRegistrationFeePayment(payment.description) &&
+        Boolean(payment.description?.trim())
+      );
+    })
+    .map((payment) => ({ payment, timestamp: new Date(payment.createdAt).getTime() }))
+    .filter(({ timestamp }) => Number.isFinite(timestamp))
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  const groups: PaymentFact[][] = [];
+  const groupedIds = new Set<string>();
+  for (let i = 0; i < candidates.length; i += 1) {
+    const first = candidates[i];
+    if (groupedIds.has(first.payment.id)) continue;
+    const description = first.payment.description!.trim().toLowerCase();
+    const group = [first.payment];
+    for (let j = i + 1; j < candidates.length; j += 1) {
+      const next = candidates[j];
+      if (next.timestamp - first.timestamp > MANUAL_DUPLICATE_WINDOW_MS) break;
+      const payment = next.payment;
+      if (
+        payment.amount === first.payment.amount &&
+        payment.currency.toLowerCase() === first.payment.currency.toLowerCase() &&
+        payment.method.trim().toLowerCase() === first.payment.method.trim().toLowerCase() &&
+        String(payment.level ?? "").trim().toUpperCase() === String(first.payment.level ?? "").trim().toUpperCase() &&
+        payment.description?.trim().toLowerCase() === description
+      ) {
+        group.push(payment);
+      }
+    }
+    if (group.length > 1) {
+      for (const payment of group) groupedIds.add(payment.id);
+      groups.push(group);
+    }
+  }
+  return groups;
+}
+
 // ---------------------------------------------------------------------------
 // Paystack matching — the algorithm behind "I paid and it is not showing"
 // ---------------------------------------------------------------------------
@@ -287,6 +338,35 @@ const ruleUnrecordedPayment: Rule = {
         needs: "payments" as Capability,
         params: { reference: tx.reference },
       })),
+    };
+  },
+};
+
+const rulePossibleDuplicateManualPayments: Rule = {
+  id: "possible-duplicate-manual-payments",
+  run(facts) {
+    const groups = possibleDuplicateManualPayments(facts.payments);
+    if (groups.length === 0) return null;
+    const duplicateCount = groups.reduce((sum, group) => sum + group.length, 0);
+    const total = groups.reduce(
+      (sum, group) => sum + group.reduce((groupSum, payment) => groupSum + payment.amount, 0),
+      0,
+    );
+    return {
+      rule: "possible-duplicate-manual-payments",
+      severity: "warning",
+      title: `${duplicateCount} similar manual payment entries need checking (${naira(total)} total)`,
+      detail:
+        "These received entries have the same amount, currency, method, level and note within ten minutes, with no gateway reference. " +
+        "They may be duplicate clicks, but matching entries are not proof that money was recorded twice. Check the bank, POS or cash evidence " +
+        "before voiding anything. Prior-level history is not cash and must not be added as a payment.",
+      evidence: groups.flatMap((group) =>
+        group.map((payment) => ({
+          label: `${payment.level || "Unassigned level"} · ${new Date(payment.createdAt).toISOString()}`,
+          value: `${payment.method} · ${naira(payment.amount)} ${payment.currency.toUpperCase()} · ${payment.description}`,
+        })),
+      ),
+      offers: [],
     };
   },
 };
@@ -888,6 +968,7 @@ export const RULES: Rule[] = [
   ruleUnrecordedPayment,
   ruleUnreviewedPriorLevelHistory,
   rulePriorLevelBalance,
+  rulePossibleDuplicateManualPayments,
   ruleTenantMismatch,
   ruleClassScheduleSetup,
   ruleTutorAssignmentHealth,

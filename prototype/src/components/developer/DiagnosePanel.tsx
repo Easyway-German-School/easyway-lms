@@ -33,6 +33,14 @@ const SEVERITY = {
 
 const BATCHABLE_REPAIRS = new Set<RepairId>(["sync_tuition_charge", "assign_student_code"]);
 const BATCH_SIZE = 10;
+const RULE_NAMES = [
+  "Paystack has a payment we did not record",
+  "Possible duplicate manual payment entries",
+  "Account missing its school (tenant) link",
+  "Their screen out of sync with the database",
+  "No student ID",
+  "Why the portal is locked",
+];
 
 export default function DiagnosePanel({ target, onTargetUsed }: { target: DiagnoseTarget; onTargetUsed: () => void }) {
   const [query, setQuery] = useState("");

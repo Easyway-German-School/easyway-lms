@@ -103,9 +103,7 @@ export default function PaymentsPage() {
 
   // Prefer the server's figures; fall back to summing the visible rows only
   // while the summary is still loading.
-  const totalPaid = summary?.totalPaid ?? payments
-    .filter((payment) => payment.status.toLowerCase() === "completed")
-    .reduce((sum, payment) => sum + payment.amount, 0);
+  const totalPaid = summary?.currentLevelPaid ?? 0;
   const tuitionFee = summary?.tuitionFee ?? 150000;
   const fullPaid = summary?.fullPaid ?? false;
   const currentLevelPaid = summary?.currentLevelPaid ?? totalPaid;
@@ -184,14 +182,9 @@ export default function PaymentsPage() {
 
             <div className="mt-10 grid gap-6 lg:grid-cols-3">
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-sm">
-                <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Total paid</p>
-                <p className="mt-4 text-4xl font-semibold text-[var(--foreground)]">₦{totalPaid.toLocaleString()}</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">Completed payments received</p>
-                {summary && (
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    Current level: ₦{currentLevelPaid.toLocaleString()} of ₦{tuitionFee.toLocaleString()}
-                  </p>
-                )}
+                <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Paid toward this level</p>
+                <p className="mt-4 text-4xl font-semibold text-[var(--foreground)]">₦{currentLevelPaid.toLocaleString()}</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Payments recorded for your current level</p>
               </div>
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-sm">
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Outstanding</p>

@@ -12,12 +12,14 @@ import {
   REGISTRATION_FEE,
   requiredDepositFor,
   resolvePartialPaymentAmount,
+  sumTuitionPayments,
   tuitionFeeFor,
 } from "@/lib/payment";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { signOffForCheckout } from "@/lib/graduation-server";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
+import { getStudentAccess } from "@/lib/student-access";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 /**
@@ -54,7 +56,10 @@ export async function POST(request: Request) {
         levelCompletedFor: true,
         levelCompletedAt: true,
         branch: { select: { name: true } },
-        payments: { where: receivedPaymentFilter(), select: { amount: true } },
+        payments: {
+          where: receivedPaymentFilter(),
+          select: { amount: true, status: true, level: true, description: true, createdAt: true },
+        },
       },
     });
 
@@ -154,7 +159,7 @@ export async function POST(request: Request) {
      * Legacy arrears are never rolled in here — they are chased separately.
      */
     let billingLevel = studentRecord.level;
-    let alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    let alreadyPaid = sumTuitionPayments(studentRecord.payments);
     let priorOpenBalance = 0;
     let priorOwedLevel: string | null = null;
     let priorBalanceToPay = 0;
@@ -237,6 +242,21 @@ export async function POST(request: Request) {
       }
     }
 
+    const charge =
+      requestedStage !== "registration"
+        ? await ensureChargeForLevel({
+            studentId: studentRecord.id,
+            level: billingLevel,
+            origin: forNextLevel ? "next_level_payment" : "signup",
+          })
+        : null;
+    if (requestedStage !== "registration" && !charge) {
+      return NextResponse.json(
+        { error: `We couldn't prepare the ${billingLevel} tuition balance. No payment has been started; please try again or contact your branch office.` },
+        { status: 503 },
+      );
+    }
+
     const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType, pathway: studentRecord.pathway };
     const grossTuitionFee = tuitionFeeFor(feeLookup);
 
@@ -290,6 +310,14 @@ export async function POST(request: Request) {
       discountAmount > 0 && !isTravelPackagePathway(feeLookup.pathway)
         ? Math.round(normalizedTuitionFee * DEPOSIT_RATE)
         : requiredDepositFor(feeLookup);
+
+    if (requestedStage !== "registration" && !forNextLevel && !forPriorBalance) {
+      const access = await getStudentAccess(studentRecord.id);
+      if (!access) {
+        return NextResponse.json({ error: "We couldn't verify your current tuition balance. No payment has been started; please try again." }, { status: 503 });
+      }
+      alreadyPaid = Math.min(normalizedTuitionFee, access.currentLevelPaid);
+    }
 
     // What is genuinely still owed at each stage — never more, so a student who
     // has already deposited is charged the balance instead of the whole fee again.

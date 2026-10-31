@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { AlertIcon, CheckIcon, PlaneIcon, PlusIcon } from "@/components/icons";
 
@@ -54,6 +54,7 @@ export default function TravelPackagePage() {
   const [error, setError] = useState("");
   const [payModal, setPayModal] = useState<TravelPackageStudent | null>(null);
   const [busy, setBusy] = useState(false);
+  const paymentAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
   /** id currently being reconciled, so just its row's button spins. */
   const [reconcilingId, setReconcilingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -85,21 +86,30 @@ export default function TravelPackagePage() {
 
   async function recordPayment(amount: number) {
     if (!payModal || !Number.isFinite(amount) || amount <= 0) return;
+    const requestBody = {
+      studentId: payModal.id,
+      amount,
+      currency: "ngn",
+      method: "bank_transfer",
+      status: payModal.paid + amount >= packagePrice ? "completed" : "partial",
+      description: "Travel Package payment",
+    };
+    const fingerprint = JSON.stringify(requestBody);
+    let attempt = paymentAttemptRef.current;
+    if (!attempt || attempt.fingerprint !== fingerprint) {
+      attempt = { fingerprint, key: crypto.randomUUID() };
+      paymentAttemptRef.current = attempt;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/admin/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          studentId: payModal.id,
-          amount,
-          method: "bank_transfer",
-          status: payModal.paid + amount >= packagePrice ? "completed" : "partial",
-          description: "Travel Package payment",
-        }),
+        body: JSON.stringify({ ...requestBody, idempotencyKey: attempt.key }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not record the payment");
+      paymentAttemptRef.current = null;
       setPayModal(null);
       await load();
     } catch (e) {
