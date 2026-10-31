@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { notify, KIND } from "@/lib/notify";
 import { attributeTutorAction, tutorPhrase } from "@/lib/tutor-attribution";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
-import { readAssignment, studentWhereForLecturer } from "@/lib/lecturer-assignment";
+import { belongsToLecturer, readAssignment, studentWhereForLecturer } from "@/lib/lecturer-assignment";
+import { recordIncident } from "@/lib/incidents";
 import {
   parseQuestions,
   finaliseScore,
@@ -25,7 +26,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type LecturerStaffAuth = { error: NextResponse } | { userId: string; lecturerId: string | null };
+type LecturerStaffAuth =
+  | { error: NextResponse }
+  | { userId: string; lecturerId: string | null; isAdmin: boolean; tenantId: string | null };
 
 async function requireStaff(): Promise<LecturerStaffAuth> {
   const session = await requireAuthSession();
@@ -35,13 +38,21 @@ async function requireStaff(): Promise<LecturerStaffAuth> {
   }
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, role: true, lecturer: { select: { id: true } } },
+    select: { id: true, role: true, tenantId: true, lecturer: { select: { id: true } } },
   });
   const role = String(user?.role ?? "").toLowerCase();
   if (role !== "lecturer" && role !== "admin") {
     return { error: NextResponse.json({ error: "Staff access required" }, { status: 403 }) };
   }
-  return { userId: user!.id, lecturerId: user?.lecturer?.id ?? null };
+  if (role === "lecturer" && !user?.lecturer?.id) {
+    return { error: NextResponse.json({ error: "Tutor account is not linked to a lecturer profile" }, { status: 403 }) };
+  }
+  return {
+    userId: user!.id,
+    lecturerId: user?.lecturer?.id ?? null,
+    isAdmin: role === "admin",
+    tenantId: user?.tenantId ?? null,
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -65,8 +76,9 @@ export async function GET(req: NextRequest) {
    * Admins (no lecturerId) keep the unrestricted view — they mark for the
    * whole school, not one class.
    */
+  let lecturerAssignment: ReturnType<typeof readAssignment> | null = null;
   let studentWhere: Record<string, unknown> | null = null;
-  if (auth.lecturerId) {
+  if (!auth.isAdmin && auth.lecturerId) {
     const lecturer = await prisma.lecturer.findUnique({
       where: { id: auth.lecturerId },
       select: {
@@ -83,10 +95,13 @@ export async function GET(req: NextRequest) {
         pathways: true,
       },
     });
-    studentWhere = lecturer ? studentWhereForLecturer(readAssignment(lecturer), lecturer.id) : null;
+    lecturerAssignment = lecturer ? readAssignment(lecturer) : null;
+    studentWhere = lecturerAssignment ? studentWhereForLecturer(lecturerAssignment, auth.lecturerId) : null;
     // A tutor with no class and no named students has nobody to mark for —
     // returning everyone else's papers would be worse than returning none.
     if (!studentWhere) return NextResponse.json({ submissions: [] });
+  } else if (!auth.isAdmin) {
+    return NextResponse.json({ submissions: [] });
   }
 
   const pending = await prisma.assignmentSubmission.findMany({
@@ -96,19 +111,38 @@ export async function GET(req: NextRequest) {
       // notification that sent the tutor here already knows it needs marking.
       ...(submissionId ? { id: submissionId } : { needsReview: true }),
       ...(assignmentId ? { assignmentId } : {}),
-      ...(studentWhere ? { student: studentWhere } : {}),
+      ...(studentWhere ? { student: { ...studentWhere, status: "active" } } : {}),
     },
     orderBy: { submittedAt: "asc" },
     include: {
       student: {
-        select: { id: true, studentCode: true, level: true, user: { select: { name: true } } },
+        select: {
+          id: true,
+          studentCode: true,
+          level: true,
+          branchId: true,
+          sessionSlot: true,
+          admission: true,
+          tutorId: true,
+          coTutors: { select: { lecturerId: true } },
+          user: { select: { name: true } },
+        },
       },
       assignment: { select: { id: true, title: true, type: true, questions: true, level: true } },
     },
   });
 
   return NextResponse.json({
-    submissions: pending.map((submission) => {
+    submissions: pending
+      .filter(
+        (submission) =>
+          auth.isAdmin ||
+          Boolean(
+            lecturerAssignment &&
+              belongsToLecturer(lecturerAssignment, auth.lecturerId, submission.student),
+          ),
+      )
+      .map((submission) => {
       const isQuiz = submission.assignment.type === "quiz";
       const questions = isQuiz ? parseQuestions(submission.assignment.questions) : [];
       const answers = Array.isArray(submission.answers) ? submission.answers : [];
@@ -143,7 +177,7 @@ export async function GET(req: NextRequest) {
           ? null
           : { text: submission.text, filePath: submission.filePath, fileName: submission.fileName },
       };
-    }),
+      }),
   });
 }
 
@@ -159,11 +193,72 @@ export async function POST(req: NextRequest) {
 
     const submission = await prisma.assignmentSubmission.findUnique({
       where: { id: String(submissionId) },
-      include: { assignment: { select: { questions: true, type: true } } },
+      include: {
+        student: {
+          select: {
+            id: true,
+            branchId: true,
+            level: true,
+            sessionSlot: true,
+            admission: true,
+            tutorId: true,
+            coTutors: { select: { lecturerId: true } },
+          },
+        },
+        assignment: { select: { id: true, questions: true, type: true } },
+      },
     });
 
     if (!submission) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
+    }
+    if (!auth.isAdmin) {
+      const lecturer = auth.lecturerId
+        ? await prisma.lecturer.findUnique({
+            where: { id: auth.lecturerId },
+            select: {
+              id: true,
+              branchId: true,
+              level: true,
+              sessionSlot: true,
+              branchIds: true,
+              levels: true,
+              sessionSlots: true,
+              assignmentGroups: true,
+              classTypes: true,
+              batches: true,
+              pathways: true,
+            },
+          })
+        : null;
+      const scope = lecturer ? readAssignment(lecturer) : null;
+      const studentWhere = scope ? studentWhereForLecturer(scope, auth.lecturerId) : null;
+      const studentInRoster =
+        studentWhere &&
+        (await prisma.student.findFirst({
+          where: { id: submission.student.id, status: "active", ...studentWhere } as any,
+          select: { id: true },
+        }));
+
+      if (!scope || !studentInRoster || !belongsToLecturer(scope, auth.lecturerId, submission.student)) {
+        await recordIncident({
+          kind: "drift",
+          source: "invariant",
+          route: "/api/lecturer/assignments/mark",
+          method: "POST",
+          severity: "high",
+          message: "Tutor tried to mark a submission outside their assigned student roster",
+          userId: auth.userId,
+          tenantId: auth.tenantId,
+          context: {
+            lecturerId: auth.lecturerId,
+            assignmentId: submission.assignment.id,
+            submissionId: submission.id,
+            studentId: submission.student.id,
+          },
+        });
+        return NextResponse.json({ error: "Submission not found" }, { status: 404 });
+      }
     }
     if (!submission.needsReview) {
       return NextResponse.json(

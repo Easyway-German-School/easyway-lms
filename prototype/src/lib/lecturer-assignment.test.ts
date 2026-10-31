@@ -111,6 +111,31 @@ describe("studentWhereForLecturerScope", () => {
       ],
     });
   });
+
+  it("finds a hybrid student's online sitting for their online co-tutor", () => {
+    const onlineBranchId = "branch-online";
+    const assignment = readAssignment({
+      branchIds: [onlineBranchId],
+      levels: ["A1"],
+      sessionSlots: ["evening"],
+      classTypes: ["online"],
+    });
+
+    const where = studentWhereForLecturerScope(assignment, "lecturer-online", {
+      level: "A1",
+      branchId: onlineBranchId,
+      sessionSlot: "evening",
+      onlineBranchId,
+    });
+
+    const clauses = (where as { OR: Record<string, unknown>[] }).OR;
+    expect(clauses.find((clause) => clause.deliveryMode === "hybrid")).toEqual({
+      level: "A1",
+      deliveryMode: "hybrid",
+      hybridOnlineSlot: "evening",
+      coTutors: { some: { lecturerId: "lecturer-online", role: "online" } },
+    });
+  });
 });
 
 describe("belongsToLecturer with co-tutors", () => {

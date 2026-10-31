@@ -2,17 +2,46 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
-import { readAssignment, studentWhereForLecturerScope } from "@/lib/lecturer-assignment";
+import {
+  belongsToLecturer,
+  readAssignment,
+  studentWhereForLecturerScope,
+} from "@/lib/lecturer-assignment";
 import { notify, KIND } from "@/lib/notify";
 import { studentsVisibleToAssignment } from "@/lib/student-assignments";
 import { resolveOnlineBranchId } from "@/lib/online-branch-server";
 import { groupStudentsByTutorPhrase } from "@/lib/tutor-attribution";
+import { batchOfAdmission } from "@/lib/class-batch";
 
 /** Tutors create and review assignments for a level (optionally one branch). */
 
 export const dynamic = "force-dynamic";
 
-type LecturerAssignmentsAuth = { error: NextResponse } | { userId: string; lecturerId: string | null };
+type LecturerAssignmentsAuth =
+  | { error: NextResponse }
+  | { userId: string; lecturerId: string | null; isAdmin: boolean; tenantId: string | null };
+
+const assignmentAudienceStudentSelect = {
+  id: true,
+  studentCode: true,
+  admission: true,
+  tutorId: true,
+  branchId: true,
+  level: true,
+  sessionSlot: true,
+  coTutors: { select: { lecturerId: true } },
+  user: { select: { name: true } },
+} as const;
+
+type AssignmentScopeOption = {
+  key: string;
+  branchId: string;
+  branchName: string;
+  level: string;
+  sessionSlot: string | null;
+  batch: string | null;
+  label: string;
+};
 
 async function requireStaff(): Promise<LecturerAssignmentsAuth> {
   const session = await requireAuthSession();
@@ -22,13 +51,114 @@ async function requireStaff(): Promise<LecturerAssignmentsAuth> {
   }
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, role: true, lecturer: { select: { id: true } } },
+    select: { id: true, role: true, tenantId: true, lecturer: { select: { id: true } } },
   });
   const role = String(user?.role ?? "").toLowerCase();
   if (role !== "lecturer" && role !== "admin") {
     return { error: NextResponse.json({ error: "Staff access required" }, { status: 403 }) };
   }
-  return { userId: user!.id, lecturerId: user?.lecturer?.id ?? null };
+  if (role === "lecturer" && !user?.lecturer?.id) {
+    return { error: NextResponse.json({ error: "Tutor account is not linked to a lecturer profile" }, { status: 403 }) };
+  }
+  return {
+    userId: user!.id,
+    lecturerId: user?.lecturer?.id ?? null,
+    isAdmin: role === "admin",
+    tenantId: user?.tenantId ?? null,
+  };
+}
+
+async function assignmentScopeOptions(
+  lecturerId: string | null,
+  tenantId: string | null,
+): Promise<AssignmentScopeOption[]> {
+  if (!lecturerId) return [];
+  const lecturer = await prisma.lecturer.findUnique({
+    where: { id: lecturerId },
+    select: {
+      branchId: true,
+      level: true,
+      sessionSlot: true,
+      branchIds: true,
+      levels: true,
+      sessionSlots: true,
+      assignmentGroups: true,
+      classTypes: true,
+    },
+  });
+  if (!lecturer) return [];
+
+  const assignment = readAssignment(lecturer);
+  const onlineBranchId = await resolveOnlineBranchId(tenantId);
+  const onlineOnly = assignment.classTypes.length === 1 && assignment.classTypes[0] === "online";
+  const includesOnline = assignment.classTypes.includes("online");
+  const campusOnly =
+    assignment.classTypes.length === 1 &&
+    (assignment.classTypes[0] === "physical" || assignment.classTypes[0] === "private");
+
+  let groups = assignment.groups.length
+    ? assignment.groups.map((group) => ({
+        branchId: group.branchId,
+        level: group.level,
+        sessionSlot: group.sessionSlot,
+        batch: group.batch ?? null,
+      }))
+    : assignment.branchIds.flatMap((branchId) =>
+        assignment.levels.flatMap((level) =>
+          (assignment.sessionSlots.length ? assignment.sessionSlots : [null]).map((sessionSlot) => ({
+            branchId,
+            level,
+            sessionSlot,
+            batch: null,
+          })),
+        ),
+      );
+
+  if (includesOnline && onlineBranchId && !groups.some((group) => group.branchId === onlineBranchId)) {
+    const onlineGroups = assignment.groups.length
+      ? groups.map((group) => ({ ...group, branchId: onlineBranchId }))
+      : assignment.levels.flatMap((level) =>
+          (assignment.sessionSlots.length ? assignment.sessionSlots : [null]).map((sessionSlot) => ({
+            branchId: onlineBranchId,
+            level,
+            sessionSlot,
+            batch: null,
+          })),
+        );
+    groups = onlineOnly ? onlineGroups : [...groups, ...onlineGroups];
+  }
+
+  const branchIds = [...new Set(groups.map((group) => group.branchId))];
+  if (!branchIds.length) return [];
+  const branches = await prisma.branch.findMany({
+    where: { id: { in: branchIds } },
+    select: { id: true, name: true, mode: true },
+  });
+  const byId = new Map(branches.map((branch) => [branch.id, branch]));
+
+  return groups.flatMap((group) => {
+    const branch = byId.get(group.branchId);
+    if (!branch || !group.level) return [];
+    if (onlineOnly && branch.mode !== "online") return [];
+    if (campusOnly && branch.mode === "online") return [];
+
+    const labelParts = [
+      branch.mode === "online" ? "Online" : branch.name,
+      group.level,
+      group.sessionSlot ? group.sessionSlot.charAt(0).toUpperCase() + group.sessionSlot.slice(1) : "All sittings",
+      group.batch ? `${group.batch} batch` : "",
+    ].filter(Boolean);
+
+    return [{
+      key: JSON.stringify([group.branchId, group.level, group.sessionSlot, group.batch]),
+      branchId: group.branchId,
+      branchName: branch.name,
+      level: group.level,
+      sessionSlot: group.sessionSlot,
+      batch: group.batch,
+      label: labelParts.join(" · "),
+    }];
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -36,18 +166,43 @@ export async function GET(req: NextRequest) {
   if ("error" in auth) return auth.error;
 
   const level = req.nextUrl.searchParams.get("level");
+  let lecturerAssignment: ReturnType<typeof readAssignment> | null = null;
+  let rosterWhere: Record<string, unknown> | null = null;
+  if (!auth.isAdmin && auth.lecturerId) {
+    const lecturer = await prisma.lecturer.findUnique({
+      where: { id: auth.lecturerId },
+      select: {
+        id: true,
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+        branchIds: true,
+        levels: true,
+        sessionSlots: true,
+        assignmentGroups: true,
+        classTypes: true,
+        batches: true,
+        pathways: true,
+      },
+    });
+    lecturerAssignment = lecturer ? readAssignment(lecturer) : null;
+    rosterWhere = lecturerAssignment ? studentWhereForLecturerScope(lecturerAssignment, auth.lecturerId) : null;
+    if (!lecturerAssignment || !rosterWhere) {
+      return NextResponse.json({ assignments: [], scopeRequired: true, scopeOptions: [] });
+    }
+  }
 
   const assignments = await prisma.assignment.findMany({
-    where: level ? { level } : {},
+    where: {
+      ...(level ? { level } : {}),
+      ...(!auth.isAdmin ? { lecturerId: auth.lecturerId } : {}),
+    },
     orderBy: { createdAt: "desc" },
     include: {
       branch: { select: { id: true, name: true } },
-      _count: { select: { submissions: true } },
       targets: {
         select: {
-          student: {
-            select: { id: true, studentCode: true, user: { select: { name: true } } },
-          },
+          student: { select: assignmentAudienceStudentSelect },
         },
       },
       submissions: {
@@ -57,7 +212,7 @@ export async function GET(req: NextRequest) {
           score: true,
           needsReview: true,
           submittedAt: true,
-          student: { select: { studentCode: true, user: { select: { name: true } } } },
+          student: { select: assignmentAudienceStudentSelect },
         },
         orderBy: { submittedAt: "desc" },
       },
@@ -65,19 +220,56 @@ export async function GET(req: NextRequest) {
   });
 
   return NextResponse.json({
-    assignments: assignments.map((assignment) => ({
-      ...assignment,
-      questionCount: parseQuestions(assignment.questions).length,
-      totalPoints: totalPoints(parseQuestions(assignment.questions)),
-      // Flattened so the list can say "set for 6 students" without the caller
-      // digging through the join rows.
-      targetStudents: assignment.targets.map((target) => ({
-        id: target.student.id,
-        name: target.student.user?.name ?? null,
-        studentCode: target.student.studentCode,
-      })),
-      awaitingMarking: assignment.submissions.filter((s) => s.needsReview).length,
-    })),
+    assignments: assignments.map((assignment) => {
+      const visibleTargets = assignment.targets.filter(
+        (target) =>
+          auth.isAdmin ||
+          Boolean(
+            lecturerAssignment &&
+              belongsToLecturer(lecturerAssignment, auth.lecturerId, target.student),
+          ),
+      );
+      const visibleSubmissions = assignment.submissions.filter(
+        (submission) =>
+          auth.isAdmin ||
+          Boolean(
+            lecturerAssignment &&
+              belongsToLecturer(lecturerAssignment, auth.lecturerId, submission.student),
+          ),
+      );
+
+      return {
+        ...assignment,
+        targets: visibleTargets.map((target) => ({
+          student: {
+            id: target.student.id,
+            studentCode: target.student.studentCode,
+            user: target.student.user,
+          },
+        })),
+        submissions: visibleSubmissions.map((submission) => ({
+          id: submission.id,
+          score: submission.score,
+          needsReview: submission.needsReview,
+          submittedAt: submission.submittedAt,
+          student: {
+            studentCode: submission.student.studentCode,
+            user: submission.student.user,
+          },
+        })),
+        questionCount: parseQuestions(assignment.questions).length,
+        totalPoints: totalPoints(parseQuestions(assignment.questions)),
+        _count: { submissions: visibleSubmissions.length },
+        targetStudents: visibleTargets.map((target) => ({
+          id: target.student.id,
+          name: target.student.user?.name ?? null,
+          studentCode: target.student.studentCode,
+        })),
+        awaitingMarking: visibleSubmissions.filter((submission) => submission.needsReview).length,
+      };
+    }),
+    scopeRequired: !auth.isAdmin,
+    scopeOptions: auth.isAdmin ? [] : await assignmentScopeOptions(auth.lecturerId, auth.tenantId),
   });
 }
 
@@ -119,11 +311,12 @@ async function resolveTargets(
   sessionSlot?: string | null,
   branchId?: string | null,
   lecturerId?: string | null,
-): Promise<string[]> {
-  if (!Array.isArray(studentIds) || studentIds.length === 0) return [];
-
-  const ids = studentIds.map((id) => String(id)).filter(Boolean);
-  if (ids.length === 0) return [];
+  tenantId?: string | null,
+  batch?: string | null,
+  includeBatch?: boolean,
+): Promise<{ ids: string[]; invalid: boolean }> {
+  const requestedIds = Array.isArray(studentIds) ? [...new Set(studentIds.map((id) => String(id)).filter(Boolean))] : [];
+  if (!requestedIds.length && !(includeBatch && batch)) return { ids: [], invalid: false };
 
   // Filtered by level and scope as well as id: a tutor should not be able to
   // set morning work for afternoon students by posting an id the picker never
@@ -143,23 +336,49 @@ async function resolveTargets(
           assignmentGroups: true,
           classTypes: true,
           batches: true,
+          pathways: true,
         },
       })
     : null;
+  const onlineBranchId = await resolveOnlineBranchId(tenantId);
   const scope = lecturer
-    ? studentWhereForLecturerScope(readAssignment(lecturer), lecturer.id, { level, sessionSlot, branchId })
+    ? studentWhereForLecturerScope(readAssignment(lecturer), lecturer.id, {
+        level,
+        sessionSlot,
+        branchId,
+        onlineBranchId,
+      })
     : { level, ...(sessionSlot ? { sessionSlot } : {}), ...(branchId ? { branchId } : {}) };
+  if (!scope) return { ids: [], invalid: requestedIds.length > 0 };
 
   const students = await prisma.student.findMany({
     where: {
-      id: { in: ids },
+      ...(requestedIds.length ? { id: { in: requestedIds } } : {}),
       ...(scope ?? {}),
       status: "active",
     } as any,
-    select: { id: true },
+    select: {
+      id: true,
+      tutorId: true,
+      coTutors: { select: { lecturerId: true } },
+      admission: true,
+      branchId: true,
+      level: true,
+      sessionSlot: true,
+    },
   });
 
-  return students.map((student) => student.id);
+  const assignment = lecturer ? readAssignment(lecturer) : null;
+  const eligible = students.filter(
+    (student) =>
+      (!assignment || belongsToLecturer(assignment, lecturerId, student)) &&
+      (!batch || batchOfAdmission(student.admission).toLowerCase() === batch.toLowerCase()),
+  );
+  const ids = eligible.map((student) => student.id);
+  return {
+    ids,
+    invalid: requestedIds.length > 0 && ids.length !== requestedIds.length,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -168,14 +387,56 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { title, description, level, branchId, sessionSlot, type, timeLimitMinutes, questions, dueAt, studentIds } = body;
+    const {
+      title,
+      description,
+      level,
+      type,
+      timeLimitMinutes,
+      questions,
+      dueAt,
+      studentIds,
+    } = body;
 
     if (!title || !level) {
       return NextResponse.json({ error: "title and level are required" }, { status: 400 });
     }
 
+    let normalizedLevel = String(level).toUpperCase();
+    let resolvedBranchId = typeof body.branchId === "string" && body.branchId ? body.branchId : null;
+    let resolvedSessionSlot =
+      typeof body.sessionSlot === "string" &&
+      ["morning", "afternoon", "evening", "weekend"].includes(body.sessionSlot.toLowerCase())
+        ? body.sessionSlot.toLowerCase()
+        : null;
+    let resolvedBatch = typeof body.batch === "string" && body.batch ? body.batch : null;
+
+    if (!auth.isAdmin) {
+      if (!auth.lecturerId) {
+        return NextResponse.json({ error: "Tutor account is not linked to a lecturer profile" }, { status: 403 });
+      }
+      const options = await assignmentScopeOptions(auth.lecturerId, auth.tenantId);
+      const matches = options.filter(
+        (option) =>
+          option.level === normalizedLevel &&
+          (!resolvedBranchId || option.branchId === resolvedBranchId) &&
+          (!resolvedSessionSlot || option.sessionSlot === resolvedSessionSlot) &&
+          (!resolvedBatch || option.batch?.toLowerCase() === resolvedBatch.toLowerCase()),
+      );
+      if (matches.length !== 1) {
+        return NextResponse.json(
+          { error: "Choose one of your assigned classes before creating this assignment." },
+          { status: 403 },
+        );
+      }
+      const scope = matches[0];
+      normalizedLevel = scope.level;
+      resolvedBranchId = scope.branchId;
+      resolvedSessionSlot = scope.sessionSlot;
+      resolvedBatch = scope.batch;
+    }
+
     const kind = type === "quiz" ? "quiz" : "document";
-    const normalizedLevel = String(level).toUpperCase();
     const parsed = kind === "quiz" ? parseQuestions(questions) : [];
 
     if (kind === "quiz") {
@@ -183,24 +444,36 @@ export async function POST(req: NextRequest) {
       if (problem) return NextResponse.json({ error: problem }, { status: 400 });
     }
 
-    const targetIds = await resolveTargets(
+    const resolvedTargets = await resolveTargets(
       studentIds,
       normalizedLevel,
-      sessionSlot ? String(sessionSlot).toLowerCase() : null,
-      branchId || null,
+      resolvedSessionSlot,
+      resolvedBranchId,
       auth.lecturerId,
+      auth.tenantId,
+      resolvedBatch,
+      Boolean(resolvedBatch),
     );
-
-    const resolvedSessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(sessionSlot))
-      ? String(sessionSlot)
-      : null;
+    if (resolvedTargets.invalid) {
+      return NextResponse.json(
+        { error: "One or more selected students are outside your assigned class." },
+        { status: 403 },
+      );
+    }
+    const targetIds = resolvedTargets.ids;
+    if (resolvedBatch && targetIds.length === 0) {
+      return NextResponse.json(
+        { error: "There are no active students in that batch to receive this assignment." },
+        { status: 409 },
+      );
+    }
 
     const created = await prisma.assignment.create({
       data: {
         title: String(title).trim(),
         description: typeof description === "string" ? description.trim() || null : null,
         level: normalizedLevel,
-        branchId: branchId || null,
+        branchId: resolvedBranchId,
         /**
          * Empty means every sitting at this level, which is how assignments
          * behaved before sessions became a boundary. A tutor who teaches the
@@ -233,18 +506,24 @@ export async function POST(req: NextRequest) {
       // here (not `notify()`'s loose branch/sitting filter) so a hybrid
       // student hears about their ONLINE tutor's homework too, which that
       // filter can't see (their branch/sitting columns are their campus side).
-      const onlineBranchId = await resolveOnlineBranchId(null);
+      const onlineBranchId = await resolveOnlineBranchId(auth.tenantId);
       const audienceIds = targetIds.length
-        ? (targetIds as string[])
+        ? targetIds
         : (
             await prisma.student.findMany({
               where: studentsVisibleToAssignment(
-                { level: normalizedLevel, branchId: branchId || null, sessionSlot: resolvedSessionSlot },
+                { level: normalizedLevel, branchId: resolvedBranchId, sessionSlot: resolvedSessionSlot },
                 onlineBranchId,
               ),
-              select: { id: true },
+              select: { id: true, admission: true },
             })
-          ).map((row) => row.id);
+          )
+            .filter(
+              (student) =>
+                !resolvedBatch ||
+                batchOfAdmission(student.admission).toLowerCase() === resolvedBatch.toLowerCase(),
+            )
+            .map((row) => row.id);
 
       // A hybrid student has two tutors, so "was just set for you" is not
       // enough — say whose. Grouped because the same tutor is a hybrid
@@ -298,10 +577,14 @@ export async function PATCH(req: NextRequest) {
         level: true,
         branchId: true,
         sessionSlot: true,
+        lecturerId: true,
         _count: { select: { submissions: true } },
       },
     });
     if (!existing) return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
+    if (!auth.isAdmin && existing.lecturerId !== auth.lecturerId) {
+      return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
+    }
 
     const hasSubmissions = existing._count.submissions > 0;
     const wantsQuestionChange = questions !== undefined;
@@ -342,13 +625,27 @@ export async function PATCH(req: NextRequest) {
     // Targets are replaced wholesale rather than diffed: the builder always
     // sends the full list, and a diff would need a delete path anyway.
     if (studentIds !== undefined) {
-      const targetIds = await resolveTargets(
+      if (!auth.isAdmin && !existing.branchId && !studentIds?.length) {
+        return NextResponse.json(
+          { error: "Choose an assigned class before removing the student targets." },
+          { status: 403 },
+        );
+      }
+      const resolvedTargets = await resolveTargets(
         studentIds,
         existing.level,
         existing.sessionSlot ?? null,
         existing.branchId ?? null,
         auth.lecturerId,
+        auth.tenantId,
       );
+      if (resolvedTargets.invalid) {
+        return NextResponse.json(
+          { error: "One or more selected students are outside your assigned class." },
+          { status: 403 },
+        );
+      }
+      const targetIds = resolvedTargets.ids;
       await prisma.assignmentTarget.deleteMany({ where: { assignmentId: existing.id } });
       if (targetIds.length) {
         await prisma.assignmentTarget.createMany({

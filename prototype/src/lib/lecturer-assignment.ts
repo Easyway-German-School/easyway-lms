@@ -325,24 +325,33 @@ export function studentWhereForLecturer(
 export function studentWhereForLecturerScope(
   assignment: LecturerAssignment,
   lecturerId?: string | null,
-  options?: { level?: string | null; sessionSlot?: string | null; branchId?: string | null },
+  options?: {
+    level?: string | null;
+    sessionSlot?: string | null;
+    branchId?: string | null;
+    onlineBranchId?: string | null;
+  },
 ): Record<string, unknown> | null {
   const level = options?.level ? String(options.level).trim().toUpperCase() : null;
   const sessionSlot = options?.sessionSlot ? String(options.sessionSlot).trim().toLowerCase() : null;
   const branchId = options?.branchId ? String(options.branchId) : null;
+  const onlineBranchId = options?.onlineBranchId ? String(options.onlineBranchId) : null;
+  const isOnlineScope = Boolean(branchId && onlineBranchId && branchId === onlineBranchId);
 
   // The level / sitting / branch narrowing that applies to a named student,
   // whichever route named them.
   const namedFilters: Record<string, unknown> = {};
   if (level) namedFilters.level = level;
   if (sessionSlot) namedFilters.sessionSlot = sessionSlot;
-  if (branchId) namedFilters.branchId = branchId;
+  if (branchId && !isOnlineScope) namedFilters.branchId = branchId;
 
   // A student is "named" onto this tutor if they are the primary tutor OR a
   // co-tutor — the same two routes as studentWhereForLecturer, each carrying
   // the narrowing above.
   const namedClauses: Record<string, unknown>[] = lecturerId
-    ? [
+    ? isOnlineScope
+      ? [{ ...namedFilters, branchId: onlineBranchId, tutorId: lecturerId }]
+      : [
         { ...namedFilters, tutorId: lecturerId },
         { ...namedFilters, coTutors: { some: { lecturerId } } },
       ]
@@ -351,9 +360,19 @@ export function studentWhereForLecturerScope(
       : [];
 
   const cohortWhere = studentWhereForAssignment(assignment);
+  const hybridOnlineCoTutor =
+    isOnlineScope && lecturerId
+      ? {
+          ...(level ? { level } : {}),
+          deliveryMode: "hybrid",
+          ...(sessionSlot ? { hybridOnlineSlot: sessionSlot } : {}),
+          coTutors: { some: { lecturerId, role: "online" } },
+        }
+      : null;
   if (!cohortWhere) {
-    if (!namedClauses.length) return null;
-    return namedClauses.length === 1 ? namedClauses[0] : { OR: namedClauses };
+    const clauses = [...namedClauses, ...(hybridOnlineCoTutor ? [hybridOnlineCoTutor] : [])];
+    if (!clauses.length) return null;
+    return clauses.length === 1 ? clauses[0] : { OR: clauses };
   }
 
   const narrowed: Record<string, unknown> = { ...cohortWhere };
@@ -397,8 +416,8 @@ export function studentWhereForLecturerScope(
     }
   }
 
-  if (namedClauses.length) {
-    return { OR: [narrowed, ...namedClauses] };
+  if (namedClauses.length || hybridOnlineCoTutor) {
+    return { OR: [narrowed, ...namedClauses, ...(hybridOnlineCoTutor ? [hybridOnlineCoTutor] : [])] };
   }
 
   return narrowed;

@@ -24,37 +24,48 @@ export async function GET(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { role: true },
+    select: { role: true, tenantId: true, lecturer: { select: { id: true } } },
   });
   const role = String(user?.role ?? "").toLowerCase();
   if (role !== "lecturer" && role !== "admin") {
     return NextResponse.json({ error: "Staff access required" }, { status: 403 });
   }
+  if (role === "lecturer" && !user?.lecturer?.id) {
+    return NextResponse.json({ error: "Tutor account is not linked to a lecturer profile" }, { status: 403 });
+  }
 
   const level = req.nextUrl.searchParams.get("level");
   const branchId = req.nextUrl.searchParams.get("branchId");
   const sessionSlot = req.nextUrl.searchParams.get("sessionSlot") ?? null;
+  const batch = req.nextUrl.searchParams.get("batch")?.trim() || null;
   if (!level) return NextResponse.json({ students: [] });
 
-  const lecturer = await prisma.lecturer.findUnique({
-    where: { userId: session.user.id },
-    select: {
-      id: true,
-      branchId: true,
-      level: true,
-      sessionSlot: true,
-      branchIds: true,
-      levels: true,
-      sessionSlots: true,
-      assignmentGroups: true,
-      classTypes: true,
-      batches: true,
-    },
-  });
+  const lecturer = role === "lecturer"
+    ? await prisma.lecturer.findUnique({
+        where: { userId: session.user.id },
+        select: {
+          id: true,
+          branchId: true,
+          level: true,
+          sessionSlot: true,
+          branchIds: true,
+          levels: true,
+          sessionSlots: true,
+          assignmentGroups: true,
+          classTypes: true,
+          batches: true,
+          pathways: true,
+        },
+      })
+    : null;
+  if (role === "lecturer" && !lecturer) {
+    return NextResponse.json({ error: "Tutor account is not linked to a lecturer profile" }, { status: 403 });
+  }
 
   const assignment = lecturer ? readAssignment(lecturer) : null;
+  const onlineBranchId = await resolveOnlineBranchId(user?.tenantId ?? null);
   const where = lecturer && assignment
-    ? studentWhereForLecturerScope(assignment, lecturer.id, { level, branchId, sessionSlot })
+    ? studentWhereForLecturerScope(assignment, lecturer.id, { level, branchId, sessionSlot, onlineBranchId })
     : { level: level.toUpperCase(), ...(branchId ? { branchId } : {}), ...(sessionSlot ? { sessionSlot } : {}) };
 
   if (!where) {
@@ -71,6 +82,8 @@ export async function GET(req: NextRequest) {
       level: true,
       admission: true,
       tutorId: true,
+      deliveryMode: true,
+      hybridOnlineSlot: true,
       coTutors: { select: { lecturerId: true } },
       user: { select: { name: true } },
       branch: { select: { name: true } },
@@ -78,7 +91,11 @@ export async function GET(req: NextRequest) {
   });
 
   const filtered = assignment && lecturer
-    ? students.filter((student) => belongsToLecturer(assignment, lecturer.id, student))
+    ? students.filter(
+        (student) =>
+          belongsToLecturer(assignment, lecturer.id, student) &&
+          (!batch || batchOfAdmission(student.admission).toLowerCase() === batch.toLowerCase()),
+      )
     : students;
 
   return NextResponse.json({
@@ -86,7 +103,10 @@ export async function GET(req: NextRequest) {
       id: student.id,
       name: student.user?.name ?? "Unnamed student",
       studentCode: student.studentCode,
-      sessionSlot: student.sessionSlot,
+      sessionSlot:
+        branchId === onlineBranchId && student.deliveryMode === "hybrid"
+          ? student.hybridOnlineSlot ?? student.sessionSlot
+          : student.sessionSlot,
       level: student.level,
       // "September" — so the picker can say which batch each name is in and select a whole one.
       batch: batchOfAdmission(student.admission),

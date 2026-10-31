@@ -75,6 +75,12 @@ export async function GET() {
       // assignments are unambiguously "your tutor", so the lookup is skipped.
       const attribution =
         student.deliveryMode === "hybrid" ? await attributeTutorAction(student.id, a.lecturerId) : null;
+      const tutorRole =
+        student.deliveryMode === "hybrid"
+          ? a.branchId === onlineBranchId
+            ? "online"
+            : attribution?.role ?? null
+          : null;
 
       /**
        * One re-hand-in, before a tutor has marked it. Covers "wrong file" and
@@ -100,7 +106,7 @@ export async function GET() {
         totalPoints: totalPoints(questions),
         dueAt: a.dueAt,
         lecturerName: a.lecturer?.user?.name ?? null,
-        tutorRole: attribution?.role ?? null,
+        tutorRole,
         submission: mine
           ? {
               submittedAt: mine.submittedAt,

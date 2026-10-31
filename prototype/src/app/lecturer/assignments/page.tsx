@@ -35,6 +35,16 @@ type Assignment = {
   awaitingMarking: number;
 };
 
+type ScopeOption = {
+  key: string;
+  branchId: string;
+  branchName: string;
+  level: string;
+  sessionSlot: string | null;
+  batch: string | null;
+  label: string;
+};
+
 /** A plain-language summary of one question's answer key, for a tutor
  *  re-reading what they set — not shown anywhere a student can see it. */
 function answerSummary(q: Question): string {
@@ -61,6 +71,9 @@ function AssignmentsContent() {
 
   const [tab, setTab] = useState<"mark" | "manage">(submissionId ? "mark" : "mark");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [scopeOptions, setScopeOptions] = useState<ScopeOption[]>([]);
+  const [selectedScopeKey, setSelectedScopeKey] = useState("");
+  const [scopeRequired, setScopeRequired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -83,6 +96,12 @@ function AssignmentsContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Unable to load assignments");
       setAssignments(data.assignments ?? []);
+      const options: ScopeOption[] = data.scopeOptions ?? [];
+      setScopeOptions(options);
+      setScopeRequired(Boolean(data.scopeRequired));
+      setSelectedScopeKey((current) =>
+        options.some((option) => option.key === current) ? current : options.length === 1 ? options[0].key : "",
+      );
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -104,7 +123,13 @@ function AssignmentsContent() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title, description, level, sessionSlot, type,
+          title,
+          description,
+          level: selectedScope?.level ?? level,
+          branchId: selectedScope?.branchId ?? null,
+          sessionSlot: selectedScope?.sessionSlot ?? sessionSlot,
+          batch: selectedScope?.batch ?? null,
+          type,
           timeLimitMinutes: type === "quiz" ? timeLimit : null,
           questions: type === "quiz" ? questions.map(draftToQuestion) : undefined,
           studentIds,
@@ -127,6 +152,7 @@ function AssignmentsContent() {
   }
 
   const totalAwaiting = assignments.reduce((sum, a) => sum + (a.awaitingMarking ?? 0), 0);
+  const selectedScope = scopeOptions.find((option) => option.key === selectedScopeKey) ?? null;
 
   return (
     <LecturerShell>
@@ -195,32 +221,54 @@ function AssignmentsContent() {
                     <span className="text-xs font-medium text-[var(--foreground-soft)]">Instructions</span>
                     <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
-                  <label>
-                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Level</span>
-                    <select value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
-                      {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </label>
-                  {/*
-                    The sitting, because a level is not a class. One branch runs the
-                    same level morning, afternoon and evening under three different
-                    tutors — homework set here would otherwise land on all three
-                    cohorts' dashboards, including the two this tutor never teaches.
-                    "Every sitting" stays the default so nothing already set changes.
-                  */}
-                  <label>
-                    <span className="text-xs font-medium text-[var(--foreground-soft)]">Class time</span>
-                    <select
-                      value={sessionSlot}
-                      onChange={(e) => setSessionSlot(e.target.value)}
-                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                    >
-                      <option value="">Every sitting at this level</option>
-                      <option value="morning">Morning only</option>
-                      <option value="afternoon">Afternoon only</option>
-                      <option value="evening">Evening only</option>
-                    </select>
-                  </label>
+                  {scopeRequired ? (
+                    <label className="sm:col-span-2">
+                      <span className="text-xs font-medium text-[var(--foreground-soft)]">Assigned class</span>
+                      <select
+                        value={selectedScopeKey}
+                        onChange={(event) => {
+                          setSelectedScopeKey(event.target.value);
+                          setStudentIds([]);
+                        }}
+                        className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      >
+                        <option value="">Choose one of your assigned classes</option>
+                        {scopeOptions.map((option) => (
+                          <option key={option.key} value={option.key}>{option.label}</option>
+                        ))}
+                      </select>
+                      {scopeOptions.length === 0 ? (
+                        <p className="mt-1 text-xs text-amber-700">No class is assigned to this tutor account. Ask the office to check your teaching assignment.</p>
+                      ) : (
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          Homework is limited to this class. Online classes also reach hybrid students with the matching online sitting.
+                        </p>
+                      )}
+                    </label>
+                  ) : (
+                    <>
+                      <label>
+                        <span className="text-xs font-medium text-[var(--foreground-soft)]">Level</span>
+                        <select value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                          {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span className="text-xs font-medium text-[var(--foreground-soft)]">Class time</span>
+                        <select
+                          value={sessionSlot}
+                          onChange={(e) => setSessionSlot(e.target.value)}
+                          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                        >
+                          <option value="">Every sitting at this level</option>
+                          <option value="morning">Morning only</option>
+                          <option value="afternoon">Afternoon only</option>
+                          <option value="evening">Evening only</option>
+                          <option value="weekend">Weekend only</option>
+                        </select>
+                      </label>
+                    </>
+                  )}
                   <label>
                     <span className="text-xs font-medium text-[var(--foreground-soft)]">Type</span>
                     <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
@@ -247,12 +295,21 @@ function AssignmentsContent() {
                 {/* Targeting applies to written work as much as to quizzes — a
                     make-up essay for two students is the same idea. */}
                 <div className="mt-6">
-                  <StudentPicker level={level} sessionSlot={sessionSlot || null} selected={studentIds} onChange={setStudentIds} />
+                  {(!scopeRequired || selectedScope) && (
+                    <StudentPicker
+                      level={selectedScope?.level ?? level}
+                      branchId={selectedScope?.branchId ?? null}
+                      sessionSlot={(selectedScope?.sessionSlot ?? sessionSlot) || null}
+                      batch={selectedScope?.batch ?? null}
+                      selected={studentIds}
+                      onChange={setStudentIds}
+                    />
+                  )}
                 </div>
 
                 <button
                   onClick={create}
-                  disabled={saving || !title.trim()}
+                  disabled={saving || !title.trim() || (scopeRequired && !selectedScope)}
                   className="mt-6 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
                 >
                   {saving ? "Creating…" : "Create assignment"}
