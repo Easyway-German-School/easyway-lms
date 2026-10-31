@@ -16,15 +16,9 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import {
-  AlertIcon,
   BroadcastMessageIcon,
-  CheckIcon,
-  ClockIcon,
-  CrossIcon,
   HandIcon,
   SendIcon,
-  StarIcon,
-  type IconProps,
 } from "@/components/icons";
 import {
   MAX_CHAT_LENGTH,
@@ -38,25 +32,16 @@ import {
 import type { ChatLine, FloatingReaction, RaisedHand } from "./useRoomInteractions";
 import type { RoomRole } from "@/lib/live-classroom";
 
-/**
- * Icons, not emoji — this project renders emoji nowhere, because they arrive as
- * whatever the operating system feels like and read as stray beside a drawn
- * set. See components/icons.tsx.
- */
-const REACTION_ICON: Record<ReactionKind, (props: IconProps) => React.ReactElement> = {
-  yes: CheckIcon,
-  no: CrossIcon,
-  slower: ClockIcon,
-  lost: AlertIcon,
-  nice: StarIcon,
-};
-
-const REACTION_TONE: Record<ReactionKind, string> = {
-  yes: "text-emerald-300",
-  no: "text-rose-300",
-  slower: "text-amber-300",
-  lost: "text-amber-300",
-  nice: "text-[var(--accent)]",
+const REACTION_EMOJI: Record<ReactionKind, string> = {
+  yes: "👍",
+  no: "👎",
+  slower: "🐢",
+  lost: "😕",
+  nice: "✨",
+  applause: "👏",
+  love: "❤️",
+  laugh: "😂",
+  celebrate: "🎉",
 };
 
 // ---------------------------------------------------------------------------
@@ -73,7 +58,6 @@ export function ReactionLayer({ reactions }: { reactions: FloatingReaction[] }) 
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
       <AnimatePresence>
         {reactions.map((reaction) => {
-          const Icon = REACTION_ICON[reaction.kind];
           return (
             <motion.div
               key={reaction.id}
@@ -84,8 +68,8 @@ export function ReactionLayer({ reactions }: { reactions: FloatingReaction[] }) 
               className="absolute bottom-10"
               style={{ left: `${reaction.offset}%` }}
             >
-              <div className="flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-sm">
-                <Icon className={`h-4 w-4 ${REACTION_TONE[reaction.kind]}`} />
+              <div className="flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.26)] backdrop-blur-sm">
+                <span className="text-xl leading-none" aria-hidden="true">{REACTION_EMOJI[reaction.kind]}</span>
                 <span className="text-[11px] font-medium text-white/90">{reaction.from}</span>
               </div>
             </motion.div>
@@ -112,11 +96,11 @@ export function ReactionBar({
   handPosition: number | null;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <button
         onClick={onToggleHand}
         aria-pressed={handRaised}
-        className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+        className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
           handRaised ? "bg-amber-400 text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
         }`}
       >
@@ -124,18 +108,17 @@ export function ReactionBar({
         {handRaised ? (handPosition ? `Hand up · #${handPosition}` : "Hand up") : "Raise hand"}
       </button>
 
-      <div className="flex items-center gap-1 rounded-xl bg-white/5 p-1">
+      <div className="grid grid-cols-5 gap-1 rounded-2xl border border-white/10 bg-white/5 p-1.5 sm:flex sm:flex-wrap">
         {REACTIONS.map((kind) => {
-          const Icon = REACTION_ICON[kind];
           return (
             <button
               key={kind}
               onClick={() => onReact(kind)}
               title={REACTION_LABEL[kind]}
               aria-label={REACTION_LABEL[kind]}
-              className="rounded-lg px-2.5 py-2 text-white/70 transition hover:bg-white/15 hover:text-white"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-transparent text-2xl transition hover:border-white/10 hover:bg-white/10 active:scale-95"
             >
-              <Icon className={`h-4 w-4 ${REACTION_TONE[kind]}`} />
+              <span aria-hidden="true">{REACTION_EMOJI[kind]}</span>
             </button>
           );
         })}

@@ -1921,6 +1921,14 @@ export default function LiveKitClassroom({
                 {/* Over the video, so the tutor catches them without looking away. */}
                 <ReactionLayer reactions={interactions.reactions} />
 
+                <div
+                  title="For everyone's privacy, please don't record or share this class."
+                  aria-label={`Please do not record or share this EasyWay live class. Participant: ${displayName}.`}
+                  className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[70%] truncate rounded-lg border border-white/10 bg-black/55 px-2.5 py-1.5 text-[10px] font-medium text-white/80 shadow-lg backdrop-blur-sm"
+                >
+                  No recording · {displayName}
+                </div>
+
                 {/*
                   The one door out of bold view. Everything else on the stage
                   ignores clicks (see ReactionLayer above); this button does
