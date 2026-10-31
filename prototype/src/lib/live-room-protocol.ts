@@ -62,18 +62,12 @@ import type { RoomRole } from "@/lib/live-classroom";
 // ---------------------------------------------------------------------------
 // Reactions
 //
-// NOT emoji. This project renders emoji nowhere — they arrive as whatever the
-// operating system feels like, flat on Windows and glossy on a Mac, and read as
-// stray next to a drawn icon set. See components/icons.tsx.
-//
-// Five, chosen for what a language student actually needs to say while somebody
-// else is talking. "Slower" and "lost" are the two that matter most and the two
-// every other product leaves out: they are precisely the things a student would
-// otherwise have to interrupt to say, and precisely the things a tutor most
-// needs to hear.
+// Stable semantic IDs travel over LiveKit; the client maps them to emoji and
+// accessible labels. The expanded set adds quick encouragement without
+// changing the meaning of the original classroom signals.
 // ---------------------------------------------------------------------------
 
-export const REACTIONS = ["yes", "no", "slower", "lost", "nice"] as const;
+export const REACTIONS = ["yes", "no", "slower", "lost", "nice", "applause", "love", "laugh", "celebrate"] as const;
 export type ReactionKind = (typeof REACTIONS)[number];
 
 export const REACTION_LABEL: Record<ReactionKind, string> = {
@@ -82,6 +76,10 @@ export const REACTION_LABEL: Record<ReactionKind, string> = {
   slower: "Slower please",
   lost: "I'm lost",
   nice: "Nice!",
+  applause: "Applause",
+  love: "Love it",
+  laugh: "Funny",
+  celebrate: "Celebrate",
 };
 
 /** How a reaction reads in the tutor's live tally. */
@@ -91,6 +89,10 @@ export const REACTION_URGENCY: Record<ReactionKind, "calm" | "attention"> = {
   slower: "attention",
   lost: "attention",
   nice: "calm",
+  applause: "calm",
+  love: "calm",
+  laugh: "calm",
+  celebrate: "calm",
 };
 
 export function isReactionKind(value: unknown): value is ReactionKind {
