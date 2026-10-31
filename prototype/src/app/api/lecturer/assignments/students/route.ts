@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { readAssignment, studentWhereForLecturerScope, belongsToLecturer } from "@/lib/lecturer-assignment";
 import { batchOfAdmission } from "@/lib/class-batch";
+import { resolveOnlineBranchId } from "@/lib/online-branch-server";
 
 /**
  * The names for the "who gets this?" picker.

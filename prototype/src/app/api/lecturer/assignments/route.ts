@@ -96,7 +96,12 @@ async function assignmentScopeOptions(
     assignment.classTypes.length === 1 &&
     (assignment.classTypes[0] === "physical" || assignment.classTypes[0] === "private");
 
-  let groups = assignment.groups.length
+  let groups: Array<{
+    branchId: string;
+    level: string;
+    sessionSlot: string | null;
+    batch: string | null;
+  }> = assignment.groups.length
     ? assignment.groups.map((group) => ({
         branchId: group.branchId,
         level: group.level,
