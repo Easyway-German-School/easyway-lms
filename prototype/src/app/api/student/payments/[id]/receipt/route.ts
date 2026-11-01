@@ -27,7 +27,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       pathway: true,
       branch: { select: { name: true } },
       user: { select: { name: true, tenant: { select: { brandName: true } } } },
-      payments: { orderBy: { createdAt: "asc" }, select: { id: true, amount: true, currency: true, status: true, method: true, description: true, createdAt: true } },
+      payments: { where: { deletedAt: null }, orderBy: { createdAt: "asc" }, select: { id: true, amount: true, currency: true, status: true, method: true, description: true, createdAt: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });

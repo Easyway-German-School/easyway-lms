@@ -48,7 +48,7 @@ export async function notifyEnrolmentLetterIfSettled(studentId: string): Promise
         enrolmentLetterSentAt: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true, tenant: { select: { brandName: true } } } },
-        payments: { where: { status: { in: ["completed", "partial"] } }, select: { amount: true, status: true, description: true } },
+        payments: { where: { status: { in: ["completed", "partial"] }, deletedAt: null }, select: { amount: true, status: true, description: true } },
       },
     });
 

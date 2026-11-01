@@ -14,6 +14,7 @@ export async function GET() {
     where: { userId: session.user.id },
     include: {
       payments: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "desc" },
         include: { invoice: true },
       },

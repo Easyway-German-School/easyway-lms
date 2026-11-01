@@ -95,7 +95,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         where: { deletedAt: null },
         select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
-      payments: { select: { amount: true, status: true, description: true } },
+      // `deletedAt: null` spelled out — this is a NESTED read, so the
+      // soft-delete guard does not fold the clause in on its own. Missed in
+      // the first sweep because this select has no `receivedPaymentFilter()`
+      // call to grep for; confirmed live on this exact screen, where a
+      // voided payment kept Remote View reporting "portal is open" after
+      // every other screen had already been fixed.
+      payments: { where: { deletedAt: null }, select: { amount: true, status: true, description: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "No such student" }, { status: 404 });

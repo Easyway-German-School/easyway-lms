@@ -105,7 +105,7 @@ const JOURNEY_SELECT = {
   germanyGoalSetAt: true,
   user: { select: { name: true } },
   branch: { select: { name: true } },
-  payments: { select: { amount: true, status: true, description: true } },
+  payments: { where: { deletedAt: null }, select: { amount: true, status: true, description: true } },
 } as const;
 
 function readJson(value: unknown): Record<string, any> {
@@ -790,7 +790,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       studentCode: true,
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
-      payments: { select: { amount: true, status: true, description: true } },
+      payments: { where: { deletedAt: null }, select: { amount: true, status: true, description: true } },
     },
     orderBy: { createdAt: "asc" },
   });

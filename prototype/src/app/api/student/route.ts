@@ -27,7 +27,7 @@ export async function GET() {
             pathway: true,
           },
         },
-        payments: true,
+        payments: { where: { deletedAt: null } },
       },
     });
 
@@ -70,7 +70,7 @@ export async function GET() {
               pathway: true,
             },
           },
-          payments: true,
+          payments: { where: { deletedAt: null } },
         },
       });
     }

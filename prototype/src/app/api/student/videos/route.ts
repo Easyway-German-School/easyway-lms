@@ -32,7 +32,7 @@ export async function GET() {
     const student = await prisma.student.findUnique({
       where: { userId: session.user.id },
       include: {
-        payments: true,
+        payments: { where: { deletedAt: null } },
         branch: { select: { name: true } },
         coTutors: { select: { lecturerId: true } },
       },

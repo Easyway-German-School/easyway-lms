@@ -116,7 +116,7 @@ export async function GET(request: Request) {
           ],
         },
         ...(classType === "private" || classType === "group" ? [{ classType }] : []),
-        { payments: { none: {} } },
+        { payments: { none: { deletedAt: null } } },
       ],
     };
     unpaidStudents = await prisma.student.findMany({
