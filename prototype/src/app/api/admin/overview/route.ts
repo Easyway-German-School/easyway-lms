@@ -69,7 +69,7 @@ export async function GET() {
         createdAt: true,
         branch: { select: { id: true, name: true } },
         user: { select: { name: true, email: true } },
-        payments: { where: receivedPaymentFilter(), select: { amount: true } },
+        payments: { where: { ...receivedPaymentFilter(), deletedAt: null }, select: { amount: true } },
         // The per-level tuition ledger — so "outstanding" on the dashboard
         // reflects everything owed across the ladder, not just the current
         // level's shortfall. See src/lib/finance/ledger.ts.

@@ -258,7 +258,7 @@ export async function buildAdminBrief(
       ...(canMoney
         ? {
             payments: {
-              where: receivedPaymentFilter(),
+              where: { ...receivedPaymentFilter(), deletedAt: null },
               select: { amount: true, createdAt: true },
             },
           }

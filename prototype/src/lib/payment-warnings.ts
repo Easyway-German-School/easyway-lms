@@ -127,7 +127,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
       payments: {
-        where: receivedPaymentFilter(),
+        where: { ...receivedPaymentFilter(), deletedAt: null },
         select: { amount: true, level: true, description: true, createdAt: true },
       },
       tuitionCharges: {

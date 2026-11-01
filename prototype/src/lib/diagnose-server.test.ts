@@ -312,7 +312,7 @@ describe("runRepair — record_paystack_payment", () => {
   it("records the payment ONCE, verifies the problem is gone, and writes the audit entry", async () => {
     const outcome = await run();
     expect(m.verify).toHaveBeenCalledTimes(1);
-    expect(m.verify).toHaveBeenCalledWith("PSK-123456");
+    expect(m.verify).toHaveBeenCalledWith("PSK-123456", "s1");
     expect(outcome).toMatchObject({ ok: true, verified: true });
     expect(m.audit).toHaveBeenCalledTimes(1);
     expect(m.audit.mock.calls[0][1]).toMatchObject({ action: "repair", model: "Student", recordId: "s1", severity: "high" });
@@ -354,7 +354,7 @@ describe("runRepair — record_paystack_payment", () => {
       return json({}, 404);
     });
     await run("PSK-OTHER-EMAIL"); // …but the metadata names this student, so it is theirs
-    expect(m.verify).toHaveBeenCalledWith("PSK-OTHER-EMAIL");
+    expect(m.verify).toHaveBeenCalledWith("PSK-OTHER-EMAIL", "s1");
   });
 
   it("stops and says so when Paystack will not confirm — no retry, no false success, still audited", async () => {

@@ -77,7 +77,7 @@ export async function nudgeStudentsWithoutPhoto() {
       branch: { select: { name: true, mode: true } },
       // Received tuition money only — `receivedPaymentFilter` excludes the
       // ₦5,000 registration fee, so it cannot push a student past the deposit.
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      payments: { where: { ...receivedPaymentFilter(), deletedAt: null }, select: { amount: true } },
       tuitionCharges: {
         where: { deletedAt: null },
         select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },

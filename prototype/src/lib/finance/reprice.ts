@@ -152,7 +152,7 @@ async function withOpenBalances(candidates: Candidate[]): Promise<Array<Candidat
         },
       },
       payments: {
-        where: receivedPaymentFilter(),
+        where: { ...receivedPaymentFilter(), deletedAt: null },
         select: { amount: true, level: true, description: true, createdAt: true },
       },
     },

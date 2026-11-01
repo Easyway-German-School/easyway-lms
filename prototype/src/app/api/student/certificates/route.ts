@@ -49,7 +49,7 @@ export async function GET() {
       user: { select: { name: true } },
       tutor: { select: { user: { select: { name: true } } } },
       payments: {
-        where: receivedPaymentFilter(),
+        where: { ...receivedPaymentFilter(), deletedAt: null },
         select: { amount: true, level: true, description: true, createdAt: true },
       },
       tuitionCharges: {

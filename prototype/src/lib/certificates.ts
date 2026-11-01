@@ -194,7 +194,7 @@ export async function issueCertificateForStudent(
         select: { score: true, type: true },
       },
       payments: {
-        where: receivedPaymentFilter(),
+        where: { ...receivedPaymentFilter(), deletedAt: null },
         select: { amount: true, level: true, description: true, createdAt: true },
       },
       tuitionCharges: {

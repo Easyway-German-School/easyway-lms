@@ -40,7 +40,14 @@ export const STUDENT_ACCESS_SELECT = {
   // still be treated as online below — the branch having no campus is the tell.
   branch: { select: { name: true, mode: true } },
   payments: {
-    where: receivedPaymentFilter(),
+    // `deletedAt: null` is spelled out because this is a NESTED read: the
+    // soft-delete guard (src/lib/prisma-guard.ts) only folds that clause into
+    // top-level queries, so a voided/reversed Payment would otherwise still
+    // be summed here — in THE ONE GATE that decides portal access for the
+    // whole app — while every admin-facing screen (a top-level
+    // `payment.findMany`) correctly excludes it. See the same note on
+    // src/lib/finance/receivables.ts, which already has this right.
+    where: { ...receivedPaymentFilter(), deletedAt: null },
     select: { amount: true, level: true, description: true, status: true, createdAt: true },
   },
   tuitionCharges: {
