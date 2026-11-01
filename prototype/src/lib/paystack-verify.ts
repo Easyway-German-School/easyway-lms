@@ -75,6 +75,18 @@ export async function persistPaystackTransaction(data: any, fallbackStudentId?: 
   const forNextLevel = String(metadata.forNextLevel || "") === "true";
   const forPriorBalance = String(metadata.forPriorBalance || "") === "true";
   const paymentLevel = String(metadata.level || metadata.targetLevel || "").trim().toUpperCase();
+  // When Paystack is asked long after the fact — Mission Control backfilling
+  // a transaction the webhook missed, sometimes months old — the Payment row
+  // must carry the date the money actually moved, not the date this function
+  // happened to run. Every place that infers which level an unstamped
+  // payment belongs to from its timing (sumPaidTowardLevel's fallback, the
+  // ledger's chronological ordering) silently misattributes a payment
+  // recorded "today" for money that arrived long before the student's
+  // current level even existed. Falls back to `undefined` (Prisma's own
+  // `now()` default) when Paystack's response has no usable date.
+  const paidAtRaw = data.paid_at || data.paidAt || data.transaction_date;
+  const paidAt = paidAtRaw ? new Date(paidAtRaw) : null;
+  const occurredAt = paidAt && !Number.isNaN(paidAt.getTime()) ? paidAt : undefined;
   const paymentClassification = classifyPaymentTransaction({
     // A next-level checkout's amount can exceed the new level's fee because it
     // ALSO clears an old balance (see the breakdown in /api/paystack/initialize).
@@ -221,6 +233,7 @@ export async function persistPaystackTransaction(data: any, fallbackStudentId?: 
       method: "paystack",
       description: getPaymentDescription(effectivePaymentType, pathwayName),
       ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
+      ...(occurredAt ? { createdAt: occurredAt } : {}),
       stripeSessionId: reference,
       paymentIntentId: reference,
     },
