@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
-import { isReturningLevelStudent, sumPaidTowardLevel } from "@/lib/payment-level";
+import { isReturningLevelStudent } from "@/lib/payment-level";
 import { buildLedger } from "@/lib/finance/ledger";
 import { BEHIND_TUITION_MIN_DAYS } from "@/lib/finance/receivables";
 import { accessFromStudent } from "@/lib/student-access";
@@ -332,9 +332,24 @@ export async function GET(
   // Returning students already paid registration on the previous level. This
   // file only shows what they have paid toward THIS level's tuition — leftover
   // A1 cash and the ₦5,000 registration row must not look like an A2 deposit.
-  const paidTowardLevel = sumPaidTowardLevel(payments, currentLevel, currentCharge?.createdAt);
-  const paid = returningStudent ? paidTowardLevel : access.totalPaid;
-  const owed = returningStudent ? Math.max(0, fee - paidTowardLevel) : access.outstandingBalance;
+  //
+  // MUST read this off `access` (the canonical ledger-aware helper), not a
+  // second, hand-rolled sum: `sumPaidTowardLevel` used to stand in here, but
+  // it only recognises a payment as belonging to a level from its `level`
+  // stamp or description, falling back to "was it recorded on/after this
+  // level's charge" when neither is set. A payment Mission Control backfills
+  // from an old Paystack transaction is exactly the case that breaks: its
+  // `level` can be unset (the original checkout predates that metadata
+  // field) and its `createdAt` is the day it was BACKFILLED, not the day it
+  // was actually paid — so the fallback misattributes it to whichever level
+  // happens to be current that day. `access.currentLevelPaid` /
+  // `.currentLevelOutstanding` go through the same per-level ledger
+  // (src/lib/finance/ledger.ts) the real portal lock reads, so this screen
+  // cannot disagree with it the way it did for a real student (confirmed:
+  // this showed ₦56,000 outstanding, newly stale the moment a backfilled
+  // payment landed, while the ledger-correct figure was ₦145,000).
+  const paid = returningStudent ? access.currentLevelPaid : access.totalPaid;
+  const owed = returningStudent ? access.currentLevelOutstanding : access.outstandingBalance;
 
   /**
    * THIS LEVEL being clear is not the same question as THE PORTAL being open.
@@ -369,7 +384,9 @@ export async function GET(
    * Returning / next-level students never sit in `registeredOnly`: that label
    * is for a brand-new file that has only paid the ₦5,000 registration fee.
    */
-  const depositMet = returningStudent ? paidTowardLevel >= deposit : access.depositCleared;
+  // Always the canonical gate value now — no reason left to hand-roll this
+  // for a returning student once `paid`/`owed` above already read off it.
+  const depositMet = access.depositCleared;
   const fullyPaid = owed <= 0;
   const paywall = returningStudent
     ? fullyPaid
