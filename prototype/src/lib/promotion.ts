@@ -99,7 +99,7 @@ export async function findPromotionCandidates(opts: {
     include: {
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
-      payments: { select: { amount: true, status: true, description: true } },
+      payments: { where: { deletedAt: null }, select: { amount: true, status: true, description: true } },
     },
   });
 

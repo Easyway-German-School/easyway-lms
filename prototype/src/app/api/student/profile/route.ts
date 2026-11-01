@@ -58,6 +58,7 @@ export async function GET() {
           orderBy: { createdAt: "desc" },
         },
         payments: {
+          where: { deletedAt: null },
           orderBy: { createdAt: "desc" },
         },
         tuitionCharges: {

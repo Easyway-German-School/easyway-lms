@@ -67,7 +67,7 @@ export async function GET(request: Request) {
       prisma.student.findUnique({
         where: { userId: session.user.id },
         include: {
-          payments: true,
+          payments: { where: { deletedAt: null } },
           branch: { select: { id: true, name: true, mode: true } },
           coTutors: { select: { lecturerId: true } },
         },

@@ -204,11 +204,12 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
               payments: {
                 some: {
                   ...allReceivedPaymentFilter(),
+                  deletedAt: null,
                   description: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX },
                 },
               },
             },
-            { payments: { none: receivedPaymentFilter() } },
+            { payments: { none: { ...receivedPaymentFilter(), deletedAt: null } } },
           ],
         }
       : {};

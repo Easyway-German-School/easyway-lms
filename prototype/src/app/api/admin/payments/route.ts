@@ -121,7 +121,7 @@ export async function POST(request: Request) {
         user: { select: { name: true, email: true } },
         // `description` is needed to tell a tuition payment from the ₦5,000
         // registration fee, which the paywall does not count.
-        payments: { select: { amount: true, status: true, description: true } },
+        payments: { where: { deletedAt: null }, select: { amount: true, status: true, description: true } },
       },
     });
     if (!student) {

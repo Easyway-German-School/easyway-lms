@@ -85,7 +85,7 @@ const STUDENT_SHAPE = {
   paymentGraceUntil: true,
   user: { select: { name: true, email: true } },
   branch: { select: { name: true } },
-  payments: { select: { amount: true, status: true, description: true } },
+  payments: { where: { deletedAt: null }, select: { amount: true, status: true, description: true } },
   tuitionCharges: {
     where: { deletedAt: null },
     select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },

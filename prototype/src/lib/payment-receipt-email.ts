@@ -233,7 +233,7 @@ export async function sendPaymentReceiptEmail(paymentId: string): Promise<void> 
             pathway: true,
             branch: { select: { name: true } },
             user: { select: { name: true, email: true, tenant: { select: { brandName: true } } } },
-            payments: { orderBy: { createdAt: "asc" }, select: { amount: true, status: true, description: true, createdAt: true } },
+            payments: { where: { deletedAt: null }, orderBy: { createdAt: "asc" }, select: { amount: true, status: true, description: true, createdAt: true } },
           },
         },
       },

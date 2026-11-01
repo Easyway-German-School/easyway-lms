@@ -66,7 +66,7 @@ const memberSelect = {
       assignmentSubmissions: true,
       grades: true,
       certificates: true,
-      payments: true,
+      payments: { where: { deletedAt: null } },
       tuitionCharges: true,
     },
   },
