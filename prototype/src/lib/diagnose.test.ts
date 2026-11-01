@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { portalVerdict } from "./portal-verdict";
-import { RULES, belongsToStudent, diagnose, unrecordedTransactions, type Facts, type PaystackTx } from "./diagnose";
+import {
+  RULES,
+  belongsToStudent,
+  diagnose,
+  unrecordedTransactions,
+  type Facts,
+  type PaymentFact,
+  type PaystackTx,
+} from "./diagnose";
 
 const who = { userId: "u1", studentId: "s1", email: "Ada@Example.com" };
 const isReceived = (s: string) => s === "completed" || s === "partial";
@@ -49,7 +57,18 @@ describe("belongsToStudent", () => {
 });
 
 describe("unrecordedTransactions", () => {
-  const row = (over: object = {}) => ({ id: "p1", amount: 150_000, status: "completed", method: "paystack", references: ["ref-1"], createdAt: "2026-09-18T10:00:00Z", ...over });
+  const row = (over: Partial<PaymentFact> = {}): PaymentFact => ({
+    id: "p1",
+    amount: 150_000,
+    currency: "NGN",
+    status: "completed",
+    method: "paystack",
+    description: null,
+    level: null,
+    references: ["ref-1"],
+    createdAt: "2026-09-18T10:00:00Z",
+    ...over,
+  });
 
   it("finds a paid transaction with no payment row at all (the missed webhook)", () => {
     const found = unrecordedTransactions([tx()], [], who, isReceived);
@@ -64,6 +83,62 @@ describe("unrecordedTransactions", () => {
   it("treats an already-recorded payment — completed OR a partial deposit — as fine", () => {
     expect(unrecordedTransactions([tx()], [row({ status: "completed" })], who, isReceived)).toEqual([]);
     expect(unrecordedTransactions([tx()], [row({ status: "partial" })], who, isReceived)).toEqual([]);
+  });
+
+  it("warns about matching manual tuition entries without treating them as proof or offering an automatic repair", () => {
+    const payments = [
+      {
+        id: "manual-1",
+        amount: 150_000,
+        currency: "NGN",
+        status: "completed",
+        method: "bank_transfer",
+        description: "A1 tuition — recorded payment note",
+        level: "A1",
+        references: [],
+        createdAt: "2026-10-31T18:00:00.000Z",
+      },
+      {
+        id: "manual-2",
+        amount: 150_000,
+        currency: "NGN",
+        status: "partial",
+        method: "bank_transfer",
+        description: "A1 tuition — recorded payment note",
+        level: "A1",
+        references: [],
+        createdAt: "2026-10-31T18:02:00.000Z",
+      },
+    ];
+    const finding = diagnose(base({ payments })).findings.find((item) => item.rule === "possible-duplicate-manual-payments");
+    expect(finding).toMatchObject({
+      severity: "warning",
+      title: expect.stringContaining("₦300,000"),
+      offers: [],
+    });
+    expect(finding?.evidence).toHaveLength(2);
+    expect(finding?.detail).toMatch(/not proof/i);
+  });
+
+  it("does not flag different levels, gateway transactions, or entries outside the duplicate window", () => {
+    const first = {
+      id: "manual-1",
+      amount: 150_000,
+      currency: "NGN",
+      status: "completed",
+      method: "bank_transfer",
+      description: "A1 tuition",
+      level: "A1",
+      references: [],
+      createdAt: "2026-10-31T18:00:00.000Z",
+    };
+    const second = { ...first, id: "manual-2", level: "A2" };
+    const gateway = { ...first, id: "gateway-1", method: "paystack", references: ["ref-1"] };
+    const later = { ...first, id: "manual-3", createdAt: "2026-10-31T18:11:00.000Z" };
+    const finding = diagnose(base({ payments: [first, second, gateway, later] })).findings.find(
+      (item) => item.rule === "possible-duplicate-manual-payments",
+    );
+    expect(finding).toBeUndefined();
   });
 
   it("matches a row by ANY reference it carries (stripeSessionId or paymentIntentId)", () => {

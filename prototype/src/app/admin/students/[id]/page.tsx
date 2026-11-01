@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -660,6 +660,7 @@ export default function StudentDossierPage() {
   });
   const [payBusy, setPayBusy] = useState(false);
   const [payMsg, setPayMsg] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null);
+  const paymentAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   /**
    * Editing is deliberately behind its own modal rather than inline fields —
@@ -945,25 +946,30 @@ export default function StudentDossierPage() {
       setPayMsg({ tone: "bad", text: "Enter the amount received, in whole naira." });
       return;
     }
+    const requestBody = {
+      studentId: id,
+      amount,
+      currency: "ngn",
+      method: payForm.method,
+      status: "completed",
+      description:
+        !data?.money.returningStudent && payForm.kind === "registration"
+          ? `Registration fee${payForm.note.trim() ? ` — ${payForm.note.trim()}` : ""}`
+          : payForm.note.trim() || "Tuition payment (recorded by office)",
+    };
+    const fingerprint = JSON.stringify(requestBody);
+    let attempt = paymentAttemptRef.current;
+    if (!attempt || attempt.fingerprint !== fingerprint) {
+      attempt = { fingerprint, key: crypto.randomUUID() };
+      paymentAttemptRef.current = attempt;
+    }
     setPayBusy(true);
     setPayMsg(null);
     try {
       const response = await fetch("/api/admin/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          studentId: id,
-          amount,
-          currency: "ngn",
-          method: payForm.method,
-          status: "completed",
-          // Returning students already paid registration on the previous
-          // level — never record a second ₦5,000 row against this file.
-          description:
-            !data?.money.returningStudent && payForm.kind === "registration"
-              ? `Registration fee${payForm.note.trim() ? ` — ${payForm.note.trim()}` : ""}`
-              : payForm.note.trim() || "Tuition payment (recorded by office)",
-        }),
+        body: JSON.stringify({ ...requestBody, idempotencyKey: attempt.key }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json?.error || "Could not record that payment");
@@ -978,6 +984,7 @@ export default function StudentDossierPage() {
             : { tone: "ok", text: "Payment recorded." },
       );
       setPayForm({ amount: "", method: "bank_transfer", kind: "tuition", note: "" });
+      paymentAttemptRef.current = null;
       setPayOpen(false);
       void load(false);
     } catch (payErr) {

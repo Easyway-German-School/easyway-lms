@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { requireCapability, requireAnyCapability } from "@/lib/admin-roles";
 import {
   isValidPaymentStatus,
@@ -17,6 +18,37 @@ import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { getStudentAccess } from "@/lib/student-access";
 import { recordCommissionForPayment } from "@/lib/growth/commission";
 import { recordPromoRewardForPayment } from "@/lib/growth/promo-rewards";
+
+async function idempotentPaymentResponse(
+  key: string,
+  studentId: string,
+  fingerprint: string,
+): Promise<NextResponse | null> {
+  const existing = await unguardedPrisma.payment.findUnique({
+    where: { idempotencyKey: key },
+    select: { studentId: true, idempotencyFingerprint: true, deletedAt: true },
+  });
+  if (!existing) return null;
+  if (existing.studentId !== studentId) {
+    return NextResponse.json({ error: "This payment request key has already been used." }, { status: 409 });
+  }
+  if (existing.deletedAt) {
+    return NextResponse.json(
+      { error: "This payment request was already used and later voided. Start a new entry only for a separately verified payment." },
+      { status: 409 },
+    );
+  }
+  if (existing.idempotencyFingerprint !== fingerprint) {
+    return NextResponse.json(
+      { error: "This payment request key was already used with different details. Review the existing payment before retrying." },
+      { status: 409 },
+    );
+  }
+  return NextResponse.json({
+    duplicate: true,
+    notice: "This payment was already recorded. No second payment was created.",
+  });
+}
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -58,9 +90,16 @@ export async function POST(request: Request) {
   const forNextLevel = body.forNextLevel === true;
   const requestedLevel =
     typeof body.level === "string" && body.level.trim() ? body.level.trim().toUpperCase() : "";
+  const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
 
   if (!studentId || !amount || !method) {
     return NextResponse.json({ error: "studentId, amount, and method are required" }, { status: 400 });
+  }
+  if (!Number.isFinite(amount) || Math.round(amount) <= 0) {
+    return NextResponse.json({ error: "amount must be a positive number of naira" }, { status: 400 });
+  }
+  if (!/^[A-Za-z0-9_-]{20,100}$/.test(idempotencyKey)) {
+    return NextResponse.json({ error: "A valid payment request key is required. Refresh the form and try again." }, { status: 400 });
   }
 
   if (!isValidPaymentStatus(status)) {
@@ -88,6 +127,24 @@ export async function POST(request: Request) {
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
+
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify({
+          studentId,
+          amount: Math.round(amount),
+          currency,
+          method,
+          description: descriptionRaw || null,
+          invoiceId,
+          status,
+          level: requestedLevel || null,
+          forNextLevel,
+        }),
+      )
+      .digest("hex");
+    const replay = await idempotentPaymentResponse(idempotencyKey, studentId, fingerprint);
+    if (replay) return replay;
 
     let paymentLevel = requestedLevel;
     if (forNextLevel) {
@@ -147,18 +204,27 @@ export async function POST(request: Request) {
       );
     }
 
-    const payment = await prisma.payment.create({
-      data: {
-        studentId,
-        amount: Math.round(amount),
-        currency,
-        method,
-        description,
-        invoiceId,
-        status,
-        level: paymentLevel || null,
-      },
-    });
+    let payment;
+    try {
+      payment = await prisma.payment.create({
+        data: {
+          studentId,
+          amount: Math.round(amount),
+          currency,
+          method,
+          description,
+          invoiceId,
+          status,
+          level: paymentLevel || null,
+          idempotencyKey,
+          idempotencyFingerprint: fingerprint,
+        },
+      });
+    } catch (error) {
+      const replay = await idempotentPaymentResponse(idempotencyKey, studentId, fingerprint);
+      if (replay) return replay;
+      throw error;
+    }
 
     /**
      * TRAVEL PACKAGE — a flat ₦980,000 that replaces the per-level ladder. Make

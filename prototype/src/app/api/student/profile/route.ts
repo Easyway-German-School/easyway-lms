@@ -1,7 +1,16 @@
 import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import {
+  derivePaymentStatus,
+  isReceivedPayment,
+  isRegistrationFeePayment,
+  isTravelPackagePathway,
+  requiredDepositFor,
+  sumTuitionPayments,
+  tuitionFeeFor,
+} from "@/lib/payment";
+import { sumPaidTowardLevel } from "@/lib/payment-level";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -51,6 +60,10 @@ export async function GET() {
         payments: {
           orderBy: { createdAt: "desc" },
         },
+        tuitionCharges: {
+          where: { deletedAt: null },
+          select: { level: true, createdAt: true },
+        },
       }
     });
 
@@ -65,7 +78,13 @@ export async function GET() {
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
-    const totalPaid = student.payments
+    const currentCharge = student.tuitionCharges.find(
+      (charge) => charge.level.toUpperCase() === student.level.toUpperCase(),
+    );
+    const totalPaid = isTravelPackagePathway(student.pathway)
+      ? sumTuitionPayments(student.payments)
+      : sumPaidTowardLevel(student.payments, student.level, currentCharge?.createdAt);
+    const lifetimePaid = student.payments
       .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const paymentMeta = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
@@ -92,6 +111,7 @@ export async function GET() {
         paymentStatus,
         paymentSummary: {
           totalPaid,
+          lifetimePaid,
           tuitionFee,
           requiredDeposit,
           balance: Math.max(0, tuitionFee - totalPaid),

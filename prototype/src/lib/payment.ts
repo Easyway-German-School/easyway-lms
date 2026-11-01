@@ -132,6 +132,15 @@ export function isTuitionPayment(payment: { status?: string | null; description?
   return isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description);
 }
 
+export function sumTuitionPayments(
+  payments: Array<{ amount?: number | null; status?: string | null; description?: string | null }>,
+): number {
+  return payments.reduce((sum, payment) => {
+    if (!isTuitionPayment(payment)) return sum;
+    return sum + Math.max(0, Math.round(Number(payment.amount) || 0));
+  }, 0);
+}
+
 /**
  * Has this student paid ANY tuition — full or part? The test for handing out
  * the proof-of-enrolment letter: a registration fee alone is an application,

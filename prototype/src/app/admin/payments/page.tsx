@@ -138,6 +138,7 @@ function PaymentsLedger() {
   const [pageSize, setPageSize] = useState<number>(20);
   const [totalCount, setTotalCount] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const loadPaymentsList = useCallback(async () => {
     try {
@@ -223,6 +224,7 @@ function PaymentsLedger() {
   }
 
   function resetFormFields() {
+    createAttemptRef.current = null;
     setStudentId("");
     setPicked(null);
     setStudentQuery("");
@@ -409,22 +411,30 @@ function PaymentsLedger() {
       return;
     }
 
+    const requestBody = {
+      studentId,
+      amount: Math.round(amount),
+      currency,
+      method,
+      description: description.trim() || null,
+      status,
+      level: paymentLevel || null,
+      forNextLevel,
+    };
+    const fingerprint = JSON.stringify(requestBody);
+    let attempt = createAttemptRef.current;
+    if (!attempt || attempt.fingerprint !== fingerprint) {
+      attempt = { fingerprint, key: crypto.randomUUID() };
+      createAttemptRef.current = attempt;
+    }
+
     setFormBusy(true);
 
     try {
       const res = await fetch("/api/admin/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          studentId,
-          amount: Math.round(amount),
-          currency,
-          method,
-          description: description.trim() || null,
-          status,
-          level: paymentLevel || null,
-          forNextLevel,
-        }),
+        body: JSON.stringify({ ...requestBody, idempotencyKey: attempt.key }),
       });
 
       const data = await res.json().catch(() => ({}));

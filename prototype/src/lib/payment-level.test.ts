@@ -97,6 +97,17 @@ describe("paymentCountsTowardLevel", () => {
 });
 
 describe("sumPaidTowardLevel", () => {
+  it("does not apply prior-level payments to the current level", () => {
+    const payments = [
+      { amount: 150_000, status: "completed", level: "A1", description: "A1 tuition (recorded by office)", createdAt: "2026-10-31T18:00:00.000Z" },
+      { amount: 150_000, status: "completed", level: "A1", description: "A1 tuition (recorded by office)", createdAt: "2026-10-31T18:02:00.000Z" },
+      { amount: 155_000, status: "completed", level: "A1", description: "A1 online class", createdAt: "2026-08-08T12:00:00.000Z" },
+    ];
+
+    expect(sumPaidTowardLevel(payments, "A1")).toBe(455_000);
+    expect(sumPaidTowardLevel(payments, "A2")).toBe(0);
+  });
+
   it("leaves a returning A2 student owing the full A2 fee", () => {
     const paid = sumPaidTowardLevel(
       [
