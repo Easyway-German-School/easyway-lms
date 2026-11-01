@@ -304,7 +304,7 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
       // may not see them and discarding the field afterwards is one refactor
       // away from a leak.
       ...(canSeeMoney
-        ? { payments: { where: receivedPaymentFilter(), select: { amount: true } } }
+        ? { payments: { where: { ...receivedPaymentFilter(), deletedAt: null }, select: { amount: true } } }
         : {}),
       // Same rule for contact details: the typed phone fields plus the raw
       // admission blob (an older intake path only wrote the number there).
@@ -1754,7 +1754,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
             },
           },
           payments: {
-            where: receivedPaymentFilter(),
+            where: { ...receivedPaymentFilter(), deletedAt: null },
             select: { amount: true, level: true, description: true, createdAt: true },
           },
         },

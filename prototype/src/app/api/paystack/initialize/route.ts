@@ -57,7 +57,7 @@ export async function POST(request: Request) {
         levelCompletedAt: true,
         branch: { select: { name: true } },
         payments: {
-          where: receivedPaymentFilter(),
+          where: { ...receivedPaymentFilter(), deletedAt: null },
           select: { amount: true, status: true, level: true, description: true, createdAt: true },
         },
       },

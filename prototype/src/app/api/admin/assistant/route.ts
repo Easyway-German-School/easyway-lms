@@ -151,7 +151,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
         pathway: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
-        payments: { where: receivedPaymentFilter(), select: { amount: true, createdAt: true } },
+        payments: { where: { ...receivedPaymentFilter(), deletedAt: null }, select: { amount: true, createdAt: true } },
       },
     });
 

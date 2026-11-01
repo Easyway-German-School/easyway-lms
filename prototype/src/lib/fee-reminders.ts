@@ -79,12 +79,12 @@ export async function sendDueFeeReminders(options: {
             },
           },
           payments: {
-            where: receivedPaymentFilter(),
+            where: { ...receivedPaymentFilter(), deletedAt: null },
             select: { amount: true, level: true, description: true, createdAt: true },
           },
         },
       },
-      payments: { where: receivedPaymentFilter() },
+      payments: { where: { ...receivedPaymentFilter(), deletedAt: null } },
     },
   });
 

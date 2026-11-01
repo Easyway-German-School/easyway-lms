@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isLevelSellable, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { resolvePaymentLevel } from "@/lib/payment-level";
 import { getStudentAccess } from "@/lib/student-access";
 import {
   deriveFullPaymentOffer,
@@ -41,9 +42,9 @@ export async function GET() {
       createdAt: true,
       branch: { select: { name: true } },
       payments: {
-        where: receivedPaymentFilter(),
+        where: { ...receivedPaymentFilter(), deletedAt: null },
         orderBy: { createdAt: "asc" },
-        select: { amount: true, createdAt: true },
+        select: { amount: true, createdAt: true, level: true, description: true },
       },
     },
   });
@@ -80,13 +81,23 @@ export async function GET() {
   // When the running total first crossed the full fee. Judging the bonus on
   // this rather than on "now" means a student who paid in full on day two keeps
   // the bundle forever, instead of losing it the moment the window lapses.
-  // (This walk is still over the raw lifetime payments — the bonus window is a
-  // low-stakes perk, not a lock gate, and only matters in the first 14 days of
-  // a FRESH enrolment, where lifetime and current-level money are the same
-  // thing anyway.)
+  //
+  // MUST walk only payments that actually resolve to THIS level, not the raw
+  // lifetime list. A returning student (promoted from an earlier level with
+  // an older balance still open) has lifetime money that the ledger allocates
+  // to that older charge first — walking lifetime payments here crossed
+  // today's fee on an old, unrelated payment and declared the bonus window
+  // closed years before this level ever existed, while the outstanding figure
+  // above (which IS level-aware, via access.currentLevelPaid) correctly still
+  // showed a balance due. Same bug class as the one `access.currentLevelPaid`
+  // was introduced to fix above — see that comment.
+  const currentLevelKey = String(student.level ?? "").trim().toUpperCase();
+  const paymentsForThisLevel = student.payments.filter(
+    (payment) => resolvePaymentLevel({ stamped: payment.level, description: payment.description }) === currentLevelKey,
+  );
   let running = 0;
   let fullPaidAt: Date | null = null;
-  for (const payment of student.payments) {
+  for (const payment of paymentsForThisLevel) {
     running += payment.amount;
     if (running >= tuitionFee && tuitionFee > 0) {
       fullPaidAt = payment.createdAt;
@@ -130,7 +141,7 @@ async function branchFullPaymentRate(branchId: string | null): Promise<BranchFul
     select: {
       level: true,
       branch: { select: { name: true } },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      payments: { where: { ...receivedPaymentFilter(), deletedAt: null }, select: { amount: true } },
     },
   });
 

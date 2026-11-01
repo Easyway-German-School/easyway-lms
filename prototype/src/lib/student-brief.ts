@@ -91,7 +91,7 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
       branch: { select: { name: true, mode: true } },
       user: { select: { name: true } },
       attendances: { select: { date: true, present: true, status: true } },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      payments: { where: { ...receivedPaymentFilter(), deletedAt: null }, select: { amount: true } },
       tuitionCharges: {
         where: { deletedAt: null },
         select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
