@@ -28,6 +28,8 @@ type OfferResponse = {
   sellable: boolean;
   requiredDeposit: number;
   previousLevelOutstanding: number;
+  /** Paying for a level reached by promotion, not the one they signed up for. */
+  isReturningLevel: boolean;
   offer: FullPaymentOffer;
   options: {
     full: { amount: number; headline: string; subline: string };
@@ -176,7 +178,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.32em] text-[#c8a24a]">
-              Tuition · {data.level}
+              {data.isReturningLevel ? "Continuing to" : "Tuition ·"} {data.level}
               {data.branchName ? ` · ${data.branchName}` : ""}
             </p>
             <p className="mt-3 font-serif text-5xl font-semibold tracking-tight text-white">
@@ -228,10 +230,17 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
             {busy === "full" ? "Opening secure checkout…" : `Pay ${naira(options.full.amount)} in full`}
           </button>
 
-          {/* A real deadline, stated in days and never restarted. */}
-          <p className={`mt-4 text-center text-xs font-semibold uppercase tracking-[0.18em] ${offer.windowOpen ? "text-[#e8cf8f]" : "text-[var(--muted)]"}`}>
-            {options.windowNote}
-          </p>
+          {/* A real deadline, stated in days and never restarted — but it is
+              measured from this student's ORIGINAL signup date, which for a
+              returning student paying for a level they were promoted into is
+              long gone. Showing it here reads as a bonus already missed
+              through no fault of theirs, so it is suppressed for them; the
+              figures above (now level-aware) are unaffected either way. */}
+          {!data.isReturningLevel ? (
+            <p className={`mt-4 text-center text-xs font-semibold uppercase tracking-[0.18em] ${offer.windowOpen ? "text-[#e8cf8f]" : "text-[var(--muted)]"}`}>
+              {options.windowNote}
+            </p>
+          ) : null}
         </div>
 
         {/* Real peer behaviour, or nothing at all. */}

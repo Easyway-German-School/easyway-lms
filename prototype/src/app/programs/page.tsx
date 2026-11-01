@@ -7,6 +7,7 @@ import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 
 import TuitionCheckout from "@/components/TuitionCheckout";
 import NextLevelCheckout from "@/components/NextLevelCheckout";
+import { LEVELS } from "@/lib/levels";
 import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
 import TravelPackageShowcase from "@/components/TravelPackageShowcase";
 import { ArrowLeftIcon } from "@/components/icons";
@@ -120,6 +121,15 @@ function ProgramsPageInner() {
   const forNextLevel = searchParams.get("forNextLevel") === "1";
   const [selected, setSelected] = useState(programs[0].pathwayName);
   const [student, setStudent] = useState<StudentInfo | null>(null);
+  // Not on the first rung of the ladder — paying for a level reached by
+  // promotion, not the one originally signed up for. The pathway picker
+  // below ("choose what you're training for") makes no sense for them: they
+  // already picked, months ago, and are not picking again — only the level
+  // they're paying for has changed.
+  const isReturningLevel = Boolean(
+    student?.level && (LEVELS as readonly string[]).indexOf(student.level.toUpperCase()) > 0,
+  );
+  const showAsContinuing = forNextLevel || isReturningLevel;
   const [showUpsellPopup, setShowUpsellPopup] = useState(false);
 
   useEffect(() => {
@@ -183,13 +193,13 @@ function ProgramsPageInner() {
 
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">
-            {forNextLevel ? "Continuing your studies" : "Tuition & pathways"}
+            {showAsContinuing ? "Continuing your studies" : "Tuition & pathways"}
           </p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">
-            {forNextLevel ? "Continue to your next level" : "Settle your tuition"}
+            {showAsContinuing ? "Continue to your next level" : "Settle your tuition"}
           </h1>
           <p className="mt-4 max-w-2xl text-[var(--muted)]">
-            {forNextLevel
+            {showAsContinuing
               ? "You already have a pathway, a tutor and a class — this just pays for the level ahead."
               : "Your tuition is set by your level and your branch — the pathway you pick decides what you study, not what you pay. Choose a track, then complete payment below."}
           </p>
@@ -198,7 +208,7 @@ function ProgramsPageInner() {
         {/* The checkout comes first: it is the reason students land on this page. */}
         {forNextLevel ? <NextLevelCheckout /> : <TuitionCheckout pathwayName={selected} />}
 
-        {!forNextLevel ? (
+        {!showAsContinuing ? (
           <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
             <h2 className="text-2xl font-semibold">Choose your pathway</h2>
             <p className="mt-2 text-sm text-[var(--muted)]">

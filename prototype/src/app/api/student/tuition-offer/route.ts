@@ -5,6 +5,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isLevelSellable, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import { resolvePaymentLevel } from "@/lib/payment-level";
+import { LEVELS } from "@/lib/levels";
 import { getStudentAccess } from "@/lib/student-access";
 import {
   deriveFullPaymentOffer,
@@ -120,6 +121,15 @@ export async function GET() {
     sellable: isLevelSellable(student.level),
     requiredDeposit: access?.requiredDeposit ?? requiredDepositFor(feeLookup),
     previousLevelOutstanding: access?.previousLevelOutstanding ?? 0,
+    // Not on the first rung of the ladder — a student paying for a level they
+    // were PROMOTED into, not the one they originally signed up for. The
+    // first-14-days bonus window and "secure your seat" urgency this screen
+    // otherwise leans on are a new-signup mechanism; showing them to a
+    // returning student measures a deadline against a registration date
+    // months gone and reads as a fabricated, already-missed countdown. The
+    // checkout itself (the figures above) is correct either way — this only
+    // tells the client which framing to show.
+    isReturningLevel: (LEVELS as readonly string[]).indexOf(student.level.toUpperCase()) > 0,
     offer,
     options: paymentOptionsFor(offer),
     socialProof: await branchFullPaymentRate(student.branchId),
