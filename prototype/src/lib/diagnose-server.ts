@@ -535,7 +535,14 @@ const REPAIRS: Record<RepairId, RepairDef> = {
     async act(facts, params) {
       const reference = params.reference;
       // verifyPaystackTransaction re-asks Paystack, and only records money Paystack confirms.
-      const result = await verifyPaystackTransaction(reference);
+      // The fallback student id matters here specifically: this repair runs
+      // against ONE NAMED STUDENT an admin is already looking at, so when the
+      // transaction's own stamped metadata can't resolve (an archived record
+      // from before a reenrolment, or an old transaction predating userId in
+      // checkout metadata) this is known-correct, not a guess — unlike the
+      // webhook/verify paths, which have no student in hand and must not fall
+      // back to one.
+      const result = await verifyPaystackTransaction(reference, facts.student.id);
       if (result.persistFailed) {
         return { ok: false, message: "Paystack confirmed the charge but it could not be written down. Nothing was recorded — reconcile this one by hand." };
       }

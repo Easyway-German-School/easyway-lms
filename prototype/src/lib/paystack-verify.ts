@@ -22,7 +22,7 @@ function getPaymentDescription(paymentType: string, pathwayName: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function resolveStudentId(metadata: any): Promise<string | null> {
+async function resolveStudentId(metadata: any, fallbackStudentId?: string): Promise<string | null> {
   const studentIdValue = String(metadata.studentId || "");
   if (studentIdValue) {
     const student = await prisma.student.findUnique({ where: { id: studentIdValue } });
@@ -35,13 +35,27 @@ async function resolveStudentId(metadata: any): Promise<string | null> {
     if (student) return student.id;
   }
 
+  // Neither the stamped studentId nor userId resolves — typically an older
+  // transaction whose student record was archived on reenrolment (see
+  // scripts/check-payment-gate-drift.mjs' sibling note on reenrolment
+  // archiving), or metadata from before `userId` was added to checkout. A
+  // caller that already knows exactly which student this payment is for
+  // (Mission Control's "record a Paystack payment Paystack confirms but we
+  // never recorded" repair, run against one named student, never a stranger)
+  // may pass it here as the last resort — never used when resolving from the
+  // webhook or the student's own browser, where nothing already knows.
+  if (fallbackStudentId) {
+    const student = await prisma.student.findUnique({ where: { id: fallbackStudentId } });
+    if (student) return student.id;
+  }
+
   return null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function persistPaystackTransaction(data: any): Promise<void> {
+export async function persistPaystackTransaction(data: any, fallbackStudentId?: string): Promise<void> {
   const metadata = data.metadata || {};
-  const studentId = await resolveStudentId(metadata);
+  const studentId = await resolveStudentId(metadata, fallbackStudentId);
   const reference = String(data.reference || "");
   const paymentStage = String(metadata.paymentStage || metadata.paymentType || "full");
   const paymentType =
@@ -370,7 +384,7 @@ export type PaystackVerifyResult = {
  * invoice / payment / enrollment. Safe to call directly from a route handler OR
  * a server component — no HTTP round-trip, so no relative-URL or self-fetch issues.
  */
-export async function verifyPaystackTransaction(reference: string): Promise<PaystackVerifyResult> {
+export async function verifyPaystackTransaction(reference: string, fallbackStudentId?: string): Promise<PaystackVerifyResult> {
   if (!reference) {
     return { success: false, status: 400, error: "Missing reference" };
   }
@@ -417,7 +431,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
   // payment", about a charge Paystack had already confirmed.
   if (data?.data?.status === "success") {
     try {
-      await persistPaystackTransaction(data.data);
+      await persistPaystackTransaction(data.data, fallbackStudentId);
     } catch (error) {
       console.error("Paystack verify: charge confirmed but could not be recorded", { reference, error });
       return {
