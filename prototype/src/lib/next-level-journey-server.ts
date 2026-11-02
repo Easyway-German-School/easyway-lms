@@ -110,6 +110,7 @@ const studentSelect = {
   germanyGoal: true,
   tenantId: true,
   branchId: true,
+  heldBackAt: true,
   branch: { select: { name: true } },
   user: { select: { name: true, email: true } },
 } as const;
@@ -238,6 +239,7 @@ export async function audienceFor(student: JourneyStudent, overrides: IntakeStar
     classesStartedAt: student.classesStartedAt,
     createdAt: student.createdAt,
     sessionSlot: student.sessionSlot,
+    heldBackAt: student.heldBackAt,
     startDayOverrides: overrides,
     now,
   });

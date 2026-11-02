@@ -239,6 +239,40 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
   );
 }
 
+/**
+ * Shown instead of the upsell card to a student the office held back
+ * (Student.heldBackAt) — they repeat `currentLevel`, not advance. Read-only:
+ * the office already applied the hold and the batch move, so this only
+ * confirms it in plain language, with the new teaching clock (it runs off
+ * `admission.batch` the same way the upsell card's dates do, so it is already
+ * correct for whichever batch the office moved them into).
+ */
+function RepeatNoticeCard({ offer }: { offer: LevelAdvanceOffer }) {
+  if (!offer.heldBack) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-lg"
+    >
+      <div className="flex flex-wrap items-center gap-4 bg-[var(--surface-alt)] px-6 py-5">
+        <LevelBadge level={offer.currentLevel} tone="current" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">Repeating this level</p>
+          <h3 className="mt-1 text-lg font-bold text-[var(--foreground)]">
+            You're staying in {offer.currentLevel}
+            {offer.heldBack.batch ? ` — ${offer.heldBack.batch} batch` : ""}
+          </h3>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Your {offer.sessionMonths}-month ({offer.weeksOfTeaching}-week) teaching clock runs with this batch. No extra payment —
+            your {offer.currentLevel} fee already covers it.
+          </p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 /** The card that lives on the dashboard once the modal has been dismissed. */
 function AdvanceCard({ offer, onOpen }: { offer: LevelAdvanceOffer; onOpen: () => void }) {
   const action = primaryAction(offer);
@@ -311,7 +345,7 @@ export default function LevelAdvance({ className = "" }: { className?: string })
         if (!res.ok) return;
         const data = await res.json();
         const loaded: LevelAdvanceOffer | undefined = data.offer;
-        if (cancelled || !loaded?.eligible) return;
+        if (cancelled || !loaded || !(loaded.eligible || loaded.heldBack)) return;
 
         setOffer(loaded);
 
@@ -350,6 +384,14 @@ export default function LevelAdvance({ className = "" }: { className?: string })
   }, [offer, releaseTurn]);
 
   if (!offer) return null;
+
+  if (offer.heldBack) {
+    return (
+      <div className={className}>
+        <RepeatNoticeCard offer={offer} />
+      </div>
+    );
+  }
 
   return (
     <div className={className}>

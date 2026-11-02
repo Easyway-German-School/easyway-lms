@@ -82,6 +82,8 @@ export type AudienceInput = {
   classesStartedAt?: Date | string | null;
   createdAt?: Date | string | null;
   sessionSlot?: string | null;
+  /** Student.heldBackAt — set, the student repeats their current level; see the check above. */
+  heldBackAt?: Date | string | null;
   /**
    * Whether the student has been taught is decided by `classesStartedAt` — a
    * start date the office or the student confirmed — NOT by attendance marks.
@@ -112,6 +114,14 @@ export function resolveJourneyAudience(input: AudienceInput): JourneyAudience | 
   // 0. The office chose this student by hand. That is an explicit decision, so
   // it opens the journey whatever the automatic rules below would say — it is
   // how a student outside the automatic groups still gets their invitation.
+  // The office held this specific student back (Student.heldBackAt/heldBackReason,
+  // set from the student page or the cohort console's bulk action) — they repeat
+  // their current level instead of advancing. This overrides every route below,
+  // including a manual offer set earlier, and is the ONLY thing that suppresses
+  // the next-level popup/notifications for a held-back student, since the
+  // automatic graduation loop already skips them (see heldBackAt in graduation-server.ts).
+  if (input.heldBackAt) return null;
+
   const manual = asRecord(admission.nextLevel);
   if (manual.manualOffer === true) {
     const wanted = String(manual.targetLevel ?? "").toUpperCase();

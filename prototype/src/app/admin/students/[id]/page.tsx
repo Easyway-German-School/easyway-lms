@@ -640,6 +640,11 @@ export default function StudentDossierPage() {
 
   const [holdBusy, setHoldBusy] = useState(false);
   const [holdError, setHoldError] = useState<string | null>(null);
+  // An on-page form, not window.prompt() — a prompt() silently returns null (no
+  // dialog, no error) inside an embedded/sandboxed browser frame, which made
+  // this button look broken with zero feedback. A real form always shows.
+  const [holdReasonOpen, setHoldReasonOpen] = useState(false);
+  const [holdReasonDraft, setHoldReasonDraft] = useState("");
 
   // Tuition balance & reminders panel — grace date + "send reminder now".
   const [graceInput, setGraceInput] = useState("");
@@ -1018,11 +1023,16 @@ export default function StudentDossierPage() {
     }
   }, [id, load]);
 
-  const holdBack = useCallback(async () => {
+  const openHoldReason = useCallback(() => {
+    setHoldError(null);
+    setHoldReasonDraft("");
+    setHoldReasonOpen(true);
+  }, []);
+
+  const submitHoldReason = useCallback(async () => {
     if (!id) return;
-    const reason = window.prompt("Why is this student being held back? (shown to other admins, not the student)");
-    if (reason === null) return;
-    if (!reason.trim()) {
+    const reason = holdReasonDraft.trim();
+    if (!reason) {
       setHoldError("A reason is required to hold a student back");
       return;
     }
@@ -1032,17 +1042,18 @@ export default function StudentDossierPage() {
       const response = await fetch("/api/admin/journey", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: id, heldBack: true, reason: reason.trim() }),
+        body: JSON.stringify({ studentId: id, heldBack: true, reason }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json?.error || "Could not hold this student back");
+      setHoldReasonOpen(false);
       void load(false);
     } catch (holdErr) {
       setHoldError(holdErr instanceof Error ? holdErr.message : "Could not hold this student back");
     } finally {
       setHoldBusy(false);
     }
-  }, [id, load]);
+  }, [id, load, holdReasonDraft]);
 
   const clearHold = useCallback(async () => {
     if (!id) return;
@@ -1996,18 +2007,54 @@ export default function StudentDossierPage() {
                 >
                   {holdBusy ? "…" : "Clear hold"}
                 </button>
-              ) : (
+              ) : !holdReasonOpen ? (
                 <button
                   type="button"
-                  onClick={holdBack}
+                  onClick={openHoldReason}
                   disabled={holdBusy}
                   className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
                 >
-                  {holdBusy ? "…" : "Hold back this level"}
+                  Hold back this level
                 </button>
-              )}
-              {holdError && <span className="text-sm text-red-600">{holdError}</span>}
+              ) : null}
+              {!journey.heldBackAt && !holdReasonOpen && holdError && <span className="text-sm text-red-600">{holdError}</span>}
             </div>
+            {!journey.heldBackAt && holdReasonOpen && (
+              <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <label htmlFor="hold-back-reason" className="text-sm font-semibold text-[var(--foreground)]">
+                  Why is this student being held back?
+                </label>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">Shown to other admins, not the student.</p>
+                <textarea
+                  id="hold-back-reason"
+                  value={holdReasonDraft}
+                  onChange={(e) => setHoldReasonDraft(e.target.value)}
+                  rows={2}
+                  autoFocus
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2.5 text-sm text-[var(--foreground)]"
+                  placeholder="e.g. Missed the October A2 batch; re-seated in the November A1 batch."
+                />
+                {holdError && <p className="mt-1.5 text-sm text-red-600">{holdError}</p>}
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={submitHoldReason}
+                    disabled={holdBusy}
+                    className="rounded-full btn-glow px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
+                  >
+                    {holdBusy ? "…" : "Confirm hold"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHoldReasonOpen(false)}
+                    disabled={holdBusy}
+                    className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             {journey.germanyGoalNote && (
               <p className="mt-3 text-sm text-[var(--muted)]">In their words: “{journey.germanyGoalNote}”</p>
             )}

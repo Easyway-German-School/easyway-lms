@@ -80,6 +80,14 @@ export type LevelAdvanceOffer = {
   currentLevelOutstanding: number;
 
   perks: AdvancePerk[];
+
+  /**
+   * Set only for a student the office held back (Student.heldBackAt) — they
+   * repeat `currentLevel` instead of being offered `nextLevel`. `eligible` is
+   * always false alongside this, so the card below renders the repeat notice
+   * instead of the upsell.
+   */
+  heldBack: { reason: string | null; batch: string | null } | null;
 };
 
 export function perWeekCost(tuitionFee: number, weeks: number = WEEKS_OF_TEACHING): number {

@@ -46,25 +46,37 @@ export async function loadRecordingForecast(opts: { tenantId: string; now?: Date
     // CONFIRM_GRACE_MINUTES in recording-forecast.ts). A generous window either side of "now" is cheap and safe.
     prisma.liveClassSession.findMany({
       where: { tenantId: opts.tenantId, startedAt: { gte: new Date(from.getTime() - DAY), lte: to } },
-      select: { branchId: true, level: true, sessionSlot: true, kind: true, privateClassId: true, startedAt: true, endedAt: true },
+      select: { branchId: true, level: true, sessionSlot: true, batch: true, kind: true, privateClassId: true, startedAt: true, endedAt: true },
     }),
   ]);
 
   const actualSessions: ActualSession[] = actualSessionRows.map((s) => ({
-    cohortKey: s.kind !== "private" && s.branchId && s.level ? `${s.branchId}:${s.level}:${s.sessionSlot ?? "evening"}` : null,
+    cohortKey:
+      s.kind !== "private" && s.branchId && s.level
+        ? `${s.branchId}:${s.level}:${s.sessionSlot ?? "evening"}:${(s.batch ?? "").toLowerCase()}`
+        : null,
     privateClassId: s.kind === "private" ? s.privateClassId : null,
     startedAt: s.startedAt,
     endedAt: s.endedAt,
   }));
 
-  // One cohort per branch + level + sitting, exactly as the admin schedule page groups them. A cohort is
-  // only forecast if AT LEAST ONE of its students actually attends over video — a cohort made up entirely
-  // of physical students never opens a room, so a server held for it would record nothing.
+  // One cohort per branch + level + sitting + BATCH, exactly as the admin schedule page groups them (see
+  // the matching comment in /api/admin/schedule/route.ts). Without the batch, two batches running at once
+  // (e.g. a new November intake starting while October is still mid-course) collapse into one key and only
+  // the first student Prisma returns represents the cohort — the other batch's classes are never forecast,
+  // so the fleet never pre-warms a server for them. A cohort is only forecast if AT LEAST ONE of its
+  // students actually attends over video — a cohort made up entirely of physical students never opens a
+  // room, so a server held for it would record nothing.
   const cohorts = new Map<string, (typeof students)[number]>();
   const cohortsNeedingVideo = new Set<string>();
   for (const student of students) {
     if (student.classType !== "private" && student.branch) {
-      const key = `${student.branch.id}:${student.level}:${student.sessionSlot ?? "evening"}`;
+      const admissionRecord =
+        student.admission && typeof student.admission === "object" && !Array.isArray(student.admission)
+          ? (student.admission as Record<string, unknown>)
+          : {};
+      const batchKey = typeof admissionRecord.batch === "string" ? admissionRecord.batch.toLowerCase() : "";
+      const key = `${student.branch.id}:${student.level}:${student.sessionSlot ?? "evening"}:${batchKey}`;
       if (!cohorts.has(key)) cohorts.set(key, student);
       const mode = String(student.deliveryMode ?? "physical").toLowerCase();
       if (mode === "online" || mode === "hybrid") cohortsNeedingVideo.add(key);
