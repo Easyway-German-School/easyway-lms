@@ -68,8 +68,11 @@ export async function GET() {
 
     // One condition, and a person put it there. The countdown on the journey
     // map is what a student watches while a level runs; this is what they see
-    // when the school says it is over.
-    const eligible = student.levelCompletedFor === currentLevel && student.levelCompletedAt !== null;
+    // when the school says it is over. A student the office held back repeats
+    // this level instead — `levelCompletedFor` can still read as finished from
+    // before the hold (or from the rest of their old cohort), so heldBackAt
+    // overrides it here too, the same way it overrides resolveJourneyAudience.
+    const eligible = !student.heldBackAt && student.levelCompletedFor === currentLevel && student.levelCompletedAt !== null;
 
     // pathway is passed through so an Exam Preparatory (or Travel Package)
     // student is quoted their own ladder here, not the ordinary group/private
@@ -114,6 +117,7 @@ export async function GET() {
       sellableOnline: nextLevel ? isLevelSellable(nextLevel) : false,
       currentLevelOutstanding,
       perks: ADVANCE_PERKS,
+      heldBack: student.heldBackAt ? { reason: student.heldBackReason, batch } : null,
     };
 
     // Fire the notification once, the first time we see this student finish
@@ -154,7 +158,7 @@ export async function GET() {
       } catch (notifyError) {
         console.error("Level-advance notification failed", notifyError);
       }
-    } else if (!eligible && nextLevel && student.classesStartedAt) {
+    } else if (!eligible && !student.heldBackAt && nextLevel && student.classesStartedAt) {
       // Escalating heads-up in the weeks before the level's own clock runs
       // out — separate from the offer above, which only exists once the
       // office has actually signed the level off. This is in-app only, never
