@@ -106,6 +106,32 @@ describe("resolveJourneyAudience", () => {
     expect(a).toEqual({ state: "promoted", finishedLevel: "A1", targetLevel: "A2" });
   });
 
+  it("suppresses the journey for a held-back student even when a batch has clearly ended", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "August" },
+        createdAt: created,
+        classesStartedAt: new Date("2026-08-03T00:00:00Z"),
+        heldBackAt: new Date("2026-09-15T00:00:00Z"),
+        now,
+      }),
+    ).toBeNull();
+  });
+
+  it("a held-back flag overrides even a manual offer set earlier", () => {
+    expect(
+      resolveJourneyAudience({
+        level: "A1",
+        admission: { batch: "October", nextLevel: { targetLevel: "A2", manualOffer: true } },
+        createdAt: created,
+        classesStartedAt: null,
+        heldBackAt: now,
+        now,
+      }),
+    ).toBeNull();
+  });
+
   it("is null at the top of the ladder", () => {
     expect(
       resolveJourneyAudience({ level: "C2", levelCompletedFor: "C2", levelCompletedAt: now, now }),

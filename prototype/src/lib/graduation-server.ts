@@ -713,6 +713,7 @@ export async function signOffForCheckout(studentId: string, now = new Date()): P
     classesStartedAt: student.classesStartedAt,
     createdAt: student.createdAt,
     sessionSlot: student.sessionSlot,
+    heldBackAt: student.heldBackAt,
     startDayOverrides: overrides,
     now,
   });
