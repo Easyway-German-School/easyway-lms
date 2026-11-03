@@ -246,42 +246,69 @@ export async function POST(request: NextRequest) {
   const startedAt = startedAtRaw && !Number.isNaN(startedAtRaw.getTime()) ? startedAtRaw : null;
 
   const hashedPassword = await bcryptjs.hash(password, 10);
-  const user = await prisma.user.create({
-    data: {
-      email,
-      name,
-      password: hashedPassword,
-      role: "LECTURER",
-      /**
-       * SET EXPLICITLY. `User` is a global model, so the isolation extension
-       * never stamps it — a tutor created without this line got a session with
-       * no tenant, which in strict mode makes every query in their portal
-       * throw, and the portal bounces them back to the sign-in form. That is
-       * what "I created a tutor and their login does nothing" was.
-       */
-      tenantId: gate.session.user.tenantId,
-      lecturer: {
-        create: {
-          specialization: specialization || null,
-          bio: bio || null,
-          phone: phone || null,
-          photoUrl: photoUrl || null,
-          status,
-          statusChangedAt: new Date(),
-          employmentType,
-          startedAt,
-          // Absent from the form means everything, which is what a tutor
-          // created before this field has. The office narrows it deliberately.
-          features: parseLecturerFeatures(body?.features),
-          ...assignment,
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        email,
+        name,
+        password: hashedPassword,
+        role: "LECTURER",
+        /**
+         * SET EXPLICITLY. `User` is a global model, so the isolation extension
+         * never stamps it — a tutor created without this line got a session with
+         * no tenant, which in strict mode makes every query in their portal
+         * throw, and the portal bounces them back to the sign-in form. That is
+         * what "I created a tutor and their login does nothing" was.
+         */
+        tenantId: gate.session.user.tenantId,
+        lecturer: {
+          create: {
+            specialization: specialization || null,
+            bio: bio || null,
+            phone: phone || null,
+            photoUrl: photoUrl || null,
+            status,
+            statusChangedAt: new Date(),
+            employmentType,
+            startedAt,
+            // Absent from the form means everything, which is what a tutor
+            // created before this field has. The office narrows it deliberately.
+            features: parseLecturerFeatures(body?.features),
+            ...assignment,
+          },
         },
       },
-    },
-    include: { lecturer: true },
-  });
+      include: { lecturer: true },
+    });
+  } catch (error) {
+    /**
+     * The findUnique check above has a race: two near-simultaneous submits
+     * (a slow network prompting a second tap, or a flaky-connection retry)
+     * both pass it before either has committed, so the second one lands here
+     * instead. Report it the same way the pre-check would have, rather than
+     * crashing to an opaque 500 that told the office nothing — that opacity
+     * is what turned one race into "tutor creation is broken", retried over
+     * and over, each retry hitting the same unhandled crash.
+     */
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "P2002"
+    ) {
+      return NextResponse.json({ error: "Email already registered" }, { status: 409 });
+    }
+    throw error;
+  }
 
   if (user.lecturer?.id && assignment.levels.length) {
-    await syncLecturerClasses(user.lecturer.id, assignment.levels);
+    // Best-effort: the tutor account is already created at this point, so a
+    // failure here should not make the office think the whole thing failed
+    // and retry into the duplicate-email race above.
+    await syncLecturerClasses(user.lecturer.id, assignment.levels).catch((error) =>
+      console.error("Tutor account was created, but class sync failed:", { email, error }),
+    );
   }
 
   if (user.lecturer?.id) {
