@@ -141,24 +141,33 @@ async function staffRecipientIdsForSpace(
   for (const lecturer of lecturers) {
     const assignment = readAssignment(lecturer);
 
-    // A tutor the office pinned to the September batch is not told about
-    // October's room; one with no batch pinned teaches every intake and is.
+    /**
+     * A tutor's push for THIS room requires an exact match on sitting and
+     * batch when the room has one — no wildcard for "nothing pinned".
+     *
+     * It used to read an unpinned sessionSlot/batch as "teaches every
+     * sitting/intake", which is the right default for the roster and the
+     * gradebook (where leaving it open really does mean "all of them"), but
+     * wrong for a push: it put a tutor's phone in rooms they never actually
+     * teach, on nothing more than an incomplete assignment. A community
+     * ping must earn its way to a tutor by matching the room exactly — a
+     * wide reach stays the office's call, made deliberately through
+     * /admin/notifications with an explicit batch, level or "everyone",
+     * never an accident of an unfinished assignment form.
+     */
     const inGroup = assignment.groups.some(
       (group) =>
         group.branchId === space.branchId &&
         group.level.toUpperCase() === space.level.toUpperCase() &&
         group.sessionSlot.toLowerCase() === space.sessionSlot.toLowerCase() &&
-        (!roomBatch || !canonicalBatch(group.batch) || canonicalBatch(group.batch) === roomBatch),
+        (!roomBatch || canonicalBatch(group.batch) === roomBatch),
     );
 
     const inLegacyScope =
       assignment.branchIds.includes(space.branchId) &&
       assignment.levels.map((level) => level.toUpperCase()).includes(space.level.toUpperCase()) &&
-      (!assignment.sessionSlots.length ||
-        assignment.sessionSlots.map((slot) => slot.toLowerCase()).includes(space.sessionSlot.toLowerCase())) &&
-      (!roomBatch ||
-        !assignment.batches.length ||
-        assignment.batches.some((batch) => canonicalBatch(batch) === roomBatch));
+      assignment.sessionSlots.map((slot) => slot.toLowerCase()).includes(space.sessionSlot.toLowerCase()) &&
+      (!roomBatch || assignment.batches.some((batch) => canonicalBatch(batch) === roomBatch));
 
     if (inGroup || inLegacyScope) ids.add(lecturer.userId);
   }
