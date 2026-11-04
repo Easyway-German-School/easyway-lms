@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcryptjs from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { prisma, unguardedPrisma } from "@/lib/prisma";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
@@ -233,6 +233,29 @@ export async function POST(request: NextRequest) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     return NextResponse.json({ error: "Email already registered" }, { status: 409 });
+  }
+
+  /**
+   * The guarded `findUnique` above hides a soft-deleted row entirely (see
+   * prisma-guard.ts) — it returns null even though the email still sits on a
+   * disk row and still trips the real Postgres unique index. Without this,
+   * that collision surfaced as an opaque create-time crash (or, after that
+   * crash was fixed, a flat "Email already registered" with nothing in the
+   * tutor/student directory to show for it — the row is deliberately hidden
+   * there too). Telling the office it's a REMOVED account, not a live one,
+   * is what turns "the app is broken" into "go restore it on /admin/security".
+   */
+  const removedMatch = await unguardedPrisma.user.findFirst({
+    where: { email, deletedAt: { not: null } },
+    select: { id: true, name: true, role: true, deletedAt: true },
+  });
+  if (removedMatch) {
+    return NextResponse.json(
+      {
+        error: `This email belongs to a previously removed ${removedMatch.role.toLowerCase()} account (${removedMatch.name ?? "no name on file"}). Restore it from /admin/security instead of creating a new one, or free the email there first.`,
+      },
+      { status: 409 },
+    );
   }
 
   const assignment = assignmentToData(body ?? {});
