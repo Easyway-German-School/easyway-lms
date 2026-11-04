@@ -1365,6 +1365,11 @@ export default function AdminTutorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [removedAccountOffer, setRemovedAccountOffer] = useState<{
+    id: string;
+    role?: string;
+    name?: string | null;
+  } | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -1533,10 +1538,11 @@ export default function AdminTutorsPage() {
     }
   }
 
-  async function createTutor() {
+  async function createTutor(restoreUserId?: string) {
     setCreating(true);
     setError("");
     setSuccess("");
+    if (!restoreUserId) setRemovedAccountOffer(null);
     try {
       let uploadedPhotoUrl = createPhotoUrl;
       if (createPhotoFile) {
@@ -1555,10 +1561,18 @@ export default function AdminTutorsPage() {
           assignmentGroups: newAssignment.groups,
           features: newFeatures,
           photoUrl: uploadedPhotoUrl ?? undefined,
+          ...(restoreUserId ? { restoreUserId } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not create the tutor account");
+      if (!res.ok) {
+        // A removed account is sitting on this email — offer the one-click
+        // restore instead of sending the office to dig through /admin/security.
+        if (data.removedUserId) {
+          setRemovedAccountOffer({ id: data.removedUserId, role: data.removedRole, name: data.removedName });
+        }
+        throw new Error(data.error || "Could not create the tutor account");
+      }
 
       if (data.welcomeEmailStatus === "queued") {
         setSuccess(
@@ -1586,6 +1600,7 @@ export default function AdminTutorsPage() {
       setNewAssignment(EMPTY_ASSIGNMENT);
       setCreatePhotoFile(null);
       setCreatePhotoUrl(null);
+      setRemovedAccountOffer(null);
       await load();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Could not create the tutor account");
@@ -2165,12 +2180,30 @@ export default function AdminTutorsPage() {
 
           <button
             type="button"
-            onClick={createTutor}
+            onClick={() => createTutor()}
             disabled={!canCreate}
             className="mt-6 rounded-lg bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {creating ? "Creating…" : "Create tutor account"}
           </button>
+
+          {removedAccountOffer && (
+            <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+              <p className="text-sm text-[var(--fg)]">
+                Restore {removedAccountOffer.name || "that account"}
+                {removedAccountOffer.role ? ` (${removedAccountOffer.role.toLowerCase()})` : ""} and turn it into this
+                tutor? This keeps their old history instead of losing it.
+              </p>
+              <button
+                type="button"
+                onClick={() => createTutor(removedAccountOffer.id)}
+                disabled={creating}
+                className="mt-3 rounded-lg border border-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent)] disabled:opacity-60"
+              >
+                {creating ? "Restoring…" : "Restore & use for this tutor"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </AdminShell>
