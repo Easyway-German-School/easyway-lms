@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcryptjs from "bcryptjs";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
+import { writeAudit, toJsonValue } from "@/lib/prisma-guard";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
@@ -230,34 +231,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json({ error: "Email already registered" }, { status: 409 });
-  }
-
-  /**
-   * The guarded `findUnique` above hides a soft-deleted row entirely (see
-   * prisma-guard.ts) — it returns null even though the email still sits on a
-   * disk row and still trips the real Postgres unique index. Without this,
-   * that collision surfaced as an opaque create-time crash (or, after that
-   * crash was fixed, a flat "Email already registered" with nothing in the
-   * tutor/student directory to show for it — the row is deliberately hidden
-   * there too). Telling the office it's a REMOVED account, not a live one,
-   * is what turns "the app is broken" into "go restore it on /admin/security".
-   */
-  const removedMatch = await unguardedPrisma.user.findFirst({
-    where: { email, deletedAt: { not: null } },
-    select: { id: true, name: true, role: true, deletedAt: true },
-  });
-  if (removedMatch) {
-    return NextResponse.json(
-      {
-        error: `This email belongs to a previously removed ${removedMatch.role.toLowerCase()} account (${removedMatch.name ?? "no name on file"}). Restore it from /admin/security instead of creating a new one, or free the email there first.`,
-      },
-      { status: 409 },
-    );
-  }
-
   const assignment = assignmentToData(body ?? {});
 
   // A newly created tutor is active unless the office says otherwise — the
@@ -267,62 +240,142 @@ export async function POST(request: NextRequest) {
   const employmentType = isEmploymentType(body?.employmentType) ? body.employmentType : null;
   const startedAtRaw = body?.startedAt ? new Date(body.startedAt) : null;
   const startedAt = startedAtRaw && !Number.isNaN(startedAtRaw.getTime()) ? startedAtRaw : null;
+  const lecturerFields = {
+    specialization: specialization || null,
+    bio: bio || null,
+    phone: phone || null,
+    photoUrl: photoUrl || null,
+    status,
+    statusChangedAt: new Date(),
+    employmentType,
+    startedAt,
+    // Absent from the form means everything, which is what a tutor
+    // created before this field has. The office narrows it deliberately.
+    features: parseLecturerFeatures(body?.features),
+    ...assignment,
+  };
 
   const hashedPassword = await bcryptjs.hash(password, 10);
-  let user;
-  try {
-    user = await prisma.user.create({
-      data: {
-        email,
-        name,
-        password: hashedPassword,
-        role: "LECTURER",
-        /**
-         * SET EXPLICITLY. `User` is a global model, so the isolation extension
-         * never stamps it — a tutor created without this line got a session with
-         * no tenant, which in strict mode makes every query in their portal
-         * throw, and the portal bounces them back to the sign-in form. That is
-         * what "I created a tutor and their login does nothing" was.
-         */
-        tenantId: gate.session.user.tenantId,
-        lecturer: {
-          create: {
-            specialization: specialization || null,
-            bio: bio || null,
-            phone: phone || null,
-            photoUrl: photoUrl || null,
-            status,
-            statusChangedAt: new Date(),
-            employmentType,
-            startedAt,
-            // Absent from the form means everything, which is what a tutor
-            // created before this field has. The office narrows it deliberately.
-            features: parseLecturerFeatures(body?.features),
-            ...assignment,
-          },
-        },
-      },
-      include: { lecturer: true },
-    });
-  } catch (error) {
+  const restoreUserId = typeof body?.restoreUserId === "string" ? body.restoreUserId.trim() : "";
+
+  let user: { id: string; email: string; name: string | null; role: string; lecturer: { id: string } | null };
+
+  if (restoreUserId) {
     /**
-     * The findUnique check above has a race: two near-simultaneous submits
-     * (a slow network prompting a second tap, or a flaky-connection retry)
-     * both pass it before either has committed, so the second one lands here
-     * instead. Report it the same way the pre-check would have, rather than
-     * crashing to an opaque 500 that told the office nothing — that opacity
-     * is what turned one race into "tutor creation is broken", retried over
-     * and over, each retry hitting the same unhandled crash.
+     * The admin confirmed, from the "this email belongs to a removed
+     * account" error, that they want THAT account back rather than hunting
+     * for it on /admin/security — one click instead of a trip through audit
+     * history. Reusing the row (not hard-deleting it to free the email) keeps
+     * whatever history it carries, same as every other restore in the app.
      */
-    if (
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "P2002"
-    ) {
+    const removed = await unguardedPrisma.user.findUnique({ where: { id: restoreUserId } });
+    if (!removed || !removed.deletedAt) {
+      return NextResponse.json(
+        { error: "That removed account could not be found anymore — it may already have been restored." },
+        { status: 404 },
+      );
+    }
+    if (removed.email !== email) {
+      return NextResponse.json(
+        { error: "That removed account's email no longer matches this form. Refresh and try again." },
+        { status: 400 },
+      );
+    }
+
+    const [restoredUser, lecturer] = await Promise.all([
+      unguardedPrisma.user.update({
+        where: { id: restoreUserId },
+        data: { name, password: hashedPassword, role: "LECTURER", tenantId: gate.session.user.tenantId, deletedAt: null },
+      }),
+      unguardedPrisma.lecturer.upsert({
+        where: { userId: restoreUserId },
+        update: { ...lecturerFields, deletedAt: null },
+        create: { userId: restoreUserId, ...lecturerFields },
+      }),
+    ]);
+
+    await writeAudit(unguardedPrisma, {
+      action: "restore",
+      model: "User",
+      recordId: restoredUser.id,
+      after: toJsonValue(restoredUser),
+      severity: "notice",
+      summary: `Restored removed ${removed.role.toLowerCase()} account and converted to LECTURER: ${email}`,
+    });
+
+    user = { id: restoredUser.id, email: restoredUser.email, name: restoredUser.name, role: restoredUser.role, lecturer };
+  } else {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
       return NextResponse.json({ error: "Email already registered" }, { status: 409 });
     }
-    throw error;
+
+    /**
+     * The guarded `findUnique` above hides a soft-deleted row entirely (see
+     * prisma-guard.ts) — it returns null even though the email still sits on
+     * a disk row and still trips the real Postgres unique index. Without
+     * this, that collision surfaced as an opaque create-time crash (or,
+     * after that crash was fixed, a flat "Email already registered" with
+     * nothing in the tutor/student directory to show for it — the row is
+     * deliberately hidden there too). `removedUserId` lets the form offer a
+     * one-click "restore it" instead of sending the office hunting through
+     * /admin/security for a needle in a haystack.
+     */
+    const removedMatch = await unguardedPrisma.user.findFirst({
+      where: { email, deletedAt: { not: null } },
+      select: { id: true, name: true, role: true },
+    });
+    if (removedMatch) {
+      return NextResponse.json(
+        {
+          error: `This email belongs to a previously removed ${removedMatch.role.toLowerCase()} account (${removedMatch.name ?? "no name on file"}).`,
+          removedUserId: removedMatch.id,
+          removedRole: removedMatch.role,
+          removedName: removedMatch.name,
+        },
+        { status: 409 },
+      );
+    }
+
+    try {
+      user = await prisma.user.create({
+        data: {
+          email,
+          name,
+          password: hashedPassword,
+          role: "LECTURER",
+          /**
+           * SET EXPLICITLY. `User` is a global model, so the isolation extension
+           * never stamps it — a tutor created without this line got a session with
+           * no tenant, which in strict mode makes every query in their portal
+           * throw, and the portal bounces them back to the sign-in form. That is
+           * what "I created a tutor and their login does nothing" was.
+           */
+          tenantId: gate.session.user.tenantId,
+          lecturer: { create: lecturerFields },
+        },
+        include: { lecturer: true },
+      });
+    } catch (error) {
+      /**
+       * The findUnique check above has a race: two near-simultaneous submits
+       * (a slow network prompting a second tap, or a flaky-connection retry)
+       * both pass it before either has committed, so the second one lands here
+       * instead. Report it the same way the pre-check would have, rather than
+       * crashing to an opaque 500 that told the office nothing — that opacity
+       * is what turned one race into "tutor creation is broken", retried over
+       * and over, each retry hitting the same unhandled crash.
+       */
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "P2002"
+      ) {
+        return NextResponse.json({ error: "Email already registered" }, { status: 409 });
+      }
+      throw error;
+    }
   }
 
   if (user.lecturer?.id && assignment.levels.length) {
