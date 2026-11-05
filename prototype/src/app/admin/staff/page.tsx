@@ -101,7 +101,8 @@ export default function AdminStaffPage() {
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ name: "", email: "", password: "", adminRole: "secretary", growthTitle: "rep" });
   const [creating, setCreating] = useState(false);
-  const [handover, setHandover] = useState<{ email: string; password: string } | null>(null);
+  const [handover, setHandover] = useState<{ email: string; password: string | null; emailed: boolean } | null>(null);
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
 
   // Editing one account's details
   const [account, setAccount] = useState({ name: "", email: "", password: "" });
@@ -196,8 +197,14 @@ export default function AdminStaffPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not create that admin");
-      // Shown once. The server stores a hash and cannot tell us again.
-      setHandover({ email: data.admin.email, password: data.password });
+      // The password is shown here only when the welcome email could not be
+      // queued — otherwise it went out by email and the server never hands it
+      // back at all.
+      setHandover({
+        email: data.admin.email,
+        password: data.password ?? null,
+        emailed: data.welcomeEmailStatus === "queued",
+      });
       setDraft({ name: "", email: "", password: "", adminRole: "secretary", growthTitle: "rep" });
       setShowNew(false);
       setError("");
@@ -238,6 +245,38 @@ export default function AdminStaffPage() {
     const action = admin.locked ? "unlock" : "lock out";
     if (!window.confirm(`${action[0].toUpperCase()}${action.slice(1)} ${admin.name ?? admin.email}?`)) return;
     await save(admin.id, { locked: !admin.locked });
+  }
+
+  /** Sets a fresh password and emails it with a sign-in link — for an admin who never got the welcome email, or lost it. */
+  async function sendLoginEmail(admin: Admin) {
+    if (
+      !window.confirm(
+        `Send ${admin.name ?? admin.email} a new login email?\n\nThis replaces their current password with a new generated one.`,
+      )
+    )
+      return;
+    setSavingId(admin.id);
+    try {
+      const res = await fetch("/api/admin/staff", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: admin.id, sendLoginEmail: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not send the login email");
+      setError("");
+      if (data.welcomeEmailStatus === "queued") {
+        setEmailNotice(`Login email sent to ${admin.email}.`);
+      } else if (data.password) {
+        setEmailNotice(`Could not send the email — new password for ${admin.email}: ${data.password}`);
+      } else {
+        setEmailNotice(`Could not send the login email to ${admin.email}.`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send the login email");
+    } finally {
+      setSavingId(null);
+    }
   }
 
   async function changeMyPassword() {
@@ -347,24 +386,39 @@ export default function AdminStaffPage() {
               <CheckIcon className="h-4 w-4 shrink-0" /> Account created
             </p>
             <p className="mt-1.5 text-sm text-emerald-800">
-              Hand these over now — the password is stored scrambled and cannot be shown again. If
-              it is lost, reset it from this page.
+              {handover.emailed
+                ? `A login email with their password and a sign-in link already went out to ${handover.email}. Nothing more to hand over.`
+                : "The welcome email could not be sent — hand these over yourself. The password is stored scrambled and cannot be shown again; if it is lost, reset it from this page."}
             </p>
-            <dl className="mt-3 space-y-1.5 break-all font-mono text-sm text-emerald-950">
-              <div>
-                <dt className="inline font-sans text-xs font-semibold uppercase">Email: </dt>
-                <dd className="inline">{handover.email}</dd>
-              </div>
-              <div>
-                <dt className="inline font-sans text-xs font-semibold uppercase">Password: </dt>
-                <dd className="inline">{handover.password}</dd>
-              </div>
-            </dl>
+            {!handover.emailed && (
+              <dl className="mt-3 space-y-1.5 break-all font-mono text-sm text-emerald-950">
+                <div>
+                  <dt className="inline font-sans text-xs font-semibold uppercase">Email: </dt>
+                  <dd className="inline">{handover.email}</dd>
+                </div>
+                <div>
+                  <dt className="inline font-sans text-xs font-semibold uppercase">Password: </dt>
+                  <dd className="inline">{handover.password}</dd>
+                </div>
+              </dl>
+            )}
             <button
               onClick={() => setHandover(null)}
               className="mt-3 rounded-full border border-emerald-300 bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-emerald-800"
             >
-              I have written it down
+              {handover.emailed ? "Done" : "I have written it down"}
+            </button>
+          </div>
+        )}
+
+        {emailNotice && (
+          <div className="mb-4 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-800">
+            {emailNotice}
+            <button
+              onClick={() => setEmailNotice(null)}
+              className="ml-3 rounded-full border border-emerald-300 bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-emerald-800"
+            >
+              Dismiss
             </button>
           </div>
         )}
@@ -424,16 +478,15 @@ export default function AdminStaffPage() {
                   placeholder="ada@easywayacademy.com"
                 />
               </Field>
-              <Field label="Password — at least 8 characters">
+              <Field label="Password — leave blank to generate one and email it to them">
                 <input
-                  required
                   minLength={8}
                   type="text"
                   autoComplete="new-password"
                   value={draft.password}
                   onChange={(e) => setDraft({ ...draft, password: e.target.value })}
                   className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 font-mono text-sm"
-                  placeholder="Set one you can read out"
+                  placeholder="Auto-generated and emailed if left blank"
                 />
               </Field>
               <Field label="Role">
@@ -647,6 +700,15 @@ export default function AdminStaffPage() {
                         className="whitespace-nowrap rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
                       >
                         {isEditing ? "Close" : "Login details"}
+                      </button>
+
+                      <button
+                        onClick={() => void sendLoginEmail(admin)}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-50"
+                      >
+                        <MailIcon className="h-4 w-4" />
+                        Send login email
                       </button>
 
                       <button

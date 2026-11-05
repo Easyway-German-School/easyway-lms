@@ -45,6 +45,7 @@ export default function InfluencerProgramHubPage() {
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState<{ email: string; password: string } | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     ownerName: "",
@@ -89,6 +90,44 @@ export default function InfluencerProgramHubPage() {
     () => (codes ?? []).filter((c) => typeFilter === "all" || (c.partnerType ?? "influencer") === typeFilter),
     [codes, typeFilter],
   );
+
+  /**
+   * Resend the partner's login — a fresh generated password, emailed with a
+   * sign-in link. The fix for a partner created before the welcome email
+   * existed, or whose first one never reached them: there was never a place
+   * on this page to set or re-send a password by hand.
+   */
+  async function resendLoginEmail(code: Code) {
+    if (!code.ownerUser) return;
+    if (
+      !window.confirm(
+        `Send ${code.ownerUser.name ?? code.ownerUser.email} a new login email?\n\nThis replaces their current password with a new generated one.`,
+      )
+    )
+      return;
+    setResendingId(code.id);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/promo-codes/${code.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sendLoginEmail: true }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Unable to send the login email.");
+      if (body.welcomeEmailStatus === "queued") {
+        setNotice(`Login email sent to ${code.ownerUser.email}.`);
+      } else if (body.generatedPassword) {
+        setGeneratedPassword({ email: code.ownerUser.email, password: body.generatedPassword });
+      } else {
+        setError(`Could not send the login email to ${code.ownerUser.email}.`);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to send the login email.");
+    } finally {
+      setResendingId(null);
+    }
+  }
 
   async function createPartner(event: FormEvent) {
     event.preventDefault();
@@ -153,10 +192,9 @@ export default function InfluencerProgramHubPage() {
         {notice ? <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p> : null}
         {generatedPassword ? (
           <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-            <p className="font-bold">Account created for {generatedPassword.email}.</p>
+            <p className="font-bold">The welcome email could not be sent to {generatedPassword.email}.</p>
             <p className="mt-1">
-              Temporary password: <span className="font-mono font-bold">{generatedPassword.password}</span> — share this with
-              them directly; it won't be shown again.
+              Share this password with them yourself: <span className="font-mono font-bold">{generatedPassword.password}</span> — it won't be shown again.
             </p>
           </div>
         ) : null}
@@ -166,8 +204,9 @@ export default function InfluencerProgramHubPage() {
             <div>
               <h2 className="text-lg font-bold">Add a partner</h2>
               <p className="text-sm text-[var(--muted)]">
-                One step: if nobody has an account at this email yet, it's created for you (adminRole Influencer) and
-                linked to this code — no separate trip to /admin/staff.
+                One step: if nobody has an account at this email yet, it's created for you (adminRole Influencer),
+                linked to this code, and they're emailed a password and a sign-in link automatically — no separate
+                trip to /admin/staff and nothing to hand over yourself.
               </p>
             </div>
             <form onSubmit={createPartner} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -245,16 +284,13 @@ export default function InfluencerProgramHubPage() {
               {filtered.map((c) => (
                 <li key={c.id}>
                   {c.ownerUser ? (
-                    <Link
-                      href={`/admin/influencer-program/${c.ownerUser.id}`}
-                      className="flex flex-wrap items-center justify-between gap-3 py-3.5 hover:bg-[var(--surface-alt)]"
-                    >
-                      <div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 py-3.5 hover:bg-[var(--surface-alt)]">
+                      <Link href={`/admin/influencer-program/${c.ownerUser.id}`} className="min-w-0">
                         <p className="font-semibold text-[var(--foreground)]">{c.ownerUser.name || c.ownerUser.email}</p>
                         <p className="text-xs text-[var(--muted)]">
                           {c.ownerUser.email} · {c.code} {c.label ? `· ${c.label}` : ""}
                         </p>
-                      </div>
+                      </Link>
                       <div className="flex items-center gap-2">
                         <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300/70">
                           <StarIcon className="h-3 w-3" strokeWidth={1.8} />
@@ -268,8 +304,16 @@ export default function InfluencerProgramHubPage() {
                           {c.status}
                         </span>
                         <span className="text-sm tabular-nums text-[var(--muted)]">{c._count.redemptions} sign-ups</span>
+                        <button
+                          type="button"
+                          onClick={() => void resendLoginEmail(c)}
+                          disabled={resendingId === c.id}
+                          className="whitespace-nowrap rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--muted)] transition hover:bg-[var(--surface)] disabled:opacity-50"
+                        >
+                          {resendingId === c.id ? "Sending…" : "Resend login"}
+                        </button>
                       </div>
-                    </Link>
+                    </div>
                   ) : (
                     <div className="py-3.5 text-sm text-[var(--muted)]">{c.code} — no linked account</div>
                   )}

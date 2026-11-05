@@ -1,6 +1,9 @@
+import bcryptjs from "bcryptjs";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapability, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
+import { generateTempPassword } from "@/lib/student-password";
+import { sendAdminWelcomeEmail } from "@/lib/admin-welcome-email";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +24,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "A request body is required" }, { status: 400 });
+  }
+
+  /**
+   * (Re)send the partner's login email with a fresh generated password —
+   * the fix for a partner whose account was created before this existed, or
+   * who was never actually emailed because nobody had a way to set their
+   * password from this side. A new password replaces the old one; the admin
+   * can no longer see or relay the original either way.
+   */
+  if ((body as Record<string, unknown>).sendLoginEmail === true) {
+    const code = await prisma.promoCode.findUnique({
+      where: { id },
+      select: { ownerUser: { select: { id: true, name: true, email: true } } },
+    });
+    if (!code?.ownerUser) {
+      return NextResponse.json({ error: "This code has no linked partner account" }, { status: 404 });
+    }
+
+    const generatedPassword = generateTempPassword();
+    await prisma.user.update({
+      where: { id: code.ownerUser.id },
+      data: { password: await bcryptjs.hash(generatedPassword, 10), passwordClaimed: true },
+    });
+
+    let welcomeEmailStatus: "queued" | "suppressed" | "failed" = "failed";
+    try {
+      const welcomeEmail = await sendAdminWelcomeEmail({
+        name: code.ownerUser.name ?? "",
+        email: code.ownerUser.email,
+        temporaryPassword: generatedPassword,
+        roleLabel: ADMIN_ROLE_LABELS.influencer,
+      });
+      welcomeEmailStatus = welcomeEmail.status === "suppressed" ? "suppressed" : "queued";
+    } catch (error) {
+      console.error("Partner login email could not be queued:", { email: code.ownerUser.email, error });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      welcomeEmailStatus,
+      // Only handed back when there's no email to carry it.
+      ...(welcomeEmailStatus === "queued" ? {} : { generatedPassword }),
+    });
   }
 
   const data: Record<string, number | string | null> = {};

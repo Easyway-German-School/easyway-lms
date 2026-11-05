@@ -18,6 +18,8 @@ import {
 } from "@/lib/admin-roles";
 import { tenantWhere } from "@/lib/auth";
 import { GROWTH_TITLES, GROWTH_TITLE_LABELS, normalizeGrowthTitle } from "@/lib/growth/titles";
+import { generateTempPassword } from "@/lib/student-password";
+import { sendAdminWelcomeEmail } from "@/lib/admin-welcome-email";
 
 /**
  * Admin accounts: who they are, what they can reach, and how they get in.
@@ -194,20 +196,26 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const email = normaliseEmail(body.email);
-    const password = typeof body.password === "string" ? body.password : "";
+    // Blank is now the normal case: a generated password goes out in the
+    // welcome email instead of a super admin having to type one and relay it
+    // by hand. Typing one is still allowed for whoever prefers that.
+    const requestedPassword = typeof body.password === "string" ? body.password : "";
+    const password = requestedPassword.trim() ? requestedPassword : generateTempPassword();
     const adminRole = normalizeAdminRole(
       typeof body.adminRole === "string" ? body.adminRole : "secretary",
     );
     const growthTitle = adminRole === "growth" ? normalizeGrowthTitle(body.growthTitle) : null;
 
-    if (!name || !email || !password) {
-      return NextResponse.json({ error: "Name, email and password are all required" }, { status: 400 });
+    if (!name || !email) {
+      return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
     }
     if (!looksLikeEmail(email)) {
       return NextResponse.json({ error: "That does not look like an email address" }, { status: 400 });
     }
-    const weak = badPassword(password);
-    if (weak) return NextResponse.json({ error: weak }, { status: 400 });
+    if (requestedPassword.trim()) {
+      const weak = badPassword(password);
+      if (weak) return NextResponse.json({ error: weak }, { status: 400 });
+    }
 
     const existing = await prisma.user.findUnique({
       where: { email },
@@ -239,6 +247,19 @@ export async function POST(req: NextRequest) {
       select: { id: true, name: true, email: true, createdAt: true },
     });
 
+    let welcomeEmailStatus: "queued" | "suppressed" | "failed" = "failed";
+    try {
+      const welcomeEmail = await sendAdminWelcomeEmail({
+        name,
+        email,
+        temporaryPassword: password,
+        roleLabel: ADMIN_ROLE_LABELS[adminRole],
+      });
+      welcomeEmailStatus = welcomeEmail.status === "suppressed" ? "suppressed" : "queued";
+    } catch (error) {
+      console.error("Admin account was created, but its welcome email could not be queued:", { email, error });
+    }
+
     return NextResponse.json(
       {
         admin: {
@@ -252,9 +273,11 @@ export async function POST(req: NextRequest) {
           mfaEnabled: false,
           growthTitle,
         },
-        // Echoed once so the super admin can pass it on. Never stored in the
-        // clear and never returned again.
-        password,
+        welcomeEmailStatus,
+        // Only echoed back when the email could not be queued — otherwise it
+        // was never stored in the clear and there is nothing left to hand
+        // over, same as the tutor-invite flow.
+        ...(welcomeEmailStatus === "queued" ? {} : { password }),
         signInPath: "/auth/admin",
       },
       { status: 201 },
@@ -332,7 +355,13 @@ export async function PATCH(req: NextRequest) {
       : null;
     const name = typeof body.name === "string" ? body.name.trim() : null;
     const email = body.email === undefined ? null : normaliseEmail(body.email);
-    const password = typeof body.password === "string" ? body.password : null;
+    // A (re)send of the welcome email: picks up an explicit password if one
+    // was sent alongside it, otherwise generates one, same as account
+    // creation. This is the fix for an admin created before the welcome email
+    // existed, or whose first one never arrived — one click instead of typing
+    // and relaying a password by hand.
+    const sendLoginEmail = body.sendLoginEmail === true;
+    const password = typeof body.password === "string" ? body.password : sendLoginEmail ? generateTempPassword() : null;
     const lockProvided = typeof body.locked === "boolean";
     const growthTitleProvided = Object.prototype.hasOwnProperty.call(body, "growthTitle");
     // Distinguished from "not sent" (leave alone) rather than folded into a
@@ -481,6 +510,22 @@ export async function PATCH(req: NextRequest) {
       select: { id: true, name: true, email: true, totpEnabledAt: true, adminBranchIds: true },
     });
 
+    let welcomeEmailStatus: "queued" | "suppressed" | "failed" | null = null;
+    if (sendLoginEmail) {
+      welcomeEmailStatus = "failed";
+      try {
+        const welcomeEmail = await sendAdminWelcomeEmail({
+          name: updated.name ?? "",
+          email: updated.email,
+          temporaryPassword: password!,
+          roleLabel: ADMIN_ROLE_LABELS[nextRole],
+        });
+        welcomeEmailStatus = welcomeEmail.status === "suppressed" ? "suppressed" : "queued";
+      } catch (error) {
+        console.error("Login email could not be queued:", { email: updated.email, error });
+      }
+    }
+
     return NextResponse.json({
       admin: {
         id: updated.id,
@@ -498,6 +543,10 @@ export async function PATCH(req: NextRequest) {
       // Told back so the page can say "they must sign in again with this",
       // rather than the super admin having to remember what they typed.
       passwordChanged: password !== null,
+      welcomeEmailStatus,
+      // Only handed back when there's no email to carry it — mirrors the
+      // create flow.
+      ...(sendLoginEmail && welcomeEmailStatus !== "queued" ? { password } : {}),
     });
   } catch (error) {
     console.error("Admin staff PATCH failed:", error);
