@@ -298,6 +298,7 @@ export default function GraduationPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [batchFilter, setBatchFilter] = useState<Record<string, "move" | "part" | null>>({});
   const [showRunning, setShowRunning] = useState(false);
   const [accounting, setAccounting] = useState<Accounting | null>(null);
   const [wrong, setWrong] = useState<WrongMove[]>([]);
@@ -589,6 +590,9 @@ export default function GraduationPage() {
       else next.add(key);
       return next;
     });
+
+  const toggleBatchFilter = (key: string, which: "move" | "part") =>
+    setBatchFilter((current) => ({ ...current, [key]: current[key] === which ? null : which }));
 
   const everyone = useMemo(() => targetsOf(batches.flatMap((batch) => batch.levels.flatMap((level) => level.students))), [batches]);
 
@@ -941,8 +945,13 @@ export default function GraduationPage() {
           {batches.map((batch) => {
             const students = batch.levels.flatMap((level) => level.students);
             const todo = targetsOf(students);
+            const batchKey = `${batch.name}|${batch.label}`;
+            const activeFilter = batchFilter[batchKey] ?? null;
+            const moveStudents = students.filter((s) => s.verdict.state === "ready");
+            const partStudents = students.filter((s) => s.verdict.state === "blocked" && s.verdict.reason === "fees");
+            const rosterStudents = activeFilter === "move" ? moveStudents : activeFilter === "part" ? partStudents : [];
             return (
-              <section key={`${batch.name}|${batch.label}`} className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+              <section key={batchKey} className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
                 <div className="space-y-1">
                   <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Batch</p>
                   <h2 className="text-3xl font-bold text-[var(--foreground)]">{batchTitle(batch)}</h2>
@@ -952,33 +961,71 @@ export default function GraduationPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={activeFilter === "move"}
+                    onClick={() => todo.move.length > 0 && toggleBatchFilter(batchKey, "move")}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && todo.move.length > 0) {
+                        e.preventDefault();
+                        toggleBatchFilter(batchKey, "move");
+                      }
+                    }}
+                    className={`space-y-3 rounded-2xl border bg-emerald-50 p-4 text-left transition ${
+                      todo.move.length > 0 ? "cursor-pointer hover:bg-emerald-100" : ""
+                    } ${activeFilter === "move" ? "border-emerald-500 ring-2 ring-emerald-400" : "border-emerald-300"}`}
+                  >
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Paid in full</p>
                       <p className="text-3xl font-bold text-emerald-900">{todo.move.length}</p>
-                      <p className="text-xs text-emerald-800">Ready to move up to the next level.</p>
+                      <p className="text-xs text-emerald-800">
+                        Ready to move up to the next level.
+                        {todo.move.length > 0 ? ` Tap to ${activeFilter === "move" ? "hide" : "see"} who.` : ""}
+                      </p>
                     </div>
                     <button
                       disabled={busy || todo.move.length === 0}
-                      onClick={() => run(`${batchTitle(batch)} — paid in full`, students, "move")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        run(`${batchTitle(batch)} — paid in full`, students, "move");
+                      }}
                       className="w-full rounded-full bg-[#FF6600] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-40"
                     >
                       {todo.move.length === 0 ? "Nobody has paid in full yet" : `Move up ${todo.move.length} who paid in full`}
                     </button>
                   </div>
 
-                  <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={activeFilter === "part"}
+                    onClick={() => todo.partTotal > 0 && toggleBatchFilter(batchKey, "part")}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && todo.partTotal > 0) {
+                        e.preventDefault();
+                        toggleBatchFilter(batchKey, "part");
+                      }
+                    }}
+                    className={`space-y-3 rounded-2xl border bg-amber-50 p-4 text-left transition ${
+                      todo.partTotal > 0 ? "cursor-pointer hover:bg-amber-100" : ""
+                    } ${activeFilter === "part" ? "border-amber-500 ring-2 ring-amber-400" : "border-amber-300"}`}
+                  >
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700">Part payment</p>
                       <p className="text-3xl font-bold text-amber-900">{todo.partTotal}</p>
                       <p className="text-xs text-amber-800">
                         Not moved. When one of them pays the rest, they join &ldquo;Paid in full&rdquo; on their own.
                         {todo.alreadyInvited > 0 ? ` ${todo.alreadyInvited} already invited.` : ""}
+                        {todo.partTotal > 0 ? ` Tap to ${activeFilter === "part" ? "hide" : "see"} who.` : ""}
                       </p>
                     </div>
                     <button
                       disabled={busy || todo.invite.length === 0}
-                      onClick={() => run(`${batchTitle(batch)} — part payment`, students, "invite")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        run(`${batchTitle(batch)} — part payment`, students, "invite");
+                      }}
                       className="w-full rounded-full border border-amber-400 bg-white px-5 py-3 text-sm font-bold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:opacity-40"
                     >
                       {todo.partTotal === 0
@@ -989,6 +1036,37 @@ export default function GraduationPage() {
                     </button>
                   </div>
                 </div>
+
+                {activeFilter && rosterStudents.length > 0 && (
+                  <ul
+                    className={`divide-y rounded-2xl border text-sm ${
+                      activeFilter === "move"
+                        ? "divide-emerald-200 border-emerald-300 bg-emerald-50"
+                        : "divide-amber-200 border-amber-300 bg-amber-50"
+                    }`}
+                  >
+                    {[...rosterStudents]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((student) => (
+                        <li key={student.studentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                          <span>
+                            <Link href={`/admin/students/${student.studentId}`} className="font-medium text-[var(--foreground)] hover:underline">
+                              {student.name}
+                            </Link>
+                            <span className="ml-2 text-xs text-[var(--muted)]">{student.sitting}</span>
+                          </span>
+                          {activeFilter === "move" ? (
+                            <span className="text-xs font-semibold text-emerald-700">Paid {money(student.paid)}</span>
+                          ) : (
+                            <span className="text-xs font-semibold text-amber-800">
+                              {student.offered ? "Invited — " : ""}
+                              Paid {money(student.paid)} · {money(student.balance)} to go
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                  </ul>
+                )}
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   {Object.entries(
