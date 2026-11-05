@@ -6,6 +6,7 @@ import { instantToZonedParts } from "@/lib/school-time";
 import { cohortTiming } from "@/lib/graduation";
 import { scanDeskCandidates } from "@/lib/graduation-server";
 import { SWEEP_ORDER, classifySweep, sweepYear, type SweepReason } from "@/lib/batch-sweep";
+import { BULK_ACTION_WARN_THRESHOLD, checkBulkActionSize } from "@/lib/bulk-action-guard";
 
 /**
  * Sweeps the whole student database for one batch ("August") and says, for every
@@ -152,6 +153,10 @@ export async function sweepBatch(options: {
 export type AdoptResult = {
   added: Array<{ studentId: string; name: string }>;
   skipped: Array<{ studentId: string; name: string; reason: string }>;
+  /** Set instead of acting: the real, server-computed count is above the quiet threshold
+   * and needs a second, specific confirmation before anything is written. See
+   * lib/bulk-action-guard.ts — this is what the 2026-11-05 incident had none of. */
+  needsConfirmation?: { total: number };
 };
 
 /** Reasons the sweep found someone, where it is safe to re-point their batch label at a different month. */
@@ -165,7 +170,16 @@ const MOVABLE_REASONS: SweepReason[] = ["no_label_strong", "no_label_weak", "unr
  */
 export async function adoptIntoBatch(
   studentIds: string[],
-  options: { where?: Record<string, unknown>; tenantId?: string | null; month: string; now?: Date; by?: string },
+  options: {
+    where?: Record<string, unknown>;
+    tenantId?: string | null;
+    month: string;
+    now?: Date;
+    by?: string;
+    /** Must equal the eligible total this exact call returns via `needsConfirmation`, or the
+     * guard fires again. Omit on the first attempt. */
+    confirmedTotal?: number;
+  },
 ): Promise<AdoptResult> {
   const result: AdoptResult = { added: [], skipped: [] };
   const sweep = await sweepBatch({ where: options.where, tenantId: options.tenantId, month: options.month, now: options.now });
@@ -174,6 +188,15 @@ export async function adoptIntoBatch(
     return result;
   }
   const eligible = new Map(sweep.rows.filter((r) => r.reason === "no_label_strong").map((r) => [r.studentId, r]));
+
+  // The guard reads the SWEEP's own total — everyone this press is really about,
+  // not just the first chunk the browser happened to send — so chunking ten at a
+  // time can never slip a bulk move past it unconfirmed.
+  const guard = checkBulkActionSize(eligible.size, options.confirmedTotal ?? null);
+  if (guard.needsConfirmation) {
+    result.needsConfirmation = { total: guard.total };
+    return result;
+  }
 
   for (const studentId of studentIds) {
     const row = eligible.get(studentId);
@@ -228,6 +251,8 @@ export async function adoptIntoBatch(
 export type MoveResult = {
   moved: Array<{ studentId: string; name: string }>;
   skipped: Array<{ studentId: string; name: string; reason: string }>;
+  /** See AdoptResult.needsConfirmation — the same guard, same reason. */
+  needsConfirmation?: { total: number };
 };
 
 /**
@@ -253,6 +278,9 @@ export async function moveIntoBatch(
     toMonth: string;
     now?: Date;
     by?: string;
+    /** Must equal the eligible total this exact call returns via `needsConfirmation`, or the
+     * guard fires again. Omit on the first attempt. */
+    confirmedTotal?: number;
   },
 ): Promise<MoveResult> {
   const result: MoveResult = { moved: [], skipped: [] };
@@ -269,6 +297,15 @@ export async function moveIntoBatch(
     return result;
   }
   const eligible = new Map(sweep.rows.filter((r) => MOVABLE_REASONS.includes(r.reason)).map((r) => [r.studentId, r]));
+
+  // The exact guard that was missing on 2026-11-05: before a single row moves, check
+  // the sweep's OWN total against the quiet threshold. Chunking never bypasses this —
+  // every chunk of the same press re-asks sweepBatch and gets the same total.
+  const guard = checkBulkActionSize(eligible.size, options.confirmedTotal ?? null);
+  if (guard.needsConfirmation) {
+    result.needsConfirmation = { total: guard.total };
+    return result;
+  }
 
   for (const studentId of studentIds) {
     const row = eligible.get(studentId);
@@ -327,5 +364,21 @@ export async function moveIntoBatch(
       result.skipped.push({ studentId, name: row.name, reason: "Something went wrong — try again" });
     }
   }
+
+  // A confirmed move above the quiet threshold still deserves a loud record, not just
+  // a silent audit row — so Mission Control pages admins the moment it happens, the
+  // same minute, instead of the office hearing about it from students hours later.
+  if (result.moved.length > BULK_ACTION_WARN_THRESHOLD) {
+    const { recordIncident } = await import("@/lib/incidents");
+    await recordIncident({
+      kind: "drift",
+      source: "request",
+      route: "/api/admin/graduation",
+      severity: "critical",
+      message: `Bulk batch move: ${result.moved.length} learners moved from ${options.fromMonth} to ${toMonth}${options.by ? ` by ${options.by}` : ""}.`,
+      context: { fromMonth: options.fromMonth, toMonth, movedCount: result.moved.length, by: options.by ?? null },
+    }).catch((error) => console.error("mission control incident for bulk move failed", error));
+  }
+
   return result;
 }

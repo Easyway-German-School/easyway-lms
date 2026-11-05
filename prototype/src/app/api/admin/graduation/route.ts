@@ -105,7 +105,8 @@ export async function POST(request: Request) {
       if (ids.length > MAX_PER_CALL) {
         return NextResponse.json({ error: `Add at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
       }
-      const result = await adoptIntoBatch(ids, { where: fence(gate), tenantId, month, by: gate.session.user.email ?? undefined });
+      const confirmedTotal = typeof body.confirmedTotal === "number" ? body.confirmedTotal : undefined;
+      const result = await adoptIntoBatch(ids, { where: fence(gate), tenantId, month, by: gate.session.user.email ?? undefined, confirmedTotal });
       return NextResponse.json({ ok: true, ...result });
     }
 
@@ -121,7 +122,15 @@ export async function POST(request: Request) {
       if (ids.length > MAX_PER_CALL) {
         return NextResponse.json({ error: `Move at most ${MAX_PER_CALL} learners at a time` }, { status: 400 });
       }
-      const result = await moveIntoBatch(ids, { where: fence(gate), tenantId, fromMonth, toMonth, by: gate.session.user.email ?? undefined });
+      const confirmedTotal = typeof body.confirmedTotal === "number" ? body.confirmedTotal : undefined;
+      const result = await moveIntoBatch(ids, {
+        where: fence(gate),
+        tenantId,
+        fromMonth,
+        toMonth,
+        by: gate.session.user.email ?? undefined,
+        confirmedTotal,
+      });
       return NextResponse.json({ ok: true, ...result });
     }
 

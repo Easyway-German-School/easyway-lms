@@ -310,6 +310,8 @@ export default function GraduationPage() {
   const [moveTarget, setMoveTarget] = useState<string>("September");
   const [moving, setMoving] = useState(false);
   const [moved, setMoved] = useState<string>("");
+  const [moveConfirmTotal, setMoveConfirmTotal] = useState<number | null>(null);
+  const [adoptConfirmTotal, setAdoptConfirmTotal] = useState<number | null>(null);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentSearchResults, setStudentSearchResults] = useState<StudentSearchResult[]>([]);
   const [studentSearchBusy, setStudentSearchBusy] = useState(false);
@@ -469,7 +471,7 @@ export default function GraduationPage() {
     }
   }
 
-  async function adopt() {
+  async function adopt(confirmedTotal?: number) {
     if (!sweep) return;
     const rows = sweep.rows.filter((row) => row.reason === "no_label_strong");
     if (rows.length === 0) return;
@@ -481,10 +483,22 @@ export default function GraduationPage() {
       return;
     setBusy(true);
     setError("");
+    setAdoptConfirmTotal(null);
     try {
       let added = 0;
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const json = await post({ action: "adopt", month: sweep.month, studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId) });
+        const json = await post({
+          action: "adopt",
+          month: sweep.month,
+          studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId),
+          ...(confirmedTotal ? { confirmedTotal } : {}),
+        });
+        // A big enough batch asks for a second, specific look — the real count,
+        // not whatever a dialog said a moment earlier — before anything is written.
+        if (json.needsConfirmation) {
+          setAdoptConfirmTotal(json.needsConfirmation.total);
+          return;
+        }
         added += json.added.length;
       }
       setFixed(`Put ${plural(added, "learner")} on the ${sweep.month} batch. They are in the lists above now.`);
@@ -497,7 +511,7 @@ export default function GraduationPage() {
     }
   }
 
-  async function moveToBatch() {
+  async function moveToBatch(confirmedTotal?: number) {
     if (!sweep) return;
     const rows = sweep.rows.filter((row) => MOVABLE_REASONS.includes(row.reason));
     if (rows.length === 0) return;
@@ -511,6 +525,7 @@ export default function GraduationPage() {
     setMoving(true);
     setError("");
     setMoved("");
+    setMoveConfirmTotal(null);
     try {
       let movedCount = 0;
       for (let i = 0; i < rows.length; i += CHUNK) {
@@ -519,7 +534,14 @@ export default function GraduationPage() {
           fromMonth: sweep.month,
           toMonth: moveTarget,
           studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId),
+          ...(confirmedTotal ? { confirmedTotal } : {}),
         });
+        // Above the quiet threshold the server refuses to write anything until this
+        // exact number is confirmed back to it — see lib/bulk-action-guard.ts.
+        if (json.needsConfirmation) {
+          setMoveConfirmTotal(json.needsConfirmation.total);
+          return;
+        }
         movedCount += json.moved.length;
       }
       setMoved(`Moved ${plural(movedCount, "learner")} from the ${sweep.month} batch onto the ${moveTarget} batch.`);
@@ -759,6 +781,29 @@ export default function GraduationPage() {
 
           {moved && <p className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-sm font-medium text-emerald-900">{moved}</p>}
 
+          {moveConfirmTotal !== null && (
+            <div className="space-y-2 rounded-2xl border border-rose-300 bg-rose-50 p-4">
+              <p className="text-sm font-bold text-rose-900">
+                That is {moveConfirmTotal} learners — more than a quick press should move at once. Look again before confirming.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  disabled={busy}
+                  onClick={() => void moveToBatch(moveConfirmTotal)}
+                  className="rounded-full bg-rose-600 px-5 py-2 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                >
+                  Yes, move these {moveConfirmTotal} learners
+                </button>
+                <button
+                  onClick={() => setMoveConfirmTotal(null)}
+                  className="rounded-full border border-rose-300 px-5 py-2 text-sm font-semibold text-rose-900"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {sweep && (
             <div className="space-y-3">
               <p className="text-sm text-[var(--foreground)]">
@@ -783,7 +828,7 @@ export default function GraduationPage() {
                   </select>
                   <button
                     disabled={moving || busy}
-                    onClick={moveToBatch}
+                    onClick={() => void moveToBatch()}
                     className="rounded-full bg-[#FF6600] px-5 py-2 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
                   >
                     {moving ? "Moving…" : `Move to ${moveTarget}`}
@@ -805,7 +850,7 @@ export default function GraduationPage() {
                       {reason === "no_label_strong" && (
                         <button
                           disabled={busy}
-                          onClick={adopt}
+                          onClick={() => void adopt()}
                           className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                         >
                           Put these {sweep.counts[reason]} on the {sweep.month} batch
@@ -830,6 +875,29 @@ export default function GraduationPage() {
                 ))}
               </ul>
               {sweep.total === 0 && <p className="text-sm text-[var(--muted)]">Nobody in the database points to a {sweep.month} batch.</p>}
+
+              {adoptConfirmTotal !== null && (
+                <div className="space-y-2 rounded-2xl border border-rose-300 bg-rose-50 p-4">
+                  <p className="text-sm font-bold text-rose-900">
+                    That is {adoptConfirmTotal} learners — more than a quick press should add at once. Look again before confirming.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      disabled={busy}
+                      onClick={() => void adopt(adoptConfirmTotal)}
+                      className="rounded-full bg-rose-600 px-5 py-2 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                    >
+                      Yes, put these {adoptConfirmTotal} learners on {sweep.month}
+                    </button>
+                    <button
+                      onClick={() => setAdoptConfirmTotal(null)}
+                      className="rounded-full border border-rose-300 px-5 py-2 text-sm font-semibold text-rose-900"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
