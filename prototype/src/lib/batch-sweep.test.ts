@@ -54,6 +54,15 @@ describe("classifySweep", () => {
     expect(v.reason).toBe("other_batch");
   });
 
+  it("never sweeps in a learner with their own valid, different batch on registration month alone (2026-11-05 incident)", () => {
+    // A learner correctly on the September batch, who simply registered in August, is NOT
+    // "really behind" the August batch — they belong to September's own sweep, not this
+    // one. Letting registration month alone override their real label is what moved 201
+    // correctly-batched learners onto the wrong batch in one bulk "Move to X" press.
+    const v = classifySweep(make({ label: "September", onDesk: false, signals: { registered: true } }));
+    expect(v.belongs).toBe(false);
+  });
+
   it("explains a learner whose August batch simply has not ended for them", () => {
     const v = classifySweep(make({ onDesk: false, endsOn: "Sat 31 Oct" }));
     expect(v.reason).toBe("still_running");

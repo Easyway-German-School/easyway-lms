@@ -46,7 +46,10 @@ describe("moveIntoBatch", () => {
         id: "student-1",
         status: "active",
         level: "A1",
-        admission: { batch: "September" },
+        // No batch on record at all — a learner the sweep can safely re-point, unlike one
+        // with their own valid, different batch label (that case belongs to that other
+        // batch's own sweep, not this one — see classifySweep.test.ts).
+        admission: {},
         createdAt,
         classesStartedAt: null,
         levelCompletedFor: null,
@@ -56,7 +59,7 @@ describe("moveIntoBatch", () => {
       },
     ]);
     mocks.studentFindUnique.mockResolvedValue({
-      admission: { batch: "September" },
+      admission: {},
       classesStartedAt: null,
       createdAt,
     });
