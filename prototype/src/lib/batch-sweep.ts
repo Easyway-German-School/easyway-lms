@@ -88,6 +88,12 @@ export function classifySweep(input: SweepInput): SweepVerdict {
   const wanted = monthNameToIndex(input.month);
   const labelIndex = monthNameToIndex(input.label);
   const labelMatches = wanted !== null && labelIndex === wanted;
+  // A learner already carries a different, readable batch label — trust it. Registering in
+  // the swept month is a coincidence for them (a late sign-up placed into whatever batch was
+  // actually open), not a sign they belong to THIS batch. Letting registration month alone
+  // override a real label is what swept active, correctly-batched learners from other months
+  // into a "Move to X" action meant only for people this batch's own records can't place.
+  const hasOtherValidLabel = labelIndex !== null && !labelMatches;
 
   const evidence: string[] = [];
   if (labelMatches) evidence.push(`batch on record is ${input.month}`);
@@ -96,7 +102,7 @@ export function classifySweep(input: SweepInput): SweepVerdict {
   if (input.signals.registered) evidence.push(`registered in ${input.month}`);
 
   const strong = input.signals.history || input.signals.started;
-  const belongs = labelMatches || strong || input.signals.registered;
+  const belongs = labelMatches || strong || (input.signals.registered && !hasOtherValidLabel);
   if (!belongs) return { belongs: false, reason: "on_desk", detail: "", evidence };
 
   const done = (reason: SweepReason, detail: string): SweepVerdict => ({ belongs: true, reason, detail, evidence });
