@@ -1,9 +1,10 @@
 import bcryptjs from "bcryptjs";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapability, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
 import { currentTenantId } from "@/lib/tenant/context";
 import { generateTempPassword } from "@/lib/student-password";
+import { sendAdminWelcomeEmail } from "@/lib/admin-welcome-email";
 
 export const dynamic = "force-dynamic";
 
@@ -148,7 +149,29 @@ export async function POST(req: NextRequest) {
       return { id: createdCode.id, ownerId };
     });
 
-    return NextResponse.json({ ok: true, id: result.id, ownerId: result.ownerId, generatedPassword });
+    let welcomeEmailStatus: "queued" | "suppressed" | "failed" | null = null;
+    if (generatedPassword) {
+      welcomeEmailStatus = "failed";
+      try {
+        const welcomeEmail = await sendAdminWelcomeEmail({
+          name: normalizedName,
+          email: normalizedEmail,
+          temporaryPassword: generatedPassword,
+          roleLabel: ADMIN_ROLE_LABELS.influencer,
+        });
+        welcomeEmailStatus = welcomeEmail.status === "suppressed" ? "suppressed" : "queued";
+      } catch (error) {
+        console.error("Partner account was created, but its welcome email could not be queued:", { email: normalizedEmail, error });
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      id: result.id,
+      ownerId: result.ownerId,
+      generatedPassword,
+      welcomeEmailStatus,
+    });
   } catch (error) {
     const message = String((error as { code?: string })?.code) === "P2002" ? "That code is already in use." : "Unable to create the code.";
     console.error("Admin promo-codes POST failed:", error);

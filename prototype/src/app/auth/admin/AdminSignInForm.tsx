@@ -124,6 +124,7 @@ export default function AdminSignInForm() {
               <li>• Lecturer management</li>
               <li>• Student oversight</li>
               <li>• System analytics</li>
+              <li>• Partner &amp; ambassador program</li>
             </ul>
           </div>
         </div>
@@ -211,6 +212,14 @@ export default function AdminSignInForm() {
               <p className="mt-2">
                 <Link href="/auth/lecturer/signin" className="font-semibold text-[#FF6600] hover:text-[#FF5500]">Lecturer login</Link>
               </p>
+            </div>
+
+            {/* Partners sign in through the same form above (role=admin) — this
+                is just so an ambassador/influencer/travel-agent landing here
+                after clicking their welcome email recognises the right door. */}
+            <div className="mt-5 rounded-2xl border border-[#FF6600]/15 bg-[#FF6600]/5 px-4 py-3 text-xs leading-5 text-[var(--muted)]">
+              <span className="font-semibold text-[var(--foreground)]">Ambassadors, influencers &amp; partners</span> — sign in right here with
+              the email and password from your welcome email.
             </div>
           </div>
         </div>

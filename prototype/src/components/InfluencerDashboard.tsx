@@ -412,19 +412,31 @@ export default function InfluencerDashboard({ mode, targetUserId }: { mode: "sel
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
       {notice ? <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p> : null}
 
+      {/* Same dark/gold family as the header, not the plain white surface
+          card every other admin screen uses — a partner's own numbers are
+          the whole point of this page, so they get the premium treatment
+          rather than reading like an afterthought underneath it. */}
       <section className={allAmbassador ? "grid gap-3 sm:max-w-xs" : "grid gap-3 sm:grid-cols-4"}>
         {(allAmbassador
-          ? [{ label: "Sign-ups", value: totals.signups.toLocaleString() }]
+          ? [{ label: "Sign-ups", value: totals.signups.toLocaleString(), highlight: false }]
           : [
-              { label: "Sign-ups", value: totals.signups.toLocaleString() },
-              { label: "Pending to pay", value: totals.pendingToPay.toLocaleString() },
-              { label: "Paid", value: totals.paid.toLocaleString() },
-              { label: "Credit earned (paid only)", value: naira(totals.pendingAmount + totals.approvedAmount + totals.creditedAmount) },
+              { label: "Sign-ups", value: totals.signups.toLocaleString(), highlight: false },
+              { label: "Pending to pay", value: totals.pendingToPay.toLocaleString(), highlight: false },
+              { label: "Paid", value: totals.paid.toLocaleString(), highlight: false },
+              { label: "Credit earned", value: naira(totals.pendingAmount + totals.approvedAmount + totals.creditedAmount), highlight: true },
             ]
         ).map((m) => (
-          <div key={m.label} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-            <p className="text-sm text-[var(--muted)]">{m.label}</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{loading ? "…" : m.value}</p>
+          <div
+            key={m.label}
+            className={`relative overflow-hidden rounded-2xl p-[1px] ${m.highlight ? "shadow-[0_16px_40px_-20px_rgba(212,175,55,0.5)]" : ""}`}
+            style={{ background: m.highlight ? "linear-gradient(135deg, rgba(212,175,55,0.65), rgba(255,102,0,0.25))" : "linear-gradient(135deg, rgba(212,175,55,0.22), rgba(255,102,0,0.08))" }}
+          >
+            <div className="rounded-[15px] bg-[radial-gradient(circle_at_20%_0%,_#1c1917_0%,_#0b0a09_60%,_#000000_100%)] px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/50">{m.label}</p>
+              <p className={`mt-1.5 text-2xl font-bold tabular-nums ${m.highlight ? "bg-gradient-to-r from-white via-[#F4E3B2] to-[#D4AF37] bg-clip-text text-transparent" : "text-white"}`}>
+                {loading ? "…" : m.value}
+              </p>
+            </div>
           </div>
         ))}
       </section>
