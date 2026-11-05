@@ -75,7 +75,8 @@ export function hasDerivedFilter(filters: RosterFilters): boolean {
       (filters.focus && churnRiskPreset(filters.focus)) ||
       filters.agingBucket ||
       filters.ids ||
-      filters.tag,
+      filters.tag ||
+      filters.paymentStatus,
   );
 }
 
@@ -119,9 +120,13 @@ export function buildRosterWhereClause(
     });
   }
 
-  if (filters.paymentStatus) {
-    whereClause.payments = { some: { status: filters.paymentStatus } };
-  }
+  // paymentStatus is filtered post-query against the computed cohort (see
+  // scoreAndFilterRoster) — it needs to match the same "Nothing paid / Part
+  // paid / Deposit paid / Paid in full" badge the roster shows, not whether
+  // any individual Payment row happens to carry that status. A student with
+  // one completed deposit payment still reads "completed" under a raw
+  // `payments.some` match even though they owe the balance and the badge
+  // says "Deposit paid".
   if (filters.tutorId) {
     whereClause.tutorId = filters.tutorId;
   }
@@ -292,6 +297,9 @@ export function scoreAndFilterRoster(
     matched = matched.filter(
       (entry) => entry.student.tags.includes(tag) || entry.segments.includes(tag),
     );
+  }
+  if (filters.paymentStatus) {
+    matched = matched.filter((entry) => entry.finance.cohort === filters.paymentStatus);
   }
 
   return matched;

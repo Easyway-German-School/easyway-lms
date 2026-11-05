@@ -1326,9 +1326,10 @@ function StudentsRoster() {
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All payments</option>
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
-                  <option value="failed">Failed</option>
+                  <option value="unpaid">Nothing paid</option>
+                  <option value="registered_only">Part paid</option>
+                  <option value="deposit_paid">Deposit paid</option>
+                  <option value="full_paid">Paid in full</option>
                 </select>
               </div>
         </div>
