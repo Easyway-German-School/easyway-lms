@@ -300,6 +300,10 @@ async function scan(options: {
     // PAID IN FULL is its own test. A learner with no charge row for the level they finished
     // used to read as owing nothing even when they had paid only a part — so the balance falls
     // back to the level's fee minus what they have paid whenever the ledger has no line for it.
+    // Must be the ledger's UNCONSUMED credit, not the lifetime total paid: `paidBy` sums every
+    // naira the student has ever sent, most of which is already allocated to earlier charges —
+    // using the lifetime figure here double-counts that money and can read a student who has
+    // paid nothing toward THIS level as fully paid, just because they paid for an earlier one.
     const paidSoFar = paidBy.get(student.id) ?? 0;
     const hasLevelLine = ledger.lines.some((line) => line.level === student.level);
     const fee = tuitionFeeFor({
@@ -308,7 +312,7 @@ async function scan(options: {
       classType: student.classType,
       pathway: student.pathway,
     });
-    const priorLevelOwed = ledgerOwed + (hasLevelLine ? 0 : Math.max(0, fee - paidSoFar));
+    const priorLevelOwed = ledgerOwed + (hasLevelLine ? 0 : Math.max(0, fee - ledger.creditBalance));
     // The same test the certificate and the portal paywall use: at least the deposit paid.
     const paidDeposit =
       (paidBy.get(student.id) ?? 0) >=
@@ -389,11 +393,31 @@ function parseAuto(value: unknown): GraduationAuto {
   };
 }
 
+const DEFAULT_TENANT_SLUG = process.env.DEFAULT_TENANT_SLUG || "easyway";
+let defaultGraduationTenantId: string | null = null;
+
+/**
+ * A handful of admin accounts carry no `tenantId` (never backfilled when the
+ * tenant platform shipped — see fix #148, same shape, for the opening-day
+ * override). For them the "Turn automatic progression on" switch was flatly
+ * refused with "No school in context" instead of landing on the one real
+ * school. Falls back to the default tenant, same as every other auto-setting
+ * reachable by those accounts.
+ */
+export async function resolveAutoTenantId(tenantId: string | null | undefined): Promise<string | null> {
+  if (tenantId) return tenantId;
+  if (defaultGraduationTenantId) return defaultGraduationTenantId;
+  const tenant = await prisma.tenant.findUnique({ where: { slug: DEFAULT_TENANT_SLUG }, select: { id: true } });
+  defaultGraduationTenantId = tenant?.id ?? null;
+  return defaultGraduationTenantId;
+}
+
 export async function readGraduationAuto(tenantId: string | null | undefined): Promise<GraduationAuto> {
-  if (!tenantId) return parseAuto(null);
   try {
+    const resolved = await resolveAutoTenantId(tenantId);
+    if (!resolved) return parseAuto(null);
     const row = await prisma.schoolSetting.findUnique({
-      where: { tenantId_key: { tenantId, key: GRADUATION_AUTO_KEY } },
+      where: { tenantId_key: { tenantId: resolved, key: GRADUATION_AUTO_KEY } },
     });
     return parseAuto(row?.value);
   } catch {
@@ -402,14 +426,16 @@ export async function readGraduationAuto(tenantId: string | null | undefined): P
 }
 
 export async function writeGraduationAuto(
-  tenantId: string,
+  tenantId: string | null | undefined,
   patch: Partial<GraduationAuto>,
-): Promise<GraduationAuto> {
-  const next = { ...(await readGraduationAuto(tenantId)), ...patch };
+): Promise<GraduationAuto | null> {
+  const resolved = await resolveAutoTenantId(tenantId);
+  if (!resolved) return null;
+  const next = { ...(await readGraduationAuto(resolved)), ...patch };
   await prisma.schoolSetting.upsert({
-    where: { tenantId_key: { tenantId, key: GRADUATION_AUTO_KEY } },
+    where: { tenantId_key: { tenantId: resolved, key: GRADUATION_AUTO_KEY } },
     update: { value: next },
-    create: { tenantId, key: GRADUATION_AUTO_KEY, value: next },
+    create: { tenantId: resolved, key: GRADUATION_AUTO_KEY, value: next },
   });
   return next;
 }
@@ -782,12 +808,14 @@ function signatureOf(text: string): string {
  * "a person should look", not guess. The hourly auto-send of Becca's message is
  * switched off with it, for the same reason. Reads back from this module's flag.
  */
-export async function setBatchAutomatic(tenantId: string, enabled: boolean): Promise<GraduationAuto> {
-  await writeNextLevelAuto(tenantId, { enabled: false });
-  return writeGraduationAuto(tenantId, { enabled });
+export async function setBatchAutomatic(tenantId: string | null | undefined, enabled: boolean): Promise<GraduationAuto | null> {
+  const resolved = await resolveAutoTenantId(tenantId);
+  if (!resolved) return null;
+  await writeNextLevelAuto(resolved, { enabled: false });
+  return writeGraduationAuto(resolved, { enabled });
 }
 
-export async function setAutoPromotion(tenantId: string, autoPromote: boolean): Promise<GraduationAuto> {
+export async function setAutoPromotion(tenantId: string | null | undefined, autoPromote: boolean): Promise<GraduationAuto | null> {
   return writeGraduationAuto(tenantId, { autoPromote });
 }
 
@@ -996,15 +1024,15 @@ export async function runAutoLevelProgression(
           await issueCertificateForStudent(student.id, { now: decision.completedAt }).catch((error) => {
             console.error("Automatic progression certificate failed", { studentId: student.id, error });
           });
+          // No human in the loop here, so no override — same rule
+          // promoteIfNextLevelPayment follows. A student who still owes on a
+          // level they've already been in is left for staff review rather than
+          // silently promoted and billed for the next one.
           const promotion = await promoteStudents([student.id], {
             now,
             placement: "next-intake",
             notBefore: decision.completedAt,
             expectedLevel: student.level,
-            override: {
-              by: "system",
-              reason: "The course window ended from a confirmed first class; prior tuition remains payable.",
-            },
           });
           if (promotion.promoted.includes(student.id)) total.promoted += 1;
           else total.review += 1;

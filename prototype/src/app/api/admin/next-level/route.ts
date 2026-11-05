@@ -9,7 +9,7 @@ import {
   sendInvites,
   sendLockedNotices,
 } from "@/lib/next-level-pipeline-server";
-import { setBatchAutomatic } from "@/lib/graduation-server";
+import { resolveAutoTenantId, setBatchAutomatic } from "@/lib/graduation-server";
 
 /**
  * The next-level pipeline.
@@ -52,7 +52,10 @@ export async function GET() {
   if (!gate.ok) return gate.response;
   try {
     const { where, tenantId } = fence(gate);
-    const [pipeline, auto] = await Promise.all([loadPipeline({ where, tenantId }), readNextLevelAuto(tenantId)]);
+    const [pipeline, auto] = await Promise.all([
+      loadPipeline({ where, tenantId }),
+      readNextLevelAuto(await resolveAutoTenantId(tenantId)),
+    ]);
     return NextResponse.json({ ...pipeline, auto });
   } catch (error) {
     console.error("Next-level pipeline failed to load:", error);
@@ -71,10 +74,10 @@ export async function POST(request: Request) {
   }
 
   if (action === "setAuto") {
-    const tenantId = gate.session.user.tenantId ?? null;
-    if (!tenantId) return NextResponse.json({ error: "No school to switch this on for" }, { status: 400 });
-    await setBatchAutomatic(tenantId, body?.enabled === true);
-    return NextResponse.json({ auto: await readNextLevelAuto(tenantId) });
+    const resolved = await resolveAutoTenantId(gate.session.user.tenantId ?? null);
+    if (!resolved) return NextResponse.json({ error: "No school to switch this on for" }, { status: 400 });
+    await setBatchAutomatic(resolved, body?.enabled === true);
+    return NextResponse.json({ auto: await readNextLevelAuto(resolved) });
   }
 
   try {

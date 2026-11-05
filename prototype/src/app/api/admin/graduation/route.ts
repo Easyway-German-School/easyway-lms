@@ -138,14 +138,14 @@ export async function POST(request: Request) {
     }
 
     if (action === "setAuto") {
-      if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
       const auto = await setBatchAutomatic(tenantId, body.enabled === true);
+      if (!auto) return NextResponse.json({ error: "No school in context" }, { status: 400 });
       return NextResponse.json({ ok: true, auto });
     }
 
     if (action === "setAutoPromotion") {
-      if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
       const auto = await setAutoPromotion(tenantId, body.autoPromote === true);
+      if (!auto) return NextResponse.json({ error: "No school in context" }, { status: 400 });
       return NextResponse.json({ ok: true, auto });
     }
 
