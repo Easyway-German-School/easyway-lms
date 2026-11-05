@@ -298,6 +298,7 @@ export default function GraduationPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [batchFilter, setBatchFilter] = useState<Record<string, "move" | "part" | null>>({});
   const [showRunning, setShowRunning] = useState(false);
   const [accounting, setAccounting] = useState<Accounting | null>(null);
   const [wrong, setWrong] = useState<WrongMove[]>([]);
@@ -309,6 +310,8 @@ export default function GraduationPage() {
   const [moveTarget, setMoveTarget] = useState<string>("September");
   const [moving, setMoving] = useState(false);
   const [moved, setMoved] = useState<string>("");
+  const [moveConfirmTotal, setMoveConfirmTotal] = useState<number | null>(null);
+  const [adoptConfirmTotal, setAdoptConfirmTotal] = useState<number | null>(null);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentSearchResults, setStudentSearchResults] = useState<StudentSearchResult[]>([]);
   const [studentSearchBusy, setStudentSearchBusy] = useState(false);
@@ -468,7 +471,7 @@ export default function GraduationPage() {
     }
   }
 
-  async function adopt() {
+  async function adopt(confirmedTotal?: number) {
     if (!sweep) return;
     const rows = sweep.rows.filter((row) => row.reason === "no_label_strong");
     if (rows.length === 0) return;
@@ -480,10 +483,22 @@ export default function GraduationPage() {
       return;
     setBusy(true);
     setError("");
+    setAdoptConfirmTotal(null);
     try {
       let added = 0;
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const json = await post({ action: "adopt", month: sweep.month, studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId) });
+        const json = await post({
+          action: "adopt",
+          month: sweep.month,
+          studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId),
+          ...(confirmedTotal ? { confirmedTotal } : {}),
+        });
+        // A big enough batch asks for a second, specific look — the real count,
+        // not whatever a dialog said a moment earlier — before anything is written.
+        if (json.needsConfirmation) {
+          setAdoptConfirmTotal(json.needsConfirmation.total);
+          return;
+        }
         added += json.added.length;
       }
       setFixed(`Put ${plural(added, "learner")} on the ${sweep.month} batch. They are in the lists above now.`);
@@ -496,7 +511,7 @@ export default function GraduationPage() {
     }
   }
 
-  async function moveToBatch() {
+  async function moveToBatch(confirmedTotal?: number) {
     if (!sweep) return;
     const rows = sweep.rows.filter((row) => MOVABLE_REASONS.includes(row.reason));
     if (rows.length === 0) return;
@@ -510,6 +525,7 @@ export default function GraduationPage() {
     setMoving(true);
     setError("");
     setMoved("");
+    setMoveConfirmTotal(null);
     try {
       let movedCount = 0;
       for (let i = 0; i < rows.length; i += CHUNK) {
@@ -518,7 +534,14 @@ export default function GraduationPage() {
           fromMonth: sweep.month,
           toMonth: moveTarget,
           studentIds: rows.slice(i, i + CHUNK).map((row) => row.studentId),
+          ...(confirmedTotal ? { confirmedTotal } : {}),
         });
+        // Above the quiet threshold the server refuses to write anything until this
+        // exact number is confirmed back to it — see lib/bulk-action-guard.ts.
+        if (json.needsConfirmation) {
+          setMoveConfirmTotal(json.needsConfirmation.total);
+          return;
+        }
         movedCount += json.moved.length;
       }
       setMoved(`Moved ${plural(movedCount, "learner")} from the ${sweep.month} batch onto the ${moveTarget} batch.`);
@@ -589,6 +612,9 @@ export default function GraduationPage() {
       else next.add(key);
       return next;
     });
+
+  const toggleBatchFilter = (key: string, which: "move" | "part") =>
+    setBatchFilter((current) => ({ ...current, [key]: current[key] === which ? null : which }));
 
   const everyone = useMemo(() => targetsOf(batches.flatMap((batch) => batch.levels.flatMap((level) => level.students))), [batches]);
 
@@ -755,6 +781,29 @@ export default function GraduationPage() {
 
           {moved && <p className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-sm font-medium text-emerald-900">{moved}</p>}
 
+          {moveConfirmTotal !== null && (
+            <div className="space-y-2 rounded-2xl border border-rose-300 bg-rose-50 p-4">
+              <p className="text-sm font-bold text-rose-900">
+                That is {moveConfirmTotal} learners — more than a quick press should move at once. Look again before confirming.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  disabled={busy}
+                  onClick={() => void moveToBatch(moveConfirmTotal)}
+                  className="rounded-full bg-rose-600 px-5 py-2 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                >
+                  Yes, move these {moveConfirmTotal} learners
+                </button>
+                <button
+                  onClick={() => setMoveConfirmTotal(null)}
+                  className="rounded-full border border-rose-300 px-5 py-2 text-sm font-semibold text-rose-900"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {sweep && (
             <div className="space-y-3">
               <p className="text-sm text-[var(--foreground)]">
@@ -779,7 +828,7 @@ export default function GraduationPage() {
                   </select>
                   <button
                     disabled={moving || busy}
-                    onClick={moveToBatch}
+                    onClick={() => void moveToBatch()}
                     className="rounded-full bg-[#FF6600] px-5 py-2 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
                   >
                     {moving ? "Moving…" : `Move to ${moveTarget}`}
@@ -801,7 +850,7 @@ export default function GraduationPage() {
                       {reason === "no_label_strong" && (
                         <button
                           disabled={busy}
-                          onClick={adopt}
+                          onClick={() => void adopt()}
                           className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                         >
                           Put these {sweep.counts[reason]} on the {sweep.month} batch
@@ -826,6 +875,29 @@ export default function GraduationPage() {
                 ))}
               </ul>
               {sweep.total === 0 && <p className="text-sm text-[var(--muted)]">Nobody in the database points to a {sweep.month} batch.</p>}
+
+              {adoptConfirmTotal !== null && (
+                <div className="space-y-2 rounded-2xl border border-rose-300 bg-rose-50 p-4">
+                  <p className="text-sm font-bold text-rose-900">
+                    That is {adoptConfirmTotal} learners — more than a quick press should add at once. Look again before confirming.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      disabled={busy}
+                      onClick={() => void adopt(adoptConfirmTotal)}
+                      className="rounded-full bg-rose-600 px-5 py-2 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                    >
+                      Yes, put these {adoptConfirmTotal} learners on {sweep.month}
+                    </button>
+                    <button
+                      onClick={() => setAdoptConfirmTotal(null)}
+                      className="rounded-full border border-rose-300 px-5 py-2 text-sm font-semibold text-rose-900"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -941,8 +1013,13 @@ export default function GraduationPage() {
           {batches.map((batch) => {
             const students = batch.levels.flatMap((level) => level.students);
             const todo = targetsOf(students);
+            const batchKey = `${batch.name}|${batch.label}`;
+            const activeFilter = batchFilter[batchKey] ?? null;
+            const moveStudents = students.filter((s) => s.verdict.state === "ready");
+            const partStudents = students.filter((s) => s.verdict.state === "blocked" && s.verdict.reason === "fees");
+            const rosterStudents = activeFilter === "move" ? moveStudents : activeFilter === "part" ? partStudents : [];
             return (
-              <section key={`${batch.name}|${batch.label}`} className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+              <section key={batchKey} className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
                 <div className="space-y-1">
                   <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Batch</p>
                   <h2 className="text-3xl font-bold text-[var(--foreground)]">{batchTitle(batch)}</h2>
@@ -952,33 +1029,71 @@ export default function GraduationPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={activeFilter === "move"}
+                    onClick={() => todo.move.length > 0 && toggleBatchFilter(batchKey, "move")}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && todo.move.length > 0) {
+                        e.preventDefault();
+                        toggleBatchFilter(batchKey, "move");
+                      }
+                    }}
+                    className={`space-y-3 rounded-2xl border bg-emerald-50 p-4 text-left transition ${
+                      todo.move.length > 0 ? "cursor-pointer hover:bg-emerald-100" : ""
+                    } ${activeFilter === "move" ? "border-emerald-500 ring-2 ring-emerald-400" : "border-emerald-300"}`}
+                  >
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Paid in full</p>
                       <p className="text-3xl font-bold text-emerald-900">{todo.move.length}</p>
-                      <p className="text-xs text-emerald-800">Ready to move up to the next level.</p>
+                      <p className="text-xs text-emerald-800">
+                        Ready to move up to the next level.
+                        {todo.move.length > 0 ? ` Tap to ${activeFilter === "move" ? "hide" : "see"} who.` : ""}
+                      </p>
                     </div>
                     <button
                       disabled={busy || todo.move.length === 0}
-                      onClick={() => run(`${batchTitle(batch)} — paid in full`, students, "move")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        run(`${batchTitle(batch)} — paid in full`, students, "move");
+                      }}
                       className="w-full rounded-full bg-[#FF6600] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-40"
                     >
                       {todo.move.length === 0 ? "Nobody has paid in full yet" : `Move up ${todo.move.length} who paid in full`}
                     </button>
                   </div>
 
-                  <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={activeFilter === "part"}
+                    onClick={() => todo.partTotal > 0 && toggleBatchFilter(batchKey, "part")}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && todo.partTotal > 0) {
+                        e.preventDefault();
+                        toggleBatchFilter(batchKey, "part");
+                      }
+                    }}
+                    className={`space-y-3 rounded-2xl border bg-amber-50 p-4 text-left transition ${
+                      todo.partTotal > 0 ? "cursor-pointer hover:bg-amber-100" : ""
+                    } ${activeFilter === "part" ? "border-amber-500 ring-2 ring-amber-400" : "border-amber-300"}`}
+                  >
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700">Part payment</p>
                       <p className="text-3xl font-bold text-amber-900">{todo.partTotal}</p>
                       <p className="text-xs text-amber-800">
                         Not moved. When one of them pays the rest, they join &ldquo;Paid in full&rdquo; on their own.
                         {todo.alreadyInvited > 0 ? ` ${todo.alreadyInvited} already invited.` : ""}
+                        {todo.partTotal > 0 ? ` Tap to ${activeFilter === "part" ? "hide" : "see"} who.` : ""}
                       </p>
                     </div>
                     <button
                       disabled={busy || todo.invite.length === 0}
-                      onClick={() => run(`${batchTitle(batch)} — part payment`, students, "invite")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        run(`${batchTitle(batch)} — part payment`, students, "invite");
+                      }}
                       className="w-full rounded-full border border-amber-400 bg-white px-5 py-3 text-sm font-bold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:opacity-40"
                     >
                       {todo.partTotal === 0
@@ -989,6 +1104,37 @@ export default function GraduationPage() {
                     </button>
                   </div>
                 </div>
+
+                {activeFilter && rosterStudents.length > 0 && (
+                  <ul
+                    className={`divide-y rounded-2xl border text-sm ${
+                      activeFilter === "move"
+                        ? "divide-emerald-200 border-emerald-300 bg-emerald-50"
+                        : "divide-amber-200 border-amber-300 bg-amber-50"
+                    }`}
+                  >
+                    {[...rosterStudents]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((student) => (
+                        <li key={student.studentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                          <span>
+                            <Link href={`/admin/students/${student.studentId}`} className="font-medium text-[var(--foreground)] hover:underline">
+                              {student.name}
+                            </Link>
+                            <span className="ml-2 text-xs text-[var(--muted)]">{student.sitting}</span>
+                          </span>
+                          {activeFilter === "move" ? (
+                            <span className="text-xs font-semibold text-emerald-700">Paid {money(student.paid)}</span>
+                          ) : (
+                            <span className="text-xs font-semibold text-amber-800">
+                              {student.offered ? "Invited — " : ""}
+                              Paid {money(student.paid)} · {money(student.balance)} to go
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                  </ul>
+                )}
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   {Object.entries(
