@@ -3,7 +3,12 @@ import { NextResponse } from "next/server";
 
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { calculateStreak, deriveBadges, summarizeGamification } from "@/lib/gamification";
+import {
+  calculateStreak,
+  deriveBadges,
+  gradeRewardXp,
+  summarizeGamification,
+} from "@/lib/gamification";
 import { countCompletedStoryEpisodes } from "@/lib/story-progress";
 
 /**
@@ -30,7 +35,7 @@ export async function GET() {
       examReadiness: true,
       createdAt: true,
       attendances: { select: { date: true, status: true, present: true } },
-      grades: { select: { score: true } },
+      grades: { select: { score: true, feedback: true } },
       completions: { select: { status: true } },
       assignmentSubmissions: { select: { id: true } },
       examRegistrations: { select: { id: true } },
@@ -73,16 +78,21 @@ export async function GET() {
   const sessionsAttended = presentDays.length;
   const streak = calculateStreak(presentDays.map((record) => record.date));
   const completedLessons = student.completions.filter((c) => c.status === "completed").length;
+  // The legacy lesson submission endpoint creates a temporary zero-score Grade
+  // while work is waiting for review. It is not a result and earns no grade XP.
+  const finalizedGrades = student.grades.filter((grade) => grade.feedback !== "Pending lecturer review");
   const averageGrade =
-    student.grades.length > 0
-      ? Math.round(student.grades.reduce((sum, g) => sum + g.score, 0) / student.grades.length)
+    finalizedGrades.length > 0
+      ? Math.round(finalizedGrades.reduce((sum, g) => sum + g.score, 0) / finalizedGrades.length)
       : null;
+  const gradeXp = finalizedGrades.reduce((sum, grade) => sum + gradeRewardXp(grade.score), 0);
 
   const summary = summarizeGamification({
     completedLessons,
     streak,
     examReadiness: student.examReadiness ?? 0,
     averageGrade,
+    gradeXp,
     submissions: student.assignmentSubmissions.length,
     sessionsAttended,
     missionsCompleted,
@@ -95,6 +105,8 @@ export async function GET() {
     sessionsAttended,
     submissions: student.assignmentSubmissions.length,
     averageGrade,
+    grades: finalizedGrades.length,
+    gradeXp,
     streak,
     examsRegistered: student.examRegistrations.length,
     level: student.level,

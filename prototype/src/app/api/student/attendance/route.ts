@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { ATTENDANCE_XP_PER_SESSION, calculateAttendanceStreak } from "@/lib/gamification";
 
 export async function GET() {
   try {
@@ -36,6 +37,10 @@ export async function GET() {
       absent: student.attendances.filter((a) => a.status === "absent").length,
       late: student.attendances.filter((a) => a.status === "late").length,
       excused: student.attendances.filter((a) => a.status === "excused").length,
+      streak: calculateAttendanceStreak(student.attendances),
+      attendanceXp:
+        student.attendances.filter((a) => a.status === "present" || a.status === "late").length *
+        ATTENDANCE_XP_PER_SESSION,
     };
 
     const records = student.attendances.map((a) => ({

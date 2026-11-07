@@ -2,9 +2,11 @@
 import { PencilIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { PublicQuestion } from "@/lib/assignments";
 import { uploadFile, uploadErrorMessage } from "@/lib/upload";
+import { celebrateLessonComplete } from "@/components/LessonCompleteCelebration";
 
 /**
  * Assignments for a student: documents to hand in, and timed quizzes.
@@ -16,8 +18,12 @@ import { uploadFile, uploadErrorMessage } from "@/lib/upload";
  */
 
 type Submission = {
+  id: string;
   submittedAt: string | null;
   score: number | null;
+  scoreXp: number | null;
+  markedAt: string | null;
+  markedByName: string | null;
   /** True while a written answer is still with the tutor. */
   needsReview?: boolean;
   feedback: string | null;
@@ -74,8 +80,11 @@ function formatRemaining(ms: number) {
 }
 
 export default function AssignmentsPanel() {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const wantedId = searchParams.get("id") || searchParams.get("assignmentId");
+  const resultId = searchParams.get("result");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -89,6 +98,8 @@ export default function AssignmentsPanel() {
   const [docText, setDocText] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const submittingRef = useRef(false);
+  const celebratedResultRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -106,9 +117,24 @@ export default function AssignmentsPanel() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Guards against the auto-submit firing twice as the clock crosses zero.
-  const submittingRef = useRef(false);
+  useEffect(() => {
+    if (!resultId || loading || celebratedResultRef.current === resultId) return;
+    const assignment = assignments.find((row) => row.submission?.id === resultId);
+    const submission = assignment?.submission;
+    if (!assignment || !submission || submission.score === null) return;
 
+    celebratedResultRef.current = resultId;
+    const xpEarned = submission.scoreXp ?? 0;
+    celebrateLessonComplete({
+      title: "Your work has been graded!",
+      message: `${assignment.title}: ${submission.score}/100${submission.markedByName ? `, marked by ${submission.markedByName}` : ""}. You earned ${xpEarned} XP on your German journey.`,
+      xpEarned,
+    });
+    void queryClient.invalidateQueries({ queryKey: ["student", "gamification"] });
+    router.replace("/assignment", { scroll: false });
+  }, [assignments, loading, queryClient, resultId, router]);
+
+  // Guards against the auto-submit firing twice as the clock crosses zero.
   const submit = useCallback(async (auto = false) => {
     if (!active || submittingRef.current) return;
     submittingRef.current = true;
@@ -149,6 +175,15 @@ export default function AssignmentsPanel() {
       setDocText("");
       setDocFile(null);
       await load();
+      if (typeof data.score === "number") {
+        const xpEarned = typeof data.scoreXp === "number" ? data.scoreXp : 0;
+        celebrateLessonComplete({
+          title: "Quiz complete!",
+          message: `${active.title}: ${data.score}/100. You earned ${xpEarned} XP on your German journey.`,
+          xpEarned,
+        });
+        void queryClient.invalidateQueries({ queryKey: ["student", "gamification"] });
+      }
       if (auto) setError("Time ran out — your answers were submitted automatically.");
     } catch (e) {
       setUploading(false);
@@ -157,7 +192,7 @@ export default function AssignmentsPanel() {
       submittingRef.current = false;
       setBusy(false);
     }
-  }, [active, answers, docText, docFile, load]);
+  }, [active, answers, docText, docFile, load, queryClient]);
 
   // Tick the countdown and auto-submit at zero.
   useEffect(() => {
@@ -495,7 +530,10 @@ export default function AssignmentsPanel() {
                     a.submission?.score !== null && a.submission?.score !== undefined ? (
                       <>
                         <p className="text-2xl font-bold">{a.submission.score}</p>
-                        <p className="text-[11px] text-[var(--muted)]">score</p>
+                        <p className="text-[11px] text-[var(--muted)]">out of 100</p>
+                        <p className="mt-1 text-[11px] font-semibold text-emerald-700">
+                          +{a.submission.scoreXp ?? 0} XP
+                        </p>
                       </>
                     ) : (
                       /* A written answer is with the tutor; a document is
@@ -535,6 +573,13 @@ export default function AssignmentsPanel() {
               {done && a.submission?.feedback && (
                 <p className="mt-3 rounded-2xl bg-[var(--surface-alt)] p-3 text-sm text-[var(--muted)]">
                   {a.submission.feedback}
+                </p>
+              )}
+              {done && a.submission?.score !== null && a.submission?.score !== undefined && (
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  {a.submission.markedByName
+                    ? `Marked by ${a.submission.markedByName}`
+                    : a.type === "quiz" ? "Auto-marked quiz" : "Tutor mark"}
                 </p>
               )}
             </div>

@@ -14,6 +14,7 @@ import {
 import { assignmentVisibleToWhere } from "@/lib/student-assignments";
 import { resolveOnlineBranchId } from "@/lib/online-branch-server";
 import { attributeTutorAction } from "@/lib/tutor-attribution";
+import { gradeRewardXp } from "@/lib/gamification";
 
 /**
  * A student's assignments: documents to hand in and timed quizzes.
@@ -64,6 +65,15 @@ export async function GET() {
     },
   });
 
+  const markerIds = [...new Set(
+    assignments.flatMap((assignment) =>
+      assignment.submissions.map((submission) => submission.markedById).filter((id): id is string => Boolean(id)),
+    ),
+  )];
+  const markers = markerIds.length
+    ? await prisma.user.findMany({ where: { id: { in: markerIds } }, select: { id: true, name: true } })
+    : [];
+  const markerNames = new Map(markers.map((marker) => [marker.id, marker.name]));
   const now = new Date();
 
   return NextResponse.json({
@@ -109,9 +119,13 @@ export async function GET() {
         tutorRole,
         submission: mine
           ? {
+              id: mine.id,
               submittedAt: mine.submittedAt,
               score: mine.score,
+              scoreXp: mine.score === null ? null : gradeRewardXp(mine.score),
               feedback: mine.feedback,
+              markedAt: mine.markedAt,
+              markedByName: mine.markedById ? markerNames.get(mine.markedById) ?? null : null,
               // So the portal can say "waiting to be marked" rather than
               // showing a blank where a result should be.
               needsReview: mine.needsReview,
@@ -248,44 +262,44 @@ export async function POST(req: NextRequest) {
         needsReview = true;
       }
 
-      const saved = await prisma.assignmentSubmission.upsert({
-        where: { assignmentId_studentId: { assignmentId, studentId: student.id } },
-        create: {
-          assignmentId,
-          studentId: student.id,
-          answers: answers ?? undefined,
-          text: typeof text === "string" ? text : undefined,
-          filePath: typeof filePath === "string" ? filePath : undefined,
-          fileName: typeof fileName === "string" ? fileName : undefined,
-          score,
-          feedback,
-          questionScores,
-          needsReview,
-          startedAt: existing?.startedAt ?? now,
-          submittedAt: now,
-        },
-        update: {
-          answers: answers ?? undefined,
-          text: typeof text === "string" ? text : undefined,
-          filePath: typeof filePath === "string" ? filePath : undefined,
-          fileName: typeof fileName === "string" ? fileName : undefined,
-          score,
-          feedback,
-          questionScores,
-          needsReview,
-          submittedAt: now,
-          ...(isResubmission ? { editCount: { increment: 1 } } : {}),
-        },
-      });
-
       // Auto-graded quizzes become a Grade so they appear alongside exam
       // results on the student's results page. A paper still waiting on a
       // human is deliberately not recorded yet — the marking route writes it
-      // once the score is final, so a provisional mark never reaches the
-      // transcript or a certificate.
-      if (assignment.type === "quiz" && score !== null) {
-        try {
-          await prisma.grade.create({
+      // once the score is final. Keep both records atomic because the Grade is
+      // also what awards XP for a completed result.
+      const saved = await prisma.$transaction(async (tx) => {
+        const submission = await tx.assignmentSubmission.upsert({
+          where: { assignmentId_studentId: { assignmentId, studentId: student.id } },
+          create: {
+            assignmentId,
+            studentId: student.id,
+            answers: answers ?? undefined,
+            text: typeof text === "string" ? text : undefined,
+            filePath: typeof filePath === "string" ? filePath : undefined,
+            fileName: typeof fileName === "string" ? fileName : undefined,
+            score,
+            feedback,
+            questionScores,
+            needsReview,
+            startedAt: existing?.startedAt ?? now,
+            submittedAt: now,
+          },
+          update: {
+            answers: answers ?? undefined,
+            text: typeof text === "string" ? text : undefined,
+            filePath: typeof filePath === "string" ? filePath : undefined,
+            fileName: typeof fileName === "string" ? fileName : undefined,
+            score,
+            feedback,
+            questionScores,
+            needsReview,
+            submittedAt: now,
+            ...(isResubmission ? { editCount: { increment: 1 } } : {}),
+          },
+        });
+
+        if (assignment.type === "quiz" && score !== null) {
+          await tx.grade.create({
             data: {
               studentId: student.id,
               type: "quiz",
@@ -293,10 +307,9 @@ export async function POST(req: NextRequest) {
               feedback,
             },
           });
-        } catch (err) {
-          console.warn("Could not record quiz grade:", err);
         }
-      }
+        return submission;
+      });
 
       /**
        * Tell the tutor who set it — not the whole school. Only possible when
@@ -327,6 +340,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         submittedAt: saved.submittedAt,
         score: saved.score,
+        scoreXp: saved.score === null ? null : gradeRewardXp(saved.score),
         feedback: saved.feedback,
       });
     }

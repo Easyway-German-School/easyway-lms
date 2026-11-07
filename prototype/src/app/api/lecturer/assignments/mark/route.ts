@@ -11,6 +11,7 @@ import {
   finaliseScore,
   type QuestionResult,
 } from "@/lib/assignments";
+import { gradeRewardXp } from "@/lib/gamification";
 
 /**
  * The marking queue for written answers.
@@ -107,9 +108,8 @@ export async function GET(req: NextRequest) {
   const pending = await prisma.assignmentSubmission.findMany({
     where: {
       submittedAt: { not: null },
-      // A direct link to one paper shows it whatever its state — the
-      // notification that sent the tutor here already knows it needs marking.
-      ...(submissionId ? { id: submissionId } : { needsReview: true }),
+      needsReview: true,
+      ...(submissionId ? { id: submissionId } : {}),
       ...(assignmentId ? { assignmentId } : {}),
       ...(studentWhere ? { student: { ...studentWhere, status: "active" } } : {}),
     },
@@ -305,35 +305,35 @@ export async function POST(req: NextRequest) {
       finalFeedback = typeof feedback === "string" && feedback.trim() ? feedback.trim() : `${finalScore} / 100.`;
     }
 
-    const updated = await prisma.assignmentSubmission.update({
-      where: { id: submission.id },
-      data: {
-        score: finalScore,
-        ...(questionScoresUpdate ? { questionScores: questionScoresUpdate } : {}),
-        needsReview: false,
-        markedById: auth.userId,
-        markedAt: new Date(),
-        feedback: finalFeedback,
-      },
-    });
+    // Keep the finalized paper and transcript grade in one commit: the grade
+    // is also the source of the student's XP reward.
+    const updated = await prisma.$transaction(async (tx) => {
+      const marked = await tx.assignmentSubmission.update({
+        where: { id: submission.id },
+        data: {
+          score: finalScore,
+          ...(questionScoresUpdate ? { questionScores: questionScoresUpdate } : {}),
+          needsReview: false,
+          markedById: auth.userId,
+          markedAt: new Date(),
+          feedback: finalFeedback,
+        },
+      });
 
-    // Only now does it reach the results page — the same rule the submit
-    // route follows, so a provisional mark never becomes a transcript entry.
-    try {
       await prisma.grade.create({
         data: {
           studentId: submission.studentId,
           type: isQuiz ? "quiz" : "assignment",
           score: finalScore,
-          feedback: updated.feedback,
+          feedback: marked.feedback,
           lecturerId: auth.lecturerId,
         },
       });
-      if (isQuiz) {
-        void recordSkillOutcome({ studentId: submission.studentId, skill: "grammar", score: finalScore });
-      }
-    } catch (error) {
-      console.warn("Could not record marked grade:", error);
+      return marked;
+    });
+
+    if (isQuiz) {
+      void recordSkillOutcome({ studentId: submission.studentId, skill: "grammar", score: finalScore });
     }
 
     // The one grading path that used to leave the student finding out by
@@ -346,12 +346,12 @@ export async function POST(req: NextRequest) {
       severity: "info",
       title: "Your submission has been marked",
       message: `${tutorPhrase(attribution)} finished marking your work. Open Assignments to see what they said.`,
-      link: `/assignment?id=${submission.assignmentId}`,
+      link: `/assignment?result=${submission.id}`,
       dedupeKey: `submission-marked:${submission.id}`,
       push: true,
     }).catch((error) => console.error("Marking notification failed", error));
 
-    return NextResponse.json({ score: finalScore });
+    return NextResponse.json({ score: finalScore, xpAwarded: gradeRewardXp(finalScore) });
   } catch (error) {
     console.error("Marking failed:", error);
     return NextResponse.json({ error: "Unable to save the marks" }, { status: 500 });
