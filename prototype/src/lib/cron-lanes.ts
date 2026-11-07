@@ -79,6 +79,7 @@ export const CRON_PLAN: TickPlan = {
       jobBudgetMs: 45_000,
       jobs: [
         "seat-nudges",
+        "hybrid-session-policy-notice",
         "auto-graduation",
         "auto-level-progression",
         "auto-next-level",

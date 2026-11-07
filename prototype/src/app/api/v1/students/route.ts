@@ -7,6 +7,7 @@ import { apiError, apiOk, apiPage, parseLimit } from "@/lib/api/response";
 import { publicStudent, studentSelect } from "@/lib/api/shapes";
 import { assignStudentCode } from "@/lib/student-code";
 import { createResetToken } from "@/lib/password-reset";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +92,9 @@ export async function POST(request: NextRequest) {
   if (!DELIVERY_MODES.includes(deliveryMode)) {
     return apiError("invalid_request", `\`deliveryMode\` must be one of: ${DELIVERY_MODES.join(", ")}.`);
   }
+  if (deliveryMode === "hybrid" && !HYBRID_SESSION_SLOTS.some((slot) => slot === sessionSlot)) {
+    return apiError("invalid_request", "Hybrid classes use one shared session: choose morning or evening for both.");
+  }
   const pathway = body?.pathway ? String(body.pathway).trim() : undefined;
 
   // Resolve the branch by id or by name, and only within this tenant — the
@@ -131,6 +135,7 @@ export async function POST(request: NextRequest) {
         sessionSlot,
         classType,
         deliveryMode,
+        ...(deliveryMode === "hybrid" ? { hybridOnlineSlot: sessionSlot } : {}),
         ...(pathway ? { pathway } : {}),
         status: "active",
       },

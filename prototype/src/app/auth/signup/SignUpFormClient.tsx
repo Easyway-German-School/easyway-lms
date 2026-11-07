@@ -1007,16 +1007,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                 </div>
               ) : null}
 
-              {/* Hybrid students pick ONE concrete pairing rather than a vague
-                  "hybrid" mode — see lib/hybrid-combo.ts. This decides both
-                  their real timetable and which two tutors (campus + online)
-                  they get assigned automatically. */}
+              {/* Hybrid students attend one matching session in both modes. */}
               {!isOnline && deliveryMode === "hybrid" && selectedBranch ? (
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <p className="text-sm font-semibold text-[var(--foreground)]">Which sittings will you attend?</p>
                   <p className="mt-1 text-xs text-[var(--muted)]">
-                    Pick the campus sitting you will attend in person, paired with the online sitting you will join
-                    over video on other days.
+                    Hybrid students attend one class time, either on campus or online. Choose the same morning or
+                    evening session for both.
                   </p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     {HYBRID_COMBOS.filter((combo) => {

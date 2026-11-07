@@ -19,6 +19,8 @@ import {
 } from "@/lib/next-level-journey";
 import { loadJourney, loadJourneyStudent, opensFor, seatAndOwed } from "@/lib/next-level-journey-server";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
+import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 
 /**
  * The office's manual path: Students → Graduate.
@@ -250,6 +252,21 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
   }
 
   const details = cleanDetails(input.details);
+  const desiredDeliveryMode = details.deliveryMode ?? normaliseDeliveryMode(before.deliveryMode);
+  const desiredSessionSlot = details.sessionSlot ?? before.sessionSlot;
+  const hybridScheduleChanged =
+    desiredDeliveryMode === "hybrid" &&
+    (desiredDeliveryMode !== normaliseDeliveryMode(before.deliveryMode) ||
+      desiredSessionSlot !== before.sessionSlot);
+  if (
+    hybridScheduleChanged &&
+    !HYBRID_SESSION_SLOTS.some((slot) => slot === desiredSessionSlot)
+  ) {
+    return {
+      ok: false,
+      reason: "Hybrid classes use one shared session: choose morning or evening for both.",
+    };
+  }
   let certificate: "issued" | "pending" | "not-applicable" = "not-applicable";
   let moved = false;
 
@@ -296,6 +313,7 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
     data: {
       ...(details.sessionSlot ? { sessionSlot: details.sessionSlot } : {}),
       ...(details.deliveryMode ? { deliveryMode: details.deliveryMode } : {}),
+      ...(hybridScheduleChanged ? { hybridOnlineSlot: desiredSessionSlot } : {}),
       admission: {
         ...admission,
         ...(details.phone ? { phone: details.phone } : {}),
@@ -304,6 +322,24 @@ export async function applyMoveUp(studentId: string, input: ApplyMoveUpInput, no
       } as never,
     },
   });
+
+  if (hybridScheduleChanged && fresh.branchId) {
+    try {
+      await autoAssignTutor({
+        studentId,
+        studentName: fresh.user.name || fresh.user.email,
+        tenantId: fresh.tenantId,
+        branchId: fresh.branchId,
+        level: target,
+        deliveryMode: "hybrid",
+        sessionSlot: desiredSessionSlot,
+        hybridOnlineSlot: desiredSessionSlot,
+        admission: admission,
+      });
+    } catch (assignError) {
+      console.error("Hybrid tutor reassignment failed on next-level change", { studentId, assignError });
+    }
+  }
 
   await prisma.journeyEvent
     .create({

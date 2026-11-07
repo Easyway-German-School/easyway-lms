@@ -1,7 +1,6 @@
 /**
- * Every hybrid combo a student can pick at signup: which physical sitting
- * they attend on campus, paired with which online sitting they drop into
- * over video.
+ * The hybrid sittings a student can pick: one class time, attended on campus
+ * and over video. Hybrid is one shared class, not two separately timed classes.
  *
  * "Hybrid" used to be a single vague mode — registered at a campus, and
  * somehow also allowed to drop into any online sitting of their level. That
@@ -10,26 +9,16 @@
  * student to one concrete online sitting, so nothing could match them to one
  * concrete online tutor either.
  *
- * A hybrid student now picks ONE of these named combos, which is what fixes
- * that — `Student.sessionSlot` stores the physical half (same column every
- * physical/online-only student already uses), `hybridOnlineSlot` stores the
- * online half. What was fixed was picking a CONCRETE pair, not which pairs
- * are offered: this is every physical sitting paired with every online
- * sitting the school runs (physical has four; online only ever runs morning
- * and evening — see session-times.ts), so "physical morning + online
- * evening" and the rest are all real options here, not just the three the
- * office happened to name first. The signup form and the retroactive
- * "pick your sittings" popup both then filter this down further to whatever
- * is actually open for the student's level (see isCellEnabled in
- * school-settings.ts) — this list is every pairing that could exist, not
- * every pairing that does right now.
+ * New hybrid registrations can choose only matching morning/morning or
+ * evening/evening slots. Existing student records are not changed here.
+ * The signup form and the retroactive "pick your sittings" popup filter these
+ * choices further to whatever is open for the student's level.
  *
  * No prisma import: the signup form and the Becca popup both need this in
  * the browser.
  */
 
-const PHYSICAL_SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
-const ONLINE_SLOTS = ["morning", "evening"] as const;
+const HYBRID_SLOTS = ["morning", "evening"] as const;
 
 export type HybridComboId = string;
 
@@ -44,14 +33,12 @@ function titleCase(slot: string): string {
   return slot.charAt(0).toUpperCase() + slot.slice(1);
 }
 
-const PAIRED_COMBOS: readonly HybridCombo[] = PHYSICAL_SLOTS.flatMap((physicalSlot) =>
-  ONLINE_SLOTS.map((onlineSlot) => ({
-    id: `physical-${physicalSlot}_online-${onlineSlot}`,
-    physicalSlot,
-    onlineSlot,
-    label: `Physical ${titleCase(physicalSlot)} + Online ${titleCase(onlineSlot)}`,
-  })),
-);
+const PAIRED_COMBOS: readonly HybridCombo[] = HYBRID_SLOTS.map((slot) => ({
+  id: `physical-${slot}_online-${slot}`,
+  physicalSlot: slot,
+  onlineSlot: slot,
+  label: `Physical ${titleCase(slot)} + Online ${titleCase(slot)}`,
+}));
 
 export const HYBRID_COMBOS: readonly HybridCombo[] = [
   ...PAIRED_COMBOS,
@@ -64,6 +51,7 @@ export const HYBRID_COMBOS: readonly HybridCombo[] = [
 ];
 
 export const HYBRID_COMBO_IDS = HYBRID_COMBOS.map((combo) => combo.id) as HybridComboId[];
+export const HYBRID_SESSION_SLOTS = HYBRID_SLOTS;
 
 export function findHybridCombo(id: unknown): HybridCombo | null {
   const key = String(id ?? "").trim();

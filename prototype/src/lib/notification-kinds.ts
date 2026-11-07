@@ -105,6 +105,8 @@ export const KIND = {
   streakAtRisk: "streak.at_risk",
   /** The transcript + AI notes for a class recording finished generating — see src/lib/class-transcription.ts. */
   classNotesReady: "class.notes_ready",
+  /** One-time Becca notice that new hybrid placements pair both attendance modes at the same session time. */
+  hybridSessionPolicy: "hybrid.session_policy",
   /** "How was that class?" — sent to everyone who was in a class when its tutor ends it. See src/lib/live-feedback.ts. */
   liveFeedbackAsk: "live_class.feedback_ask",
   /** A class recording is within ~2 days of leaving the student's shelf — download it in the app first. See src/lib/recording-expiry-nudge.ts. */

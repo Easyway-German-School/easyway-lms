@@ -12,6 +12,7 @@ import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -286,6 +287,18 @@ export async function POST(request: NextRequest) {
         placeholderEmail: placeholderEmailUsed || undefined,
       };
 
+      if (
+        deliveryMode === "hybrid" &&
+        !HYBRID_SESSION_SLOTS.some((slot) => slot === sessionSlot)
+      ) {
+        results.push({
+          ...base,
+          status: "error",
+          note: "Hybrid classes use one shared session: choose morning or evening for both.",
+        });
+        continue;
+      }
+
       if (!name) {
         results.push({ ...base, status: "error", note: "A name is required" });
         continue;
@@ -471,6 +484,7 @@ export async function POST(request: NextRequest) {
                 level,
                 sessionSlot,
                 deliveryMode,
+                ...(deliveryMode === "hybrid" ? { hybridOnlineSlot: sessionSlot } : {}),
                 branchId: branch?.id ?? null,
                 pathway: str(row, "pathway", "program") || "Language training",
                 // The batch month is what the timetable generator and the
