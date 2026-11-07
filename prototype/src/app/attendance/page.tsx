@@ -25,6 +25,8 @@ export default function AttendancePage() {
     absent: 0,
     late: 0,
     excused: 0,
+    streak: 0,
+    attendanceXp: 0,
   });
 
   useEffect(() => {
@@ -109,6 +111,21 @@ export default function AttendancePage() {
             <div className="rounded-3xl border border-orange-500/20 bg-orange-500/5 p-6">
               <p className="text-sm text-orange-700">Excused</p>
               <p className="mt-2 text-3xl font-bold text-orange-600">{stats.excused}</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-5 rounded-3xl border border-amber-300/40 bg-gradient-to-r from-amber-50 to-orange-50 p-6 text-amber-950 shadow-sm">
+            <div className="flex items-center gap-4">
+              <span aria-hidden="true" className="grid h-14 w-14 place-items-center rounded-2xl bg-white text-3xl shadow-sm">🔥</span>
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-amber-800">Class streak</p>
+                <p className="mt-1 text-2xl font-bold">{stats.streak} session{stats.streak === 1 ? "" : "s"} in a row</p>
+                <p className="mt-1 text-sm text-amber-900/75">Excused sessions do not break your run. Keep showing up for your German journey.</p>
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white/80 px-5 py-3 text-center shadow-sm">
+              <p className="text-2xl font-bold text-orange-700">+{stats.attendanceXp} XP</p>
+              <p className="text-xs font-medium text-amber-900/75">earned by attending · 15 per session</p>
             </div>
           </div>
 
