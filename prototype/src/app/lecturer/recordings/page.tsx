@@ -53,10 +53,15 @@ export default function LecturerRecordingsPage() {
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), 10_000);
+    const refresh = () => {
+      if (!document.hidden) void load();
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, []);
 
