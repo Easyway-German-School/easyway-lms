@@ -18,7 +18,7 @@ describe("learning journey rewards", () => {
   });
 
   it("keeps attendance rewards aligned with the shared XP formula", () => {
-    expect(calculateXp({ sessionsAttended: 2 })).toBe(XP_FLOOR + 2 * ATTENDANCE_XP_PER_SESSION);
+    expect(calculateXp({ sessionsAttended: 14 })).toBe(14 * ATTENDANCE_XP_PER_SESSION);
   });
 
   it("counts consecutive attended sessions and ignores excused sessions", () => {

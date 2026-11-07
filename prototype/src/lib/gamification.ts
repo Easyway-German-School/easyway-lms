@@ -28,7 +28,7 @@ export function gradeRewardXp(score: number): number {
   return GRADE_XP_BASE + Math.round(boundedScore / 10);
 }
 
-/** A starting XP grant; activity points build on top instead of disappearing below a floor. */
+/** Nobody starts on an empty bar; showing 0 XP on day one is discouraging. */
 export const XP_FLOOR = 180;
 
 export type XpInputs = {
@@ -125,7 +125,7 @@ export function calculateXp(inputs: XpInputs): number {
     (inputs.storyEpisodesCompleted ?? 0) * STORY_EPISODE_XP +
     gradeBonus;
 
-  return XP_FLOOR + raw + (inputs.gradeXp ?? 0);
+  return Math.max(XP_FLOOR, raw) + (inputs.gradeXp ?? 0);
 }
 
 export function summarizeGamification(inputs: XpInputs): GamificationSummary {
