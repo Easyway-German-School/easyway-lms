@@ -211,12 +211,15 @@ export default function NextLevelJourney() {
   const [burst, setBurst] = useState(0);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [form, setForm] = useState({ phone: "", parentPhone: "", sessionSlot: "morning", deliveryMode: "physical", batch: "", note: "" });
-  const sessionOptions =
-    form.deliveryMode === "hybrid" && !HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
-      ? [...HYBRID_SESSION_SLOTS, form.sessionSlot]
-      : form.deliveryMode === "hybrid"
-        ? [...HYBRID_SESSION_SLOTS]
-        : SLOTS;
+  const sessionOptions: readonly (readonly [string, string])[] =
+    form.deliveryMode === "hybrid"
+      ? [
+          ...HYBRID_SESSION_SLOTS.map((slot) => [slot, slot[0].toUpperCase() + slot.slice(1)] as const),
+          ...(HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
+            ? []
+            : [[form.sessionSlot, form.sessionSlot[0].toUpperCase() + form.sessionSlot.slice(1)] as const]),
+        ]
+      : SLOTS;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [held, setHeld] = useState(false);

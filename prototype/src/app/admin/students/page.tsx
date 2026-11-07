@@ -1791,7 +1791,9 @@ function StudentsRoster() {
               </label>
               {newDeliveryMode === "hybrid" && (
                 <p className="text-xs text-[var(--muted)]">
-                  Online session: {newHybridOnlineSlot ? SLOT_DEFAULTS[newHybridOnlineSlot]?.label ?? newHybridOnlineSlot : "not set"}.
+                  Online session: {newHybridOnlineSlot
+                    ? SLOT_DEFAULTS[newHybridOnlineSlot as keyof typeof SLOT_DEFAULTS]?.label ?? newHybridOnlineSlot
+                    : "not set"}.
                   Changing the session above pairs both classes at that time. Existing schedules are left unchanged unless edited.
                 </p>
               )}
