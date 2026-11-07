@@ -2,9 +2,7 @@
 
 ## The Real Problem
 
-Recordings are **being skipped completely** because your Vercel environment variables are incomplete or missing. The system has a "graceful degradation" design — if recording isn't configured, it doesn't crash the classroom, it just silently doesn't record.
-
-**No error. No warning. No recording.**
+Missing recording configuration can prevent a capture from starting without interrupting the class. The recorder status page now reports the configuration and shows every live room's recording state, so check that before assuming a class was saved.
 
 ---
 
@@ -30,6 +28,14 @@ Recordings are **being skipped completely** because your Vercel environment vari
 ```
 
 **If Step 3 returns null, everything after it is cancelled.**
+
+## Live rooms, private classes, and unplanned classes
+
+The tutor's live heartbeat retries a recording start for every live room, including private bookings. This is the second chance if the first attempt ran before LiveKit had finished opening the room. Private recordings retain their booking id so they remain visible only to the booked student.
+
+Open **Admin → Class recording** to see all live rooms and whether each has an active recording. If a live room is not recording, use **Start recording** on that room; the action targets that exact class and reports an error if it cannot start.
+
+The separate **Extra capacity for unplanned classes** control only asks the scheduler to reserve more capacity. It does not identify a room or start its recording. Use the live-room list to start an unplanned class, and use the capacity control when several classes need recorder capacity at once.
 
 ---
 
@@ -302,4 +308,3 @@ This tells them:
 | `RECORDING_S3_*` are missing | Recording is skipped silently, no error, nothing in Video Library ❌ |
 | File in S3 but no Material row | Webhook didn't arrive; run `/api/live/recording/reconcile` ❌ |
 | Material row exists but students can't play | `RECORDING_PUBLIC_BASE_URL` is wrong or missing 🎥 |
-

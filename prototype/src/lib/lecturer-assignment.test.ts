@@ -151,14 +151,37 @@ describe("belongsToLecturer with co-tutors", () => {
     ],
   });
 
-  it("a co-tutored student is IN even when their intake month does not match", () => {
+  it("a named student does not stay on a tutor's roster after moving outside the assigned intake", () => {
     const wrongMonthButCoTutor = {
       coTutors: [{ lecturerId: "lec-1" }],
+      level: "A1",
       admission: { batch: "January" },
     };
-    expect(belongsToLecturer(twoGroups, "lec-1", wrongMonthButCoTutor)).toBe(true);
+    expect(belongsToLecturer(twoGroups, "lec-1", wrongMonthButCoTutor)).toBe(false);
     expect(
-      belongsToLecturer(twoGroups, "lec-1", { coTutorIds: ["lec-2", "lec-1"], admission: { batch: "January" } }),
+      belongsToLecturer(twoGroups, "lec-1", { coTutorIds: ["lec-2", "lec-1"], level: "B2", admission: { batch: "January" } }),
+    ).toBe(false);
+  });
+
+  it("a named student can differ by branch or sitting while their current level and intake still match", () => {
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", {
+        tutorId: "lec-1",
+        branchId: "another-branch",
+        level: "A1",
+        sessionSlot: "morning",
+        admission: { batch: "September" },
+      }),
+    ).toBe(true);
+  });
+
+  it("a directly named student remains visible when the tutor has no cohort assignment", () => {
+    expect(
+      belongsToLecturer(readAssignment({}), "lec-1", {
+        tutorId: "lec-1",
+        level: "B2",
+        admission: { batch: "January" },
+      }),
     ).toBe(true);
   });
 
@@ -218,15 +241,15 @@ describe("per-group batch", () => {
     expect(belongsToLecturer(twoGroups, "lec-1", augB2)).toBe(true);
   });
 
-  it("still lets a named student through regardless of month", () => {
+  it("drops a named student after a level and intake move outside the tutor's assigned groups", () => {
     const wrongMonthButNamed = {
       tutorId: "lec-1",
       branchId: "b1",
-      level: "A1",
-      sessionSlot: "afternoon",
-      admission: { batch: "August" },
+      level: "B1",
+      sessionSlot: "morning",
+      admission: { batch: "November" },
     };
-    expect(belongsToLecturer(twoGroups, "lec-1", wrongMonthButNamed)).toBe(true);
+    expect(belongsToLecturer(twoGroups, "lec-1", wrongMonthButNamed)).toBe(false);
   });
 
   it("falls back to the flat union when the row lacks group keys", () => {

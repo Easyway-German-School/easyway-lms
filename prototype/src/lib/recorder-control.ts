@@ -75,7 +75,7 @@ export type ControlRequest = {
   pauseNote?: string;
   addSkipDate?: string;
   removeSkipDate?: string;
-  /** Start room for this many classes for this many hours. null cancels a boost. */
+  /** Reserve extra scheduler capacity for this many classes and hours; it does not start a room. */
   boost?: { classes: number; hours: number } | null;
   spareClasses?: number | null;
   maxServers?: number | null;

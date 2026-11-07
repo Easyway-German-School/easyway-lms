@@ -338,21 +338,28 @@ function TutorField({
 }) {
   const [tutors, setTutors] = useState<Array<{ id: string; name: string }>>([]);
   const [saving, setSaving] = useState(false);
+  const [loadingTutors, setLoadingTutors] = useState(true);
   const [problem, setProblem] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const response = await fetch("/api/admin/lecturers", { cache: "no-store" });
-      if (!response.ok || cancelled) return;
-      const payload = await response.json().catch(() => ({}));
-      if (cancelled) return;
-      setTutors(
-        (payload.lecturers || []).map((tutor: { id: string; user: { name: string | null; email: string } }) => ({
-          id: tutor.id,
-          name: tutor.user.name || tutor.user.email,
-        })),
-      );
+      try {
+        const response = await fetch("/api/admin/students/tutor-options", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Could not load tutors.");
+        if (cancelled) return;
+        setTutors(
+          (payload.lecturers || []).map((tutor: { id: string; user: { name: string | null; email: string } }) => ({
+            id: tutor.id,
+            name: tutor.user.name || tutor.user.email,
+          })),
+        );
+      } catch (error) {
+        if (!cancelled) setProblem(error instanceof Error ? error.message : "Could not load tutors.");
+      } finally {
+        if (!cancelled) setLoadingTutors(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -363,10 +370,10 @@ function TutorField({
     setSaving(true);
     setProblem("");
     try {
-      const response = await fetch("/api/admin/lecturers/students", {
-        method: "POST",
+      const response = await fetch("/api/admin/students", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId, lecturerId: lecturerId || null }),
+        body: JSON.stringify({ studentId, tutorId: lecturerId || null }),
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
@@ -398,7 +405,7 @@ function TutorField({
       <select
         aria-label="Tutor"
         value={current?.id ?? ""}
-        disabled={saving}
+        disabled={saving || loadingTutors}
         onChange={(event) => change(event.target.value)}
         className={`mt-1 w-full rounded-lg border px-2 py-1.5 text-sm font-semibold ${
           current
@@ -473,29 +480,36 @@ function CoTutorsField({
 }) {
   const [tutors, setTutors] = useState<Array<{ id: string; name: string; suggested: boolean }>>([]);
   const [saving, setSaving] = useState(false);
+  const [loadingTutors, setLoadingTutors] = useState(true);
   const [problem, setProblem] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const response = await fetch("/api/admin/lecturers", { cache: "no-store" });
-      if (!response.ok || cancelled) return;
-      const payload = await response.json().catch(() => ({}));
-      if (cancelled) return;
-      setTutors(
-        (payload.lecturers || []).map(
-          (tutor: { id: string; user: { name: string | null; email: string }; assignment: LecturerAssignment }) => ({
-            id: tutor.id,
-            name: tutor.user.name || tutor.user.email,
-            // A rough same-signal-as-the-real-engine hint, not an
-            // authoritative match (that lives server-side in
-            // tutor-auto-assign.ts and runs at signup) — this just orders the
-            // picker so the office is not scanning the whole tutor directory
-            // by hand to find who actually covers this student's online sitting.
-            suggested: suggestsOnlineTutor(tutor.assignment, level, onlineSlot),
-          }),
-        ),
-      );
+      try {
+        const response = await fetch("/api/admin/students/tutor-options", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Could not load tutors.");
+        if (cancelled) return;
+        setTutors(
+          (payload.lecturers || []).map(
+            (tutor: { id: string; user: { name: string | null; email: string }; assignment: LecturerAssignment }) => ({
+              id: tutor.id,
+              name: tutor.user.name || tutor.user.email,
+              // A rough same-signal-as-the-real-engine hint, not an
+              // authoritative match (that lives server-side in
+              // tutor-auto-assign.ts and runs at signup) — this just orders the
+              // picker so the office is not scanning the whole tutor directory
+              // by hand to find who actually covers this student's online sitting.
+              suggested: suggestsOnlineTutor(tutor.assignment, level, onlineSlot),
+            }),
+          ),
+        );
+      } catch (error) {
+        if (!cancelled) setProblem(error instanceof Error ? error.message : "Could not load tutors.");
+      } finally {
+        if (!cancelled) setLoadingTutors(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -550,7 +564,7 @@ function CoTutorsField({
                 <input
                   type="checkbox"
                   checked={checked}
-                  disabled={saving || (atRescueCap && !checked)}
+                  disabled={saving || loadingTutors || (atRescueCap && !checked)}
                   onChange={(event) => void toggle(tutor.id, event.target.checked)}
                 />
                 <span>{tutor.name}</span>
