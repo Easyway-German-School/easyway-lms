@@ -41,6 +41,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withUnscoped } from "@/lib/tenant/context";
 import { CRON_PLAN, TICK_BUDGET_MS, runTick } from "@/lib/cron-lanes";
+import { sendHybridSessionPolicyNotice } from "@/lib/hybrid-session-policy-notice";
 
 export const dynamic = "force-dynamic";
 // The reconcile and retention passes talk to LiveKit and to the bucket, and
@@ -118,7 +119,6 @@ async function handleGET(request: NextRequest) {
   });
 
   register("hybrid-session-policy-notice", async () => {
-    const { sendHybridSessionPolicyNotice } = await import("@/lib/hybrid-session-policy-notice");
     return sendHybridSessionPolicyNotice();
   });
 
