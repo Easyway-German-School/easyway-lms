@@ -32,6 +32,7 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { availableBatchOptions } from "@/lib/intake";
 import { resolveBatchWindow } from "@/lib/batch";
 import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 

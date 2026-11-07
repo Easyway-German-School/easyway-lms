@@ -9,6 +9,8 @@ import { naira } from "@/lib/finance/receivables";
 import { closeOpenEnrolment, openEnrolment } from "@/lib/student-enrolment";
 import { nextPlacement } from "@/lib/graduation";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
+import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 import { issueCertificateForStudent } from "@/lib/certificates";
 
 /**
@@ -245,6 +247,8 @@ export async function promoteStudents(
         sessionSlot: true,
         classType: true,
         deliveryMode: true,
+        hybridOnlineSlot: true,
+        user: { select: { name: true, email: true } },
         tenantId: true,
         createdAt: true,
         classesStartedAt: true,
@@ -259,6 +263,17 @@ export async function promoteStudents(
     const next = nextLevelAfter(student.level);
     if (!next) {
       result.skipped.push({ studentId, reason: `Already at ${student.level}, the top of the ladder` });
+      continue;
+    }
+
+    if (
+      student.deliveryMode === "hybrid" &&
+      !HYBRID_SESSION_SLOTS.some((slot) => slot === student.sessionSlot)
+    ) {
+      result.skipped.push({
+        studentId,
+        reason: "Hybrid classes need a matching morning or evening session before promotion. Update the schedule and retry.",
+      });
       continue;
     }
 
@@ -408,6 +423,7 @@ export async function promoteStudents(
 
     const studentUpdate = {
         level: next,
+        ...(student.deliveryMode === "hybrid" ? { hybridOnlineSlot: student.sessionSlot } : {}),
         admission: {
           ...admission,
           batch: landingMonth,
@@ -488,6 +504,28 @@ export async function promoteStudents(
       });
     } catch (enrolmentError) {
       console.error("Enrolment history update failed on promotion", { studentId, next, enrolmentError });
+    }
+
+    if (
+      student.deliveryMode === "hybrid" &&
+      student.hybridOnlineSlot !== student.sessionSlot &&
+      student.branchId
+    ) {
+      try {
+        await autoAssignTutor({
+          studentId,
+          studentName: student.user.name || student.user.email,
+          tenantId: student.tenantId,
+          branchId: student.branchId,
+          level: next,
+          deliveryMode: "hybrid",
+          sessionSlot: student.sessionSlot,
+          hybridOnlineSlot: student.sessionSlot,
+          admission,
+        });
+      } catch (assignError) {
+        console.error("Hybrid tutor reassignment failed on promotion", { studentId, next, assignError });
+      }
     }
 
     result.promoted.push(studentId);

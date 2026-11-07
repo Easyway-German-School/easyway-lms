@@ -9,6 +9,7 @@ import { ArrowRightIcon, CheckIcon } from "@/components/icons";
 import { ADVANCE_PERKS, naira } from "@/lib/level-advance";
 import { safeJson } from "@/lib/safe-json";
 import type { JourneyPayload } from "@/lib/next-level-journey-server";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 
 /**
  * Becca walks a finished student from "I completed a level" to "my seat in the
@@ -210,6 +211,12 @@ export default function NextLevelJourney() {
   const [burst, setBurst] = useState(0);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [form, setForm] = useState({ phone: "", parentPhone: "", sessionSlot: "morning", deliveryMode: "physical", batch: "", note: "" });
+  const sessionOptions =
+    form.deliveryMode === "hybrid" && !HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
+      ? [...HYBRID_SESSION_SLOTS, form.sessionSlot]
+      : form.deliveryMode === "hybrid"
+        ? [...HYBRID_SESSION_SLOTS]
+        : SLOTS;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [held, setHeld] = useState(false);
@@ -599,11 +606,23 @@ export default function NextLevelJourney() {
                   )}
                   <div>
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Which sitting suits you?</span>
-                    <Pills options={SLOTS} value={form.sessionSlot} onChange={(v) => setForm({ ...form, sessionSlot: v })} />
+                    <Pills options={sessionOptions} value={form.sessionSlot} onChange={(v) => setForm({ ...form, sessionSlot: v })} />
                   </div>
                   <div>
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">How will you attend?</span>
-                    <Pills options={MODES} value={form.deliveryMode} onChange={(v) => setForm({ ...form, deliveryMode: v })} />
+                    <Pills
+                      options={MODES}
+                      value={form.deliveryMode}
+                      onChange={(v) =>
+                        setForm({
+                          ...form,
+                          deliveryMode: v,
+                          ...(v === "hybrid" && !HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
+                            ? { sessionSlot: HYBRID_SESSION_SLOTS[0] }
+                            : {}),
+                        })
+                      }
+                    />
                   </div>
                   <label className="block">
                     <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Anything we should know? (optional)</span>

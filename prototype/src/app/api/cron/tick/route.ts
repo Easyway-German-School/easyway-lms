@@ -117,6 +117,11 @@ async function handleGET(request: NextRequest) {
     return runSeatNudges();
   });
 
+  register("hybrid-session-policy-notice", async () => {
+    const { sendHybridSessionPolicyNotice } = await import("@/lib/hybrid-session-policy-notice");
+    return sendHybridSessionPolicyNotice();
+  });
+
   register("auto-graduation", async () => {
     // The MORNING SUMMARY. Off until a school switches it on at /admin/graduation.
     // Counts what is ready on the finished batches and tells the admins; it never

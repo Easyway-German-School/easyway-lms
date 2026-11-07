@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MoveUpPreview } from "@/lib/next-level-manual-server";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 
 /**
  * What the Graduate button on the Students table opens.
@@ -49,6 +50,12 @@ export default function NextLevelDialog({
   const [mode, setMode] = useState<Mode>("move");
   const [notifyStudent, setNotifyStudent] = useState(true);
   const [form, setForm] = useState({ sessionSlot: "morning", deliveryMode: "physical", phone: "", parentPhone: "", note: "" });
+  const sessionOptions =
+    form.deliveryMode === "hybrid" && !HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
+      ? [...HYBRID_SESSION_SLOTS, form.sessionSlot]
+      : form.deliveryMode === "hybrid"
+        ? [...HYBRID_SESSION_SLOTS]
+        : SLOTS;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
 
@@ -193,7 +200,7 @@ export default function NextLevelDialog({
                 <div>
                   <span className={label}>Sitting</span>
                   <select className={input} value={form.sessionSlot} onChange={(e) => setForm({ ...form, sessionSlot: e.target.value })}>
-                    {SLOTS.map((s) => (
+                    {sessionOptions.map((s) => (
                       <option key={s} value={s}>
                         {s[0].toUpperCase() + s.slice(1)}
                       </option>
@@ -202,7 +209,19 @@ export default function NextLevelDialog({
                 </div>
                 <div>
                   <span className={label}>Attends</span>
-                  <select className={input} value={form.deliveryMode} onChange={(e) => setForm({ ...form, deliveryMode: e.target.value })}>
+                  <select
+                    className={input}
+                    value={form.deliveryMode}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        deliveryMode: e.target.value,
+                        ...(e.target.value === "hybrid" && !HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
+                          ? { sessionSlot: HYBRID_SESSION_SLOTS[0] }
+                          : {}),
+                      })
+                    }
+                  >
                     {MODES.map(([v, l]) => (
                       <option key={v} value={v}>
                         {l}
