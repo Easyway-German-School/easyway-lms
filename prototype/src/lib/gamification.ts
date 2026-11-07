@@ -17,7 +17,18 @@ export const XP_PER_LEVEL = 250;
  */
 export const STORY_EPISODE_XP = 50;
 
-/** Nobody starts on an empty bar; showing 0 XP on day one is discouraging. */
+/** A completed grade earns a small base reward plus a score-based bonus. */
+export const GRADE_XP_BASE = 10;
+
+/** XP awarded for each attended session. */
+export const ATTENDANCE_XP_PER_SESSION = 15;
+
+export function gradeRewardXp(score: number): number {
+  const boundedScore = Math.max(0, Math.min(100, Math.round(score)));
+  return GRADE_XP_BASE + Math.round(boundedScore / 10);
+}
+
+/** A starting XP grant; activity points build on top instead of disappearing below a floor. */
 export const XP_FLOOR = 180;
 
 export type XpInputs = {
@@ -27,6 +38,8 @@ export type XpInputs = {
   examReadiness?: number;
   /** Percentage average across graded work, if any has been graded. */
   averageGrade?: number | null;
+  /** XP awarded for finalized grade records. */
+  gradeXp?: number;
   /** Assignments actually handed in. */
   submissions?: number;
   /** Sessions marked present. */
@@ -91,14 +104,15 @@ export function tierForLevel(level: number): LearnerTier {
 }
 
 export function calculateXp(inputs: XpInputs): number {
-  const gradeBonus = inputs.averageGrade ? Math.round((inputs.averageGrade - 70) / 2) : 0;
+  const gradeBonus =
+    inputs.averageGrade == null ? 0 : Math.max(0, Math.round((inputs.averageGrade - 70) / 2));
 
   const raw =
     (inputs.completedLessons ?? 0) * 45 +
     (inputs.streak ?? 0) * 25 +
     (inputs.examReadiness ?? 0) * 2 +
     (inputs.submissions ?? 0) * 30 +
-    (inputs.sessionsAttended ?? 0) * 15 +
+    (inputs.sessionsAttended ?? 0) * ATTENDANCE_XP_PER_SESSION +
     (inputs.missionsCompleted ?? 0) * 20 +
     // Between a mission and a submission: more than ticking a box, less than
     // handing in written work, which is what a revision game is worth.
@@ -111,7 +125,7 @@ export function calculateXp(inputs: XpInputs): number {
     (inputs.storyEpisodesCompleted ?? 0) * STORY_EPISODE_XP +
     gradeBonus;
 
-  return Math.max(XP_FLOOR, raw);
+  return XP_FLOOR + raw + (inputs.gradeXp ?? 0);
 }
 
 export function summarizeGamification(inputs: XpInputs): GamificationSummary {
@@ -270,6 +284,27 @@ export function calculateStreak(dates: Array<Date | string>): number {
     streak += 1;
     offset += 1;
   }
+  return streak;
+}
+
+/** Consecutive attended class sessions; excused sessions do not break a run. */
+export function calculateAttendanceStreak(
+  records: Array<{ date: Date | string; status: string; present: boolean }>,
+): number {
+  const ordered = [...records].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+  let streak = 0;
+
+  for (const record of ordered) {
+    if (record.status === "excused") continue;
+    if (record.present || record.status === "present" || record.status === "late") {
+      streak += 1;
+      continue;
+    }
+    break;
+  }
+
   return streak;
 }
 

@@ -58,6 +58,7 @@ export default function MarkingQueue({
   const [feedback, setFeedback] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -106,6 +107,9 @@ export default function MarkingQueue({
       if (!response.ok) throw new Error(data.error ?? "Could not save the marks");
 
       await load();
+      setSuccess(
+        `Mark released for ${submission.student.name ?? "your student"} — they earned ${data.xpAwarded ?? 0} XP toward their German journey.`,
+      );
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the marks");
@@ -119,6 +123,7 @@ export default function MarkingQueue({
   if (pending.length === 0) {
     return (
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+        {success && <p role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-left text-sm text-emerald-800">{success}</p>}
         <p className="text-sm font-semibold">
           {submissionId ? "This paper has already been marked" : "Nothing waiting to be marked"}
         </p>
@@ -139,6 +144,7 @@ export default function MarkingQueue({
   return (
     <div className="space-y-4">
       {error && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      {success && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{success}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">

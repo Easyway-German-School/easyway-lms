@@ -25,6 +25,8 @@ export type LessonCompleteDetail = {
   title: string;
   /** e.g. "Nice work finishing “Chapter 3 Homework”." */
   message: string;
+  /** Present when the moment celebrates a graded assignment. */
+  xpEarned?: number;
 };
 
 export function celebrateLessonComplete(detail: LessonCompleteDetail) {
@@ -104,6 +106,17 @@ export default function LessonCompleteCelebration() {
                 >
                   {detail.message}
                 </motion.p>
+                {detail.xpEarned !== undefined && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.48 }}
+                    className="mx-auto mt-5 inline-flex items-center gap-2 rounded-full bg-white/15 px-5 py-2 text-sm font-bold"
+                  >
+                    <SparklesIcon className="h-4 w-4" />
+                    +{detail.xpEarned} XP added to your journey
+                  </motion.div>
+                )}
               </div>
 
               <div className="p-6">

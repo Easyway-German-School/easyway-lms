@@ -11,6 +11,8 @@ export type GamificationPayload = GamificationSummary & {
     totalSessions: number;
     attendanceRate: number | null;
     submissions: number;
+    grades: number;
+    gradeXp: number;
     completedLessons: number;
     averageGrade: number | null;
     examsRegistered: number;
