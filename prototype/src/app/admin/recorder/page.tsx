@@ -6,7 +6,22 @@ import { AlertIcon, PulseIcon, RefreshIcon } from "@/components/icons";
 import type { RecorderStatus } from "@/lib/recorder-status";
 import type { RecordingLine, SpendReport } from "@/lib/recorder-report";
 
-type Report = RecorderStatus & { spend: SpendReport; recordingsToday: RecordingLine[] };
+type LiveSessionLine = {
+  id: string;
+  title: string;
+  kind: string;
+  level: string | null;
+  sessionSlot: string | null;
+  startedAt: string;
+  branchName: string | null;
+  lecturerName: string | null;
+  recording: boolean;
+};
+type Report = RecorderStatus & {
+  spend: SpendReport;
+  recordingsToday: RecordingLine[];
+  liveSessions: LiveSessionLine[];
+};
 
 const usd = (x: number) => `$${x.toFixed(2)}`;
 const notesStyle: Record<RecordingLine["notes"]["state"], string> = {
@@ -43,6 +58,7 @@ export default function RecorderPage() {
   const [boostClasses, setBoostClasses] = useState(1);
   const [boostHours, setBoostHours] = useState(2);
   const [skipDate, setSkipDate] = useState("");
+  const [startingSessionId, setStartingSessionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,13 +91,34 @@ export default function RecorderPage() {
       const response = await fetch("/api/admin/recorder/control", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(data.error || "That did not work.");
-      setNotice(`${done} It reaches the servers within about a minute.`);
+      setNotice(`${done} The scheduler applies control changes on its next check.`);
       setError(null);
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "That did not work.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const startRecording = async (session: LiveSessionLine) => {
+    setStartingSessionId(session.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/admin/recorder/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: session.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Could not start recording for this class.");
+      setNotice(`Recording started for ${session.title}.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not start recording for this class.");
+    } finally {
+      setStartingSessionId(null);
     }
   };
 
@@ -111,6 +148,43 @@ export default function RecorderPage() {
               <div className={card}><p className="text-sm text-[var(--muted)]">Live right now</p><p className="mt-1 text-3xl font-bold">{status.forecast.liveNow}</p></div>
               <div className={card}><p className="text-sm text-[var(--muted)]">Most classes at once, next 24 h</p><p className="mt-1 text-3xl font-bold">{status.forecast.peakNext24h}</p>{status.forecast.nextClassAt && <p className="mt-1 text-xs text-[var(--muted)]">Next: {schoolTime(status.forecast.nextClassAt)}</p>}</div>
               <div className={card}><p className="text-sm text-[var(--muted)]">Recorded this month</p><p className="mt-1 text-xl font-bold">{status.month.ownRecordings} by us · {status.month.liveKitRecordings} by LiveKit</p></div>
+            </section>
+
+            <section className={card}>
+              <h2 className="text-lg font-semibold">Live classes and recording status</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Every live room is listed here, including private and unplanned classes. If a room is not recording, start its capture directly.
+              </p>
+              {status.liveSessions.length ? (
+                <ul className="mt-4 divide-y divide-[var(--border)]">
+                  {status.liveSessions.map((session) => (
+                    <li key={session.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{session.title}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          {session.kind === "private" ? "Private class" : [session.level, session.sessionSlot, session.branchName].filter(Boolean).join(" · ")}
+                          {session.lecturerName ? ` · ${session.lecturerName}` : ""}
+                          {` · started ${schoolTime(session.startedAt)}`}
+                        </p>
+                      </div>
+                      {session.recording ? (
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Recording</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={startingSessionId !== null}
+                          className={button}
+                          onClick={() => void startRecording(session)}
+                        >
+                          {startingSessionId === session.id ? "Starting…" : "Start recording"}
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-[var(--muted)]">No live rooms right now. Classes appear as soon as tutors connect.</p>
+              )}
             </section>
 
             <section className={card}>
@@ -179,17 +253,20 @@ export default function RecorderPage() {
                   </div>
 
                   <div className="mt-4 space-y-2 border-t border-[var(--border)] pt-4">
-                    <p className="text-sm font-semibold">Start room for an unplanned class</p>
+                    <p className="text-sm font-semibold">Extra capacity for unplanned classes</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      This asks the scheduler to prepare capacity; it does not select or start a room. Start an individual live class from the list above.
+                    </p>
                     {status.boostActive && control.boost ? (
                       <div className="flex flex-wrap items-center gap-3 text-sm">
-                        <span>Room for {control.boost.classes} class{control.boost.classes === 1 ? "" : "es"} until {schoolTime(control.boost.until)}</span>
+                        <span>Extra capacity for {control.boost.classes} concurrent class{control.boost.classes === 1 ? "" : "es"} until {schoolTime(control.boost.until)}</span>
                         <button type="button" disabled={busy} className={button} onClick={() => change({ boost: null }, "Cancelled.")}>Cancel</button>
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <select value={boostClasses} onChange={(e) => setBoostClasses(Number(e.target.value))} className="rounded-full border border-[var(--border)] bg-transparent px-3 py-2">{[1, 2, 3, 4, 6].map((n) => <option key={n} value={n}>{n} class{n === 1 ? "" : "es"}</option>)}</select>
                         <select value={boostHours} onChange={(e) => setBoostHours(Number(e.target.value))} className="rounded-full border border-[var(--border)] bg-transparent px-3 py-2">{[1, 2, 4, 8].map((n) => <option key={n} value={n}>for {n} h</option>)}</select>
-                        <button type="button" disabled={busy} className={button} onClick={() => change({ boost: { classes: boostClasses, hours: boostHours } }, "A server is being prepared.")}>Start now</button>
+                        <button type="button" disabled={busy} className={button} onClick={() => change({ boost: { classes: boostClasses, hours: boostHours } }, "Extra capacity requested.")}>Prepare capacity</button>
                       </div>
                     )}
                   </div>

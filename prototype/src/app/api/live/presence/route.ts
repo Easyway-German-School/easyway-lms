@@ -171,42 +171,40 @@ export async function POST(request: Request) {
        * only a live Room keeps it going. `ensureRecordingStarted` is already
        * idempotent (see class-recorder.ts), so calling it again here costs
        * nothing when the first attempt already won, and quietly fixes it
-       * within one heartbeat interval when it did not. Private classes are
-       * still excluded — recording a one-to-one is a consent question, not a
-       * timing one.
+       * within one heartbeat interval when it did not. Private captures carry
+       * their booking id and remain scoped to that student's video library.
        */
-      if (owned.kind !== "private") {
-        const { currentTenantId } = await import("@/lib/tenant/context");
-        const recordingInput = {
-          roomName: owned.roomName,
-          tenantId: currentTenantId(),
-          branchId: owned.branchId,
-          branchName: owned.branch?.name ?? null,
-          level: owned.level,
-          sessionSlot: owned.sessionSlot,
-          startedByUserId: owned.startedByUserId,
-        };
-        // Chained, not run alongside each other: the restart has to flip the
-        // old row off "active" before this same tick's start-attempt looks
-        // for one, or the idempotency check below sees the still-active old
-        // row and (correctly, but uselessly) no-ops instead of picking up the
-        // replacement. See the module comment on
-        // `restartRecordingIfNearingLimit` in class-recorder.ts for why a
-        // capture needs swapping out at all.
-        //
-        // In `after()`, NOT a loose promise: a promise left running after the response is sent can be frozen or
-        // killed by the serverless platform half-way. Starting on OUR recorder takes several network calls (the
-        // server list, the server, the database), so it is exactly the kind of work that got cut off, which is how
-        // a class could end up on LiveKit without a single log line. `after()` keeps the function alive until it is done.
-        after(async () => {
-          try {
-            await restartRecordingIfNearingLimit(recordingInput);
-            await ensureRecordingStarted(recordingInput);
-          } catch (error) {
-            console.error("Recording start from the heartbeat failed", error);
-          }
-        });
-      }
+      const { currentTenantId } = await import("@/lib/tenant/context");
+      const recordingInput = {
+        roomName: owned.roomName,
+        tenantId: currentTenantId(),
+        branchId: owned.branchId,
+        branchName: owned.branch?.name ?? null,
+        level: owned.level,
+        sessionSlot: owned.sessionSlot,
+        startedByUserId: owned.startedByUserId,
+        privateClassId: owned.privateClassId,
+      };
+      // Chained, not run alongside each other: the restart has to flip the
+      // old row off "active" before this same tick's start-attempt looks
+      // for one, or the idempotency check below sees the still-active old
+      // row and (correctly, but uselessly) no-ops instead of picking up the
+      // replacement. See the module comment on
+      // `restartRecordingIfNearingLimit` in class-recorder.ts for why a
+      // capture needs swapping out at all.
+      //
+      // In `after()`, NOT a loose promise: a promise left running after the response is sent can be frozen or
+      // killed by the serverless platform half-way. Starting on OUR recorder takes several network calls (the
+      // server list, the server, the database), so it is exactly the kind of work that got cut off, which is how
+      // a class could end up on LiveKit without a single log line. `after()` keeps the function alive until it is done.
+      after(async () => {
+        try {
+          await restartRecordingIfNearingLimit(recordingInput);
+          await ensureRecordingStarted(recordingInput);
+        } catch (error) {
+          console.error("Recording start from the heartbeat failed", error);
+        }
+      });
 
       return NextResponse.json({ ok: true, live: true });
     }

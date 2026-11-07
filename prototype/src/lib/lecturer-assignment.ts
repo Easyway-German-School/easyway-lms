@@ -294,10 +294,10 @@ export function spaceWhereForAssignment(assignment: LecturerAssignment): Record<
  * src/lib/tutor-pairing.ts) is on their roster for every purpose the primary
  * pairing is — register, gradebook, live class.
  *
- * A named student is IN, whatever the assignment says. The office naming
- * somebody is a deliberate act and outranks a pattern match — a rule that let
- * the branch filter overrule it would silently drop precisely the students who
- * needed naming in the first place.
+ * A named student is a candidate even when their branch or sitting differs
+ * from the class pattern. The in-memory check still requires their current
+ * level and (when pinned) intake to match, so a promotion cannot leave them on
+ * the old tutor's active class.
  */
 export function studentWhereForLecturer(
   assignment: LecturerAssignment,
@@ -460,9 +460,9 @@ export function hasBatchConstraint(assignment: LecturerAssignment): boolean {
  * The in-memory half of the same question, applied after the rows come back.
  *
  * Batch cannot be filtered in SQL (it lives in the admission JSON), so it runs
- * here — and a named student must skip that filter too, for the same reason
- * they skip the branch one. Callers must select `tutorId` for this to work;
- * without it every named student silently falls through to the batch check.
+ * here. A named student can differ by branch or sitting, but still has to match
+ * the tutor's current level and any pinned intake. Callers must select
+ * `tutorId` for this distinction to work.
  *
  * PER-GROUP BATCH. When any teaching group pins an intake month, this stops
  * being a flat "is the student in one of the tutor's months?" and becomes
@@ -490,13 +490,41 @@ export function belongsToLecturer(
     sessionSlot?: string | null;
   },
 ): boolean {
-  if (lecturerId && student.tutorId && student.tutorId === lecturerId) return true;
-  if (
+  const namedByOffice = Boolean(
     lecturerId &&
-    (student.coTutorIds?.includes(lecturerId) ||
-      student.coTutors?.some((link) => link.lecturerId === lecturerId))
-  ) {
-    return true;
+      (student.tutorId === lecturerId ||
+        student.coTutorIds?.includes(lecturerId) ||
+        student.coTutors?.some((link) => link.lecturerId === lecturerId)),
+  );
+
+  if (namedByOffice) {
+    // A named link is still a useful override for a tutor without a class
+    // assignment, or when the branch/sitting is an intentional exception.
+    // It must not pin a student to a tutor's old level or intake after
+    // promotion: current course dimensions decide whether the link remains
+    // part of this tutor's active roster.
+    if (!isAssigned(assignment)) return true;
+
+    const level = student.level?.trim().toUpperCase();
+    if (
+      level &&
+      assignment.levels.length &&
+      !assignment.levels.some((assignedLevel) => assignedLevel.toUpperCase() === level)
+    ) {
+      return false;
+    }
+
+    if (!hasBatchConstraint(assignment)) return true;
+    const batch = admissionBatch(student.admission);
+    if (!batch) return false;
+    if (assignment.groups.length && level) {
+      return assignment.groups.some(
+        (group) =>
+          group.level.toUpperCase() === level &&
+          (!group.batch || group.batch.toLowerCase() === batch),
+      );
+    }
+    return matchesBatch(assignment, student.admission);
   }
 
   const pinnedGroups = assignment.groups.filter((group) => Boolean(group.batch));
