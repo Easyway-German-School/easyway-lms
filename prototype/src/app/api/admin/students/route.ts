@@ -26,6 +26,7 @@ import {
 } from "@/lib/deleted-account";
 import { batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
   buildRosterWhereClause,
@@ -295,6 +296,15 @@ export async function POST(request: Request) {
    * silently hid the Live class tab from them.
    */
   const deliveryMode = isOnlineBranch(branchRow) ? "online" : requestedDeliveryMode;
+  if (
+    deliveryMode === "hybrid" &&
+    !HYBRID_SESSION_SLOTS.some((slot) => slot === sessionSlot)
+  ) {
+    return NextResponse.json(
+      { error: "Hybrid classes use one shared session: choose morning or evening for both." },
+      { status: 400 },
+    );
+  }
 
   const hashedPassword = await bcryptjs.hash(password, 10);
 
@@ -327,6 +337,7 @@ export async function POST(request: Request) {
     classType,
     sessionSlot,
     deliveryMode,
+    ...(deliveryMode === "hybrid" ? { hybridOnlineSlot: sessionSlot } : {}),
     admission: admissionBlob,
   };
 
@@ -798,12 +809,30 @@ export async function PATCH(request: Request) {
     if (status) updateStudent.status = status;
     if (classType) updateStudent.classType = classType;
     if (sessionSlot) updateStudent.sessionSlot = sessionSlot;
-    // Only for a student who is (or is becoming) hybrid — the edit form only
-    // shows this field in that case, but a save that switches the same
-    // request's delivery mode away from hybrid must not leave a stale online
-    // sitting behind on a now-physical/online student.
+    // A legacy mismatch survives unrelated edits. Any new/changed hybrid
+    // assignment must use the same supported time for both attendance modes.
     const effectiveDeliveryMode = updateStudent.deliveryMode ?? student.deliveryMode;
-    if (hybridOnlineSlot && effectiveDeliveryMode === "hybrid") updateStudent.hybridOnlineSlot = hybridOnlineSlot;
+    const nextSessionSlot = sessionSlot ?? student.sessionSlot;
+    const hybridAssignmentChanged =
+      effectiveDeliveryMode === "hybrid" &&
+      (nextSessionSlot !== student.sessionSlot ||
+        (hybridOnlineSlot !== undefined && hybridOnlineSlot !== student.hybridOnlineSlot) ||
+        (requestedDeliveryMode === "hybrid" && student.deliveryMode !== "hybrid"));
+    if (hybridAssignmentChanged && !HYBRID_SESSION_SLOTS.some((slot) => slot === nextSessionSlot)) {
+      return NextResponse.json(
+        { error: "Hybrid classes use one shared session: choose morning or evening for both." },
+        { status: 400 },
+      );
+    }
+    if (effectiveDeliveryMode === "hybrid") {
+      if (hybridAssignmentChanged && hybridOnlineSlot && hybridOnlineSlot !== nextSessionSlot) {
+        return NextResponse.json(
+          { error: "Hybrid classes use one shared session: choose morning or evening for both." },
+          { status: 400 },
+        );
+      }
+      if (hybridAssignmentChanged) updateStudent.hybridOnlineSlot = nextSessionSlot;
+    }
 
     /**
      * "YOUR CLASS TIME HAS CHANGED" — the same stamp, audit row and notification
@@ -812,9 +841,8 @@ export async function PATCH(request: Request) {
      * mode from this form used to happen in total silence — no bell, no Becca
      * card on their next page, no audit trail — even though it is exactly the
      * same fact about their week as the bulk case. A hybrid student's online
-     * sitting is corrected the same way — e.g. re-pairing them to a combo (like
-     * "physical morning + online evening") that only became offerable once
-     * hybrid-combo.ts stopped curating a fixed 3.
+     * sitting is corrected the same way — when a hybrid schedule changes, both
+     * attendance modes move to the same morning or evening session.
      */
     const sessionSlotChanged = Boolean(sessionSlot && sessionSlot !== student.sessionSlot);
     const deliveryModeChanged = Boolean(

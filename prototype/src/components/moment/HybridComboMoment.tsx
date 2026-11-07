@@ -101,8 +101,8 @@ export default function HybridComboMoment() {
             <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">System update</p>
             <h2 className="mt-1.5 text-lg font-bold text-[var(--foreground)]">Which sittings will you attend?</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              We've made hybrid classes more specific — pick the campus sitting you attend in person, paired with the
-              online sitting you join over video, and we'll pair you with both tutors.
+              Hybrid is one class, not two separate sessions. Choose the same morning or evening time for campus and
+              online, and we'll pair you with both tutors.
             </p>
 
             <div className="mt-4 space-y-2.5">

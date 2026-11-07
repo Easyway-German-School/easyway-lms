@@ -32,6 +32,7 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { availableBatchOptions } from "@/lib/intake";
 import { resolveBatchWindow } from "@/lib/batch";
 import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 
@@ -751,11 +752,22 @@ export default function StudentDossierPage() {
       : "physical";
   const editSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, editForm.level, slot, editMode));
   const editModes = (["physical", "hybrid"] as const).filter((mode) => isModeEnabled(sessionCfg, editForm.level, mode));
-  // The online half of a hybrid pairing — the school only ever runs online
-  // morning/evening (see lib/session-times.ts), never afternoon or weekend.
-  const editOnlineSlots = (["morning", "evening"] as const).filter((slot) =>
-    isCellEnabled(sessionCfg, editForm.level, slot, "online"),
+  const editHybridSlots = HYBRID_SESSION_SLOTS.filter(
+    (slot) =>
+      isCellEnabled(sessionCfg, editForm.level, slot, "hybrid") &&
+      isCellEnabled(sessionCfg, editForm.level, slot, "online"),
   );
+  const editSessionOptions =
+    editMode === "hybrid"
+      ? [
+          ...editHybridSlots,
+          ...(editForm.sessionSlot && !editHybridSlots.some((slot) => slot === editForm.sessionSlot)
+            ? [editForm.sessionSlot]
+            : []),
+        ]
+      : editSlots.length
+        ? editSlots
+        : TIME_SLOTS;
 
   async function issueCode() {
     if (issuingCode) return;
@@ -2536,14 +2548,26 @@ export default function StudentDossierPage() {
                 <span className="font-semibold text-[var(--muted)]">Session</span>
                 <select
                   value={editForm.sessionSlot}
-                  onChange={(event) => setEditForm((form) => ({ ...form, sessionSlot: event.target.value }))}
+                  onChange={(event) =>
+                    setEditForm((form) => ({
+                      ...form,
+                      sessionSlot: event.target.value,
+                      ...(form.deliveryMode === "hybrid" ? { hybridOnlineSlot: event.target.value } : {}),
+                    }))
+                  }
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  {(editSlots.length ? editSlots : TIME_SLOTS).map((slot) => (
-                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                  {editSessionOptions.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {SLOT_DEFAULTS[slot as keyof typeof SLOT_DEFAULTS]?.label ?? slot}
+                    </option>
                   ))}
                 </select>
-                {editSlots.length > 0 && editSlots.length < TIME_SLOTS.length && (
+                {editMode === "hybrid" ? (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    New hybrid session choices use the same morning or evening time online and on campus. Existing schedules stay unchanged unless you edit them.
+                  </span>
+                ) : editSlots.length > 0 && editSlots.length < TIME_SLOTS.length && (
                   <span className="block text-xs font-normal text-[var(--muted)]">
                     Some sessions are switched off for {editForm.level} · {editMode === "physical" ? "on campus" : editMode} on Settings.
                     Changing Delivery mode or Branch can reveal others (e.g. Weekend).
@@ -2593,7 +2617,16 @@ export default function StudentDossierPage() {
                 ) : (
                   <select
                     value={editForm.deliveryMode}
-                    onChange={(event) => setEditForm((form) => ({ ...form, deliveryMode: event.target.value }))}
+                    onChange={(event) =>
+                      setEditForm((form) => ({
+                        ...form,
+                        deliveryMode: event.target.value,
+                        ...(event.target.value === "hybrid" &&
+                        !HYBRID_SESSION_SLOTS.some((slot) => slot === form.sessionSlot)
+                          ? { sessionSlot: HYBRID_SESSION_SLOTS[0], hybridOnlineSlot: HYBRID_SESSION_SLOTS[0] }
+                          : {}),
+                      }))
+                    }
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                   >
                     {(editModes.length ? editModes : (["physical", "hybrid"] as const)).map((mode) => (
@@ -2605,24 +2638,12 @@ export default function StudentDossierPage() {
                 )}
               </label>
               {editMode === "hybrid" && (
-                <label className="space-y-2 text-sm">
-                  <span className="font-semibold text-[var(--muted)]">Online sitting</span>
-                  <select
-                    value={editForm.hybridOnlineSlot}
-                    onChange={(event) => setEditForm((form) => ({ ...form, hybridOnlineSlot: event.target.value }))}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                  >
-                    <option value="">Unchanged</option>
-                    {(editOnlineSlots.length ? editOnlineSlots : (["morning", "evening"] as const)).map((slot) => (
-                      <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
-                    ))}
-                  </select>
-                  <span className="block text-xs font-normal text-[var(--muted)]">
-                    Which online sitting this hybrid student drops into, alongside the physical Session above — any
-                    pairing works now, not just the few offered at signup. Leave on &quot;Unchanged&quot; unless
-                    you&apos;re correcting it.
-                  </span>
-                </label>
+                <p className="text-xs text-[var(--muted)]">
+                  Online session: {editForm.hybridOnlineSlot
+                    ? SLOT_DEFAULTS[editForm.hybridOnlineSlot as keyof typeof SLOT_DEFAULTS]?.label ?? editForm.hybridOnlineSlot
+                    : "not set"}.
+                  Changing the session above pairs both classes at that time.
+                </p>
               )}
               <SchedulePreview
                 branchId={editForm.branchId}

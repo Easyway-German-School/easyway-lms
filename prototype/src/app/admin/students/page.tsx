@@ -12,6 +12,7 @@ import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranchName } from "@/lib/online-branch";
+import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
@@ -462,15 +463,25 @@ function StudentsRoster() {
       ? "hybrid"
       : "physical";
   const addSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, newLevel, slot, addMode));
+  const hybridAddSlots = HYBRID_SESSION_SLOTS.filter(
+    (slot) =>
+      isCellEnabled(sessionCfg, newLevel, slot, "hybrid") &&
+      isCellEnabled(sessionCfg, newLevel, slot, "online"),
+  );
+  const addSessionOptions =
+    addMode === "hybrid"
+      ? [
+          ...hybridAddSlots,
+          ...(editingStudentId && newSessionSlot && !hybridAddSlots.some((slot) => slot === newSessionSlot)
+            ? [newSessionSlot]
+            : []),
+        ]
+      : addSlots.length
+        ? addSlots
+        : TIME_SLOTS;
   const addModes = (["physical", "hybrid"] as const).filter((mode) =>
     isModeEnabled(sessionCfg, newLevel, mode),
   );
-  // The online half of a hybrid pairing — the school only ever runs online
-  // morning/evening (see lib/session-times.ts), never afternoon or weekend.
-  const addOnlineSlots = (["morning", "evening"] as const).filter((slot) =>
-    isCellEnabled(sessionCfg, newLevel, slot, "online"),
-  );
-
   async function handleSaveStudent(addAnother = false) {
     setStudentError("");
     setSendCredsState("idle");
@@ -483,6 +494,14 @@ function StudentsRoster() {
 
     const isOnlineSelection = isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name);
     const effectiveDelivery = isOnlineSelection ? "online" : newDeliveryMode;
+    if (
+      !editingStudentId &&
+      effectiveDelivery === "hybrid" &&
+      !HYBRID_SESSION_SLOTS.some((slot) => slot === newSessionSlot)
+    ) {
+      setStudentError("Hybrid classes use one shared session: choose morning or evening for both.");
+      return;
+    }
     const payload = {
       name: newName.trim(),
       email: newEmail.trim().toLowerCase(),
@@ -496,7 +515,7 @@ function StudentsRoster() {
       deliveryMode: effectiveDelivery,
       pathway: newPathway,
       batch: newBatch,
-      hybridOnlineSlot: newHybridOnlineSlot,
+      hybridOnlineSlot: effectiveDelivery === "hybrid" && !editingStudentId ? newSessionSlot : newHybridOnlineSlot,
       city: newCity.trim(),
       state: newStateRegion.trim(),
       country: newCountry.trim(),
@@ -1698,14 +1717,23 @@ function StudentsRoster() {
                 <span className="font-semibold text-[var(--muted)]">Session</span>
                 <select
                   value={newSessionSlot}
-                  onChange={(event) => setNewSessionSlot(event.target.value)}
+                  onChange={(event) => {
+                    setNewSessionSlot(event.target.value);
+                    if (newDeliveryMode === "hybrid") setNewHybridOnlineSlot(event.target.value);
+                  }}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  {(addSlots.length ? addSlots : TIME_SLOTS).map((slot) => (
-                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                  {addSessionOptions.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {SLOT_DEFAULTS[slot as keyof typeof SLOT_DEFAULTS]?.label ?? slot}
+                    </option>
                   ))}
                 </select>
-                {addSlots.length > 0 && addSlots.length < TIME_SLOTS.length && (
+                {addMode === "hybrid" ? (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    A hybrid student joins the same session online and on campus. Morning or evening only.
+                  </span>
+                ) : addSlots.length > 0 && addSlots.length < TIME_SLOTS.length && (
                   <span className="block text-xs font-normal text-[var(--muted)]">
                     Some sessions are switched off for {newLevel} · {addMode === "physical" ? "on campus" : addMode} on
                     Settings. Changing Delivery mode or Branch below can reveal others (e.g. Weekend).
@@ -1738,7 +1766,16 @@ function StudentsRoster() {
                 ) : (
                   <select
                     value={newDeliveryMode}
-                    onChange={(event) => setNewDeliveryMode(event.target.value)}
+                    onChange={(event) => {
+                      setNewDeliveryMode(event.target.value);
+                      if (event.target.value === "hybrid") {
+                        const slot = HYBRID_SESSION_SLOTS.some((item) => item === newSessionSlot)
+                          ? newSessionSlot
+                          : HYBRID_SESSION_SLOTS[0];
+                        setNewSessionSlot(slot);
+                        setNewHybridOnlineSlot(slot);
+                      }
+                    }}
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                   >
                     {(addModes.length ? addModes : (["physical", "hybrid"] as const)).map((mode) => (
@@ -1754,25 +1791,13 @@ function StudentsRoster() {
                   that switches this to Online on its own.
                 </span>
               </label>
-              {editingStudentId && newDeliveryMode === "hybrid" && (
-                <label className="space-y-2 text-sm">
-                  <span className="font-semibold text-[var(--muted)]">Online sitting</span>
-                  <select
-                    value={newHybridOnlineSlot}
-                    onChange={(event) => setNewHybridOnlineSlot(event.target.value)}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                  >
-                    <option value="">Unchanged</option>
-                    {(addOnlineSlots.length ? addOnlineSlots : (["morning", "evening"] as const)).map((slot) => (
-                      <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
-                    ))}
-                  </select>
-                  <span className="block text-xs font-normal text-[var(--muted)]">
-                    Which online sitting this hybrid student drops into, alongside the physical Session above — any
-                    pairing works now, not just the few offered at signup. Leave on &quot;Unchanged&quot; unless
-                    you&apos;re correcting it.
-                  </span>
-                </label>
+              {newDeliveryMode === "hybrid" && (
+                <p className="text-xs text-[var(--muted)]">
+                  Online session: {newHybridOnlineSlot
+                    ? SLOT_DEFAULTS[newHybridOnlineSlot as keyof typeof SLOT_DEFAULTS]?.label ?? newHybridOnlineSlot
+                    : "not set"}.
+                  Changing the session above pairs both classes at that time. Existing schedules are left unchanged unless edited.
+                </p>
               )}
               <SchedulePreview
                 branchId={newBranchId}
