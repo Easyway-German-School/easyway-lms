@@ -2558,7 +2558,9 @@ export default function StudentDossierPage() {
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   {editSessionOptions.map((slot) => (
-                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                    <option key={slot} value={slot}>
+                      {SLOT_DEFAULTS[slot as keyof typeof SLOT_DEFAULTS]?.label ?? slot}
+                    </option>
                   ))}
                 </select>
                 {editMode === "hybrid" ? (
