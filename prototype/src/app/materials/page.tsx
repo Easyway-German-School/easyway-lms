@@ -106,8 +106,15 @@ export default function MaterialsPage() {
   }, [refreshTick]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((value) => value + 1), 10_000);
-    return () => window.clearInterval(timer);
+    const refresh = () => {
+      if (!document.hidden) setRefreshTick((value) => value + 1);
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
 
   // Videos have their own tab, so they are not repeated in the document list.
