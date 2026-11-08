@@ -135,6 +135,10 @@ export const KIND = {
   campusChallenge: "campus.challenge",
   campusAccepted: "campus.accepted",
   campusDuelResult: "campus.duel_result",
+  /** Becca asking a student to confirm a held "keep my seat" batch that looks implausibly far out, or telling the office what they answered. See src/lib/seat-batch-confirm.ts. */
+  seatBatchConfirm: "seat.batch_confirm",
+  /** One-time Becca announcement that the Travel Package Visa & Interview Prep guide is live. See src/lib/travel-package-prep-notice.ts. */
+  travelPackagePrepReady: "travel_package.prep_ready",
   general: "general",
 } as const;
 

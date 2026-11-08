@@ -20,6 +20,28 @@ import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/stu
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import { describePhone, studentPhoneRaw } from "@/lib/phone-display";
 import { enrolmentYearOptions } from "@/lib/student-enrolment-years";
+import { batchFromAdmission } from "@/lib/batch";
+
+/**
+ * The roster's "Batch" column used to print the bare month off
+ * `admission.batch` ("October") with no year, so a student held a full
+ * calendar year ahead (see batch-reservation.ts's stale-registration guard)
+ * looked identical to one in the batch everyone else is in — the "Enrolled
+ * in year" filter narrowed the rows correctly, but every row still read
+ * "October", so switching between 2026 and 2027 looked like "the same
+ * data". `admission.batchYear` has carried the real year since signup; this
+ * just prints it back.
+ */
+function batchCellLabel(admission: unknown): string {
+  const batch = batchFromAdmission(admission);
+  if (!batch) return "—";
+  if (/\d{4}/.test(batch)) return batch;
+  const year =
+    admission && typeof admission === "object" && !Array.isArray(admission)
+      ? (admission as Record<string, unknown>).batchYear
+      : null;
+  return typeof year === "number" && Number.isInteger(year) ? `${batch} ${year}` : batch;
+}
 
 /**
  * The chase list, as one-tap views. These ids are the `FOCUS_PRESETS` in
@@ -2205,7 +2227,7 @@ function StudentsRoster() {
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
                     <td className="px-6 py-4">{student.level || "—"}</td>
-                    <td className="px-6 py-4">{typeof student.admission === "object" && student.admission && !Array.isArray(student.admission) && (student.admission as Record<string, unknown>).batch ? String((student.admission as Record<string, unknown>).batch) : "—"}</td>
+                    <td className="px-6 py-4">{batchCellLabel(student.admission)}</td>
                     <td className="px-6 py-4">
                       {student.germanyGoal ? (
                         <span
