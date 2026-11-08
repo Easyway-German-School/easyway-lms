@@ -8,6 +8,7 @@ import { publicStudent, studentSelect } from "@/lib/api/shapes";
 import { assignStudentCode } from "@/lib/student-code";
 import { createResetToken } from "@/lib/password-reset";
 import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
+import { currentTenantId } from "@/lib/tenant/context";
 
 export const dynamic = "force-dynamic";
 
@@ -124,7 +125,18 @@ export async function POST(request: NextRequest) {
 
   const student = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
-      data: { email, name, role: "STUDENT", password: unusable, passwordClaimed: false },
+      // User is a global model, so the isolation extension never stamps a
+      // top-level create of it — only relations nested inside one. Without
+      // this, every student enrolled through this public API landed owned
+      // by nobody, invisible to the school's own admin board.
+      data: {
+        email,
+        name,
+        role: "STUDENT",
+        password: unusable,
+        passwordClaimed: false,
+        tenantId: currentTenantId(),
+      },
       select: { id: true },
     });
     return tx.student.create({
