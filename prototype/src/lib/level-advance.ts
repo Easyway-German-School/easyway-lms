@@ -19,6 +19,7 @@
  */
 
 import { SESSION_MONTHS, WEEKS_OF_TEACHING } from "@/lib/levels";
+import type { RetakePrice } from "@/lib/retake-fee";
 
 export type AdvancePerk = {
   label: string;
@@ -70,6 +71,8 @@ export type LevelAdvanceOffer = {
 
   /** Price of the NEXT level at this student's branch. */
   tuitionFee: number;
+  /** Current-level tuition and its 30% retake quote. */
+  retakeTuition: RetakePrice | null;
   requiredDeposit: number;
   /** Fee spread over the teaching weeks — the number that makes it feel affordable. */
   perWeek: number;

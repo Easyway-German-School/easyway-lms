@@ -23,10 +23,8 @@ import {
  *   - a card that stays on the dashboard afterwards, because one dismissed
  *     modal must not be the only chance to convert.
  *
- * Nothing here invents a discount or a deadline. The price is the price table's
- * price, and the balance still open on the finished level is shown rather than
- * hidden — a student told to "continue to A2" who then hits an unpaid A1
- * balance at the counter trusts nothing else the portal says.
+ * The retake price is the school's 30% discount applied to the live price book.
+ * The balance still open on the finished level is shown rather than hidden.
  */
 
 function LevelBadge({ level, tone = "next" }: { level: string; tone?: "current" | "next" }) {
@@ -215,6 +213,16 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
           <PriceBlock offer={offer} />
           <Perks offer={offer} animate />
 
+          {offer.retakeTuition ? (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Prefer to repeat {offer.currentLevel}?</p>
+              <p className="mt-1 text-sm text-[var(--foreground)]">
+                Retake tuition is 30% off: <span className="font-semibold line-through">{naira(offer.retakeTuition.baseFee)}</span>{" "}
+                <span className="font-bold text-[var(--accent)]">{naira(offer.retakeTuition.fee)}</span>
+              </p>
+            </div>
+          ) : null}
+
           <div className="flex flex-col gap-3 pt-1 sm:flex-row">
             <Link
               href={action.href}
@@ -223,6 +231,15 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
             >
               {action.label}
             </Link>
+            {offer.retakeTuition ? (
+              <Link
+                href="/programs?forRetake=1"
+                onClick={onClose}
+                className="flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-6 py-3.5 text-center text-sm font-bold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+              >
+                Retake {offer.currentLevel} · {naira(offer.retakeTuition.fee)}
+              </Link>
+            ) : null}
             <button
               onClick={onClose}
               className="rounded-full border border-[var(--border)] px-6 py-3.5 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
@@ -260,7 +277,7 @@ function RepeatNoticeCard({ offer }: { offer: LevelAdvanceOffer }) {
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">Repeating this level</p>
           <h3 className="mt-1 text-lg font-bold text-[var(--foreground)]">
-            You're staying in {offer.currentLevel}
+            You&apos;re staying in {offer.currentLevel}
             {offer.heldBack.batch ? ` — ${offer.heldBack.batch} batch` : ""}
           </h3>
           <p className="mt-1 text-sm text-[var(--muted)]">
@@ -310,6 +327,14 @@ function AdvanceCard({ offer, onOpen }: { offer: LevelAdvanceOffer; onOpen: () =
           >
             {action.label}
           </Link>
+          {offer.retakeTuition ? (
+            <Link
+              href="/programs?forRetake=1"
+              className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+            >
+              Retake {offer.currentLevel} · {naira(offer.retakeTuition.fee)}
+            </Link>
+          ) : null}
           {!offer.atTopOfLadder ? (
             <button
               onClick={onOpen}

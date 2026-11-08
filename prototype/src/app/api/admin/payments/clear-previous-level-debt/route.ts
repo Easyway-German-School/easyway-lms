@@ -77,6 +77,7 @@ export async function POST(request: Request) {
           select: {
             id: true,
             level: true,
+            attempt: true,
             amount: true,
             waivedAmount: true,
             legacyArrears: true,
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
         }),
         tx.payment.findMany({
           where: { studentId, ...receivedPaymentFilter() },
-          select: { amount: true, level: true, description: true, createdAt: true },
+          select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
         }),
       ]);
 

@@ -85,6 +85,7 @@ export async function GET(request: Request) {
         select: {
           id: true,
           level: true,
+          attempt: true,
           amount: true,
           waivedAmount: true,
           legacyArrears: true,
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
       }),
       prisma.payment.findMany({
         where: { studentId, ...receivedPaymentFilter() },
-        select: { amount: true, level: true, description: true, createdAt: true },
+        select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
       }),
     ]);
     const paid = payments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -214,7 +215,7 @@ export async function POST(request: Request) {
         pathway: student.pathway,
       });
       const existing = await tx.tuitionCharge.findUnique({
-        where: { studentId_level: { studentId, level } },
+        where: { studentId_level_attempt: { studentId, level, attempt: 1 } },
         select: {
           id: true,
           amount: true,
@@ -257,6 +258,7 @@ export async function POST(request: Request) {
           data: {
             studentId,
             level,
+            attempt: 1,
             amount: classification === "not_taken_here" ? 0 : amount,
             classType: student.classType ?? "group",
             branchName: student.branch?.name ?? null,
@@ -299,6 +301,7 @@ export async function POST(request: Request) {
             select: {
               id: true,
               level: true,
+              attempt: true,
               amount: true,
               waivedAmount: true,
               legacyArrears: true,
@@ -310,7 +313,7 @@ export async function POST(request: Request) {
           }),
           tx.payment.findMany({
             where: { studentId, ...receivedPaymentFilter() },
-            select: { amount: true, level: true, description: true, createdAt: true },
+            select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
           }),
         ]);
         const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);

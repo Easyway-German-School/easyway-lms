@@ -48,13 +48,14 @@ export const STUDENT_ACCESS_SELECT = {
     // `payment.findMany`) correctly excludes it. See the same note on
     // src/lib/finance/receivables.ts, which already has this right.
     where: { ...receivedPaymentFilter(), deletedAt: null },
-    select: { amount: true, level: true, description: true, status: true, createdAt: true },
+    select: { amount: true, level: true, description: true, status: true, createdAt: true, tuitionChargeId: true },
   },
   tuitionCharges: {
     where: { deletedAt: null },
     select: {
       id: true,
       level: true,
+      attempt: true,
       amount: true,
       waivedAmount: true,
       legacyArrears: true,
@@ -69,6 +70,7 @@ export const STUDENT_ACCESS_SELECT = {
 /** The shape `accessFromStudent` needs — exactly what `STUDENT_ACCESS_SELECT` fetches. */
 export type StudentAccessFields = {
   level: string;
+  attempt?: number;
   classType: string;
   pathway: string;
   deliveryMode?: unknown;
@@ -84,6 +86,7 @@ export type StudentAccessFields = {
   payments: Array<{
     amount: number;
     level?: string | null;
+    tuitionChargeId?: string | null;
     description?: string | null;
     status?: string | null;
     createdAt?: Date | string | null;

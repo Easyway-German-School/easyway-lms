@@ -7,13 +7,15 @@ import {
   isReceivedPayment,
   isRegistrationFeePayment,
   PAYMENT_STATUSES,
+  tuitionFeeFor,
 } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
 import { nextLevelAfter } from "@/lib/levels";
 import { isPaymentLevelAllowedForStudent, levelFromDescription } from "@/lib/payment-level";
-import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { ensureChargeForLevel, ensureRetakeChargeForLevel } from "@/lib/tuition-charges";
+import { retakePrice } from "@/lib/retake-fee";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { getStudentAccess } from "@/lib/student-access";
 import { recordCommissionForPayment } from "@/lib/growth/commission";
@@ -88,6 +90,7 @@ export async function POST(request: Request) {
   const invoiceId = typeof body.invoiceId === "string" && body.invoiceId.trim() ? body.invoiceId : null;
   const status = typeof body.status === "string" ? body.status : "pending";
   const forNextLevel = body.forNextLevel === true;
+  const forRetake = body.forRetake === true;
   const requestedLevel =
     typeof body.level === "string" && body.level.trim() ? body.level.trim().toUpperCase() : "";
   const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
@@ -115,6 +118,8 @@ export async function POST(request: Request) {
       select: {
         id: true,
         level: true,
+        levelCompletedFor: true,
+        levelCompletedAt: true,
         classType: true,
         pathway: true,
         branch: { select: { name: true } },
@@ -140,6 +145,7 @@ export async function POST(request: Request) {
           status,
           level: requestedLevel || null,
           forNextLevel,
+          forRetake,
         }),
       )
       .digest("hex");
@@ -147,7 +153,21 @@ export async function POST(request: Request) {
     if (replay) return replay;
 
     let paymentLevel = requestedLevel;
-    if (forNextLevel) {
+    if (forRetake) {
+      if (forNextLevel) {
+        return NextResponse.json({ error: "A payment cannot be both a next-level payment and a retake." }, { status: 400 });
+      }
+      if (status !== "completed") {
+        return NextResponse.json({ error: "A retake can only be recorded after the full payment has been received." }, { status: 400 });
+      }
+      if (student.levelCompletedFor !== student.level || !student.levelCompletedAt) {
+        return NextResponse.json({ error: "The current level must be signed off before recording a retake." }, { status: 409 });
+      }
+      if (requestedLevel && requestedLevel !== student.level.toUpperCase()) {
+        return NextResponse.json({ error: `A retake payment must be assigned to ${student.level}.` }, { status: 400 });
+      }
+      paymentLevel = student.level.toUpperCase();
+    } else if (forNextLevel) {
       const next = nextLevelAfter(student.level);
       if (!next) {
         return NextResponse.json(
@@ -187,14 +207,32 @@ export async function POST(request: Request) {
 
     const description =
       descriptionRaw ||
-      (forNextLevel ? `${paymentLevel} tuition — next level` : `${paymentLevel} tuition`);
+      (forRetake
+        ? `${paymentLevel} retake tuition — 30% discount`
+        : forNextLevel
+          ? `${paymentLevel} tuition — next level`
+          : `${paymentLevel} tuition`);
 
+    const retakeAmount = retakePrice(tuitionFeeFor({
+      level: student.level,
+      branch: student.branch?.name ?? null,
+      classType: student.classType,
+      pathway: student.pathway,
+    })).fee;
     const charge = paymentLevel && !isRegistrationFeePayment(description)
-      ? await ensureChargeForLevel({
-          studentId,
-          level: paymentLevel,
-          origin: forNextLevel ? "next_level_payment" : "admin",
-        })
+      ? forRetake
+        ? await ensureRetakeChargeForLevel({
+            studentId,
+            level: paymentLevel,
+            amount: retakeAmount,
+            requestKey: idempotencyKey,
+            note: "30% retake discount on tuition",
+          })
+        : await ensureChargeForLevel({
+            studentId,
+            level: paymentLevel,
+            origin: forNextLevel ? "next_level_payment" : "admin",
+          })
       : null;
     const chargeReady = !paymentLevel || isRegistrationFeePayment(description) || Boolean(charge);
     if (!chargeReady) {
@@ -206,19 +244,29 @@ export async function POST(request: Request) {
 
     let payment;
     try {
-      payment = await prisma.payment.create({
-        data: {
-          studentId,
-          amount: Math.round(amount),
-          currency,
-          method,
-          description,
-          invoiceId,
-          status,
-          level: paymentLevel || null,
-          idempotencyKey,
-          idempotencyFingerprint: fingerprint,
-        },
+      payment = await prisma.$transaction(async (tx) => {
+        const created = await tx.payment.create({
+          data: {
+            studentId,
+            amount: Math.round(amount),
+            currency,
+            method,
+            description,
+            invoiceId,
+            status,
+            level: paymentLevel || null,
+            tuitionChargeId: charge?.chargeId ?? null,
+            idempotencyKey,
+            idempotencyFingerprint: fingerprint,
+          },
+        });
+        if (forRetake) {
+          await tx.student.updateMany({
+            where: { id: studentId, level: paymentLevel, levelCompletedFor: paymentLevel },
+            data: { levelCompletedFor: null, levelCompletedAt: null },
+          });
+        }
+        return created;
       });
     } catch (error) {
       const replay = await idempotentPaymentResponse(idempotencyKey, studentId, fingerprint);

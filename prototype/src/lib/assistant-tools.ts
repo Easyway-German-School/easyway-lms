@@ -1744,6 +1744,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
             select: {
               id: true,
               level: true,
+              attempt: true,
               amount: true,
               waivedAmount: true,
               legacyArrears: true,
@@ -1755,7 +1756,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
           },
           payments: {
             where: { ...receivedPaymentFilter(), deletedAt: null },
-            select: { amount: true, level: true, description: true, createdAt: true },
+            select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
           },
         },
       });

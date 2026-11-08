@@ -28,6 +28,7 @@ export type ChargeOrigin =
   | "signup"
   | "promotion"
   | "next_level_payment"
+  | "retake"
   | "admin"
   | "import"
   | "backfill";
@@ -94,7 +95,7 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
   }
 
   const existing = await prisma.tuitionCharge.findUnique({
-    where: { studentId_level: { studentId: student.id, level } },
+    where: { studentId_level_attempt: { studentId: student.id, level, attempt: 1 } },
     select: { id: true, amount: true, historyStatus: true },
   });
   if (existing) {
@@ -136,7 +137,7 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
         });
 
   const existingArchived = await unguardedPrisma.tuitionCharge.findUnique({
-    where: { studentId_level: { studentId: student.id, level } },
+    where: { studentId_level_attempt: { studentId: student.id, level, attempt: 1 } },
     select: { id: true, amount: true, deletedAt: true, studentId: true },
   });
   if (existingArchived?.deletedAt && existingArchived.studentId === student.id) {
@@ -175,6 +176,7 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
   const data: Prisma.TuitionChargeUncheckedCreateInput = {
     studentId: student.id,
     level,
+    attempt: 1,
     amount,
     classType: student.classType ?? "group",
     branchName: student.branch?.name ?? null,
@@ -192,13 +194,145 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
     // Re-read and treat it as "already there" rather than throwing into a
     // payment or promotion path.
     const raced = await prisma.tuitionCharge.findUnique({
-      where: { studentId_level: { studentId: student.id, level } },
+      where: { studentId_level_attempt: { studentId: student.id, level, attempt: 1 } },
       select: { id: true, amount: true },
     });
     if (raced) return { created: false, chargeId: raced.id, level, amount: raced.amount };
     console.error("ensureChargeForLevel: create failed", { studentId: input.studentId, level, error });
     return null;
   }
+}
+
+export type EnsureRetakeChargeInput = {
+  studentId: string;
+  level: string;
+  amount: number;
+  requestKey: string;
+  note?: string;
+  now?: Date;
+};
+
+/**
+ * Record one discounted repeat of a completed level.
+ *
+ * A repeat is a distinct charge, never a rewrite of the student's original
+ * tuition. The payment reference is the request key so webhook retries and
+ * verify/webhook races resolve to the same charge.
+ */
+export async function ensureRetakeChargeForLevel(
+  input: EnsureRetakeChargeInput,
+): Promise<EnsureChargeResult | null> {
+  const level = String(input.level ?? "").trim().toUpperCase();
+  const amount = Math.round(Number(input.amount));
+  const requestKey = String(input.requestKey ?? "").trim();
+  if (!level || !requestKey || !Number.isFinite(amount) || amount <= 0) return null;
+
+  const existingByRequest = await prisma.tuitionCharge.findUnique({
+    where: { requestKey },
+    select: { id: true, studentId: true, level: true, amount: true },
+  });
+  if (existingByRequest) {
+    if (
+      existingByRequest.studentId !== input.studentId ||
+      existingByRequest.level !== level ||
+      existingByRequest.amount !== amount
+    ) {
+      console.error("ensureRetakeChargeForLevel: request key is already bound to another charge", {
+        requestKey,
+        studentId: input.studentId,
+        level,
+      });
+      return null;
+    }
+    return {
+      created: false,
+      chargeId: existingByRequest.id,
+      level: existingByRequest.level,
+      amount: existingByRequest.amount,
+    };
+  }
+
+  const student = await prisma.student.findUnique({
+    where: { id: input.studentId },
+    select: { id: true, classType: true, tenantId: true, branch: { select: { name: true } } },
+  });
+  if (!student) return null;
+
+  for (let attemptTry = 0; attemptTry < 3; attemptTry += 1) {
+    const latest = await prisma.tuitionCharge.findFirst({
+      where: { studentId: student.id, level },
+      orderBy: { attempt: "desc" },
+      select: { attempt: true },
+    });
+    const attempt = (latest?.attempt ?? 0) + 1;
+    try {
+      const charge = await prisma.tuitionCharge.create({
+        data: {
+          studentId: student.id,
+          level,
+          attempt,
+          requestKey,
+          amount,
+          classType: student.classType ?? "group",
+          branchName: student.branch?.name ?? null,
+          origin: "retake",
+          note: input.note ?? "30% retake discount",
+          ...(student.tenantId ? { tenantId: student.tenantId } : {}),
+          ...(input.now ? { createdAt: input.now } : {}),
+        },
+        select: { id: true },
+      });
+      return { created: true, chargeId: charge.id, level, amount };
+    } catch (error) {
+      const racedRequest = await prisma.tuitionCharge.findUnique({
+        where: { requestKey },
+        select: { id: true, studentId: true, level: true, amount: true },
+      });
+      if (racedRequest) {
+        if (
+          racedRequest.studentId !== input.studentId ||
+          racedRequest.level !== level ||
+          racedRequest.amount !== amount
+        ) {
+          console.error("ensureRetakeChargeForLevel: raced request key is bound to another charge", {
+            requestKey,
+            studentId: input.studentId,
+            level,
+          });
+          return null;
+        }
+        return {
+          created: false,
+          chargeId: racedRequest.id,
+          level: racedRequest.level,
+          amount: racedRequest.amount,
+        };
+      }
+
+      const racedAttempt = await prisma.tuitionCharge.findUnique({
+        where: {
+          studentId_level_attempt: { studentId: student.id, level, attempt },
+        },
+        select: { id: true, amount: true },
+      });
+      if (racedAttempt) continue;
+
+      console.error("ensureRetakeChargeForLevel: create failed", {
+        studentId: input.studentId,
+        level,
+        requestKey,
+        error,
+      });
+      return null;
+    }
+  }
+
+  console.error("ensureRetakeChargeForLevel: retry limit reached", {
+    studentId: input.studentId,
+    level,
+    requestKey,
+  });
+  return null;
 }
 
 export type RepriceResult = {
@@ -246,18 +380,18 @@ export async function reconcileCurrentLevelChargeForPathway(studentId: string, n
       branch: { select: { name: true } },
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true },
+        select: { id: true, level: true, attempt: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true },
       },
       payments: {
         where: { deletedAt: null },
-        select: { amount: true, level: true, description: true, status: true, createdAt: true },
+        select: { amount: true, level: true, description: true, status: true, createdAt: true, tuitionChargeId: true },
       },
     },
   });
   if (!student) return null;
 
   const level = String(student.level ?? "").trim().toUpperCase();
-  const currentCharge = student.tuitionCharges.find((c) => c.level.trim().toUpperCase() === level) ?? null;
+  const currentCharge = student.tuitionCharges.find((c) => c.level.trim().toUpperCase() === level && c.attempt === 1) ?? null;
   if (!currentCharge) return { studentId, level, from: 0, to: 0, repriced: false, reason: "no_charge_yet" };
 
   const liveFee = tuitionFeeFor({
@@ -310,6 +444,7 @@ export async function loadStudentLedger(studentId: string, now: Date = new Date(
       select: {
         id: true,
         level: true,
+        attempt: true,
         amount: true,
         waivedAmount: true,
         legacyArrears: true,
@@ -319,7 +454,7 @@ export async function loadStudentLedger(studentId: string, now: Date = new Date(
     }),
     prisma.payment.findMany({
       where: { studentId, ...receivedPaymentFilter() },
-      select: { amount: true, level: true, description: true, createdAt: true },
+      select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
     }),
   ]);
 

@@ -59,7 +59,7 @@ export type RepriceRow = {
 };
 
 /** Everything except a person-typed figure or a pre-ledger level can be repriced. */
-const INELIGIBLE_ORIGINS = ["admin"];
+const INELIGIBLE_ORIGINS = ["admin", "retake"];
 
 type Candidate = {
   chargeId: string;
@@ -75,6 +75,7 @@ async function loadCandidates(onlyIds?: string[]): Promise<Candidate[]> {
       legacyArrears: false,
       waivedAmount: 0,
       origin: { notIn: INELIGIBLE_ORIGINS },
+      attempt: 1,
       ...(onlyIds ? { id: { in: onlyIds } } : {}),
     },
     select: {
@@ -142,6 +143,7 @@ async function withOpenBalances(candidates: Candidate[]): Promise<Array<Candidat
         select: {
           id: true,
           level: true,
+          attempt: true,
           amount: true,
           waivedAmount: true,
           legacyArrears: true,
@@ -153,7 +155,7 @@ async function withOpenBalances(candidates: Candidate[]): Promise<Array<Candidat
       },
       payments: {
         where: { ...receivedPaymentFilter(), deletedAt: null },
-        select: { amount: true, level: true, description: true, createdAt: true },
+        select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
       },
     },
   });

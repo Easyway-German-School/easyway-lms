@@ -49,13 +49,13 @@ export async function GET(req: NextRequest) {
     const charges = ids.length
       ? await prisma.tuitionCharge.findMany({
           where: { studentId: { in: ids }, deletedAt: null },
-          select: { studentId: true, id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
+          select: { studentId: true, id: true, level: true, attempt: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
         })
       : [];
     const payments = ids.length
       ? await prisma.payment.findMany({
           where: { studentId: { in: ids }, ...receivedPaymentFilter() },
-        select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
+        select: { studentId: true, amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
         })
       : [];
     const chargesByStudent = new Map<string, typeof charges>();

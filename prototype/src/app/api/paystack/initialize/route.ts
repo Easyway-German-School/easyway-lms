@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
@@ -21,6 +22,7 @@ import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { applyPromoDiscountIfNeeded } from "@/lib/promo-discount";
 import { getStudentAccess } from "@/lib/student-access";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
+import { retakePrice } from "@/lib/retake-fee";
 
 /**
  * Opens a Paystack checkout.
@@ -45,6 +47,14 @@ export async function POST(request: Request) {
     const requestType = String(body?.type ?? "").toLowerCase();
     const forNextLevel = Boolean(body?.forNextLevel);
     const forPriorBalance = Boolean(body?.forPriorBalance);
+    const forRetake = Boolean(body?.forRetake);
+
+    if (forRetake && (forNextLevel || forPriorBalance || requestType)) {
+      return NextResponse.json({ error: "Retake checkout cannot be combined with another payment type." }, { status: 400 });
+    }
+    if (forRetake && requestedStage !== "full") {
+      return NextResponse.json({ error: "Retake tuition must be paid in full." }, { status: 400 });
+    }
 
     const studentRecord = await prisma.student.findUnique({
       where: { userId: session.user.id as string },
@@ -117,7 +127,7 @@ export async function POST(request: Request) {
           email: userEmail,
           amount: privatePrice * 100,
           currency: "NGN",
-          reference: `easyway-private-${Date.now()}-${session.user.id}`,
+          reference: `easyway-private-${randomUUID()}-${session.user.id}`,
           callback_url: callbackUrl,
           metadata: {
             kind: "private_class_upgrade",
@@ -164,7 +174,28 @@ export async function POST(request: Request) {
     let priorOwedLevel: string | null = null;
     let priorBalanceToPay = 0;
 
-    if (forPriorBalance) {
+    if (forRetake) {
+      if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
+        return NextResponse.json(
+          { error: "Your level must be signed off before you can book a discounted retake." },
+          { status: 409 },
+        );
+      }
+      const currentPosition = (LEVELS as readonly string[]).indexOf(studentRecord.level.toUpperCase());
+      const ledger = await loadStudentLedger(studentRecord.id);
+      const previousBalance = ledger.lines.some((line) => {
+        const position = (LEVELS as readonly string[]).indexOf(line.level.toUpperCase());
+        return position >= 0 && currentPosition >= 0 && position < currentPosition && line.outstanding > 0;
+      });
+      if (previousBalance) {
+        return NextResponse.json(
+          { error: "Clear your previous-level tuition balance before booking a retake." },
+          { status: 409 },
+        );
+      }
+      billingLevel = studentRecord.level;
+      alreadyPaid = 0;
+    } else if (forPriorBalance) {
       let balanceBeforeLevel = studentRecord.level;
       if (forNextLevel) {
         if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
@@ -243,14 +274,14 @@ export async function POST(request: Request) {
     }
 
     const charge =
-      requestedStage !== "registration"
+      requestedStage !== "registration" && !forRetake
         ? await ensureChargeForLevel({
             studentId: studentRecord.id,
             level: billingLevel,
             origin: forNextLevel ? "next_level_payment" : "signup",
           })
         : null;
-    if (requestedStage !== "registration" && !charge) {
+    if (requestedStage !== "registration" && !forRetake && !charge) {
       return NextResponse.json(
         { error: `We couldn't prepare the ${billingLevel} tuition balance. No payment has been started; please try again or contact your branch office.` },
         { status: 503 },
@@ -258,7 +289,8 @@ export async function POST(request: Request) {
     }
 
     const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType, pathway: studentRecord.pathway };
-    const grossTuitionFee = tuitionFeeFor(feeLookup);
+    const fullTuitionFee = tuitionFeeFor(feeLookup);
+    const grossTuitionFee = forRetake ? retakePrice(fullTuitionFee).fee : fullTuitionFee;
 
     if (requestedStage !== "registration" && !forPriorBalance && !isLevelSellable(billingLevel)) {
       return NextResponse.json(
@@ -276,7 +308,7 @@ export async function POST(request: Request) {
     // request body (see the comment on this route's price derivation above).
     let discountAmount = 0;
 
-    if (requestedStage !== "registration") {
+    if (requestedStage !== "registration" && !forRetake) {
       const charge = await ensureChargeForLevel({
         studentId: studentRecord.id,
         level: billingLevel,
@@ -289,7 +321,7 @@ export async function POST(request: Request) {
         );
       }
 
-      if (!forNextLevel) {
+      if (!forNextLevel && !forRetake) {
         // Best-effort fallback: normally already applied at signup (see
         // api/auth/signup/route.ts) — this only matters if that best-effort
         // step missed, so the discount still lands the first time this
@@ -311,7 +343,7 @@ export async function POST(request: Request) {
         ? Math.round(normalizedTuitionFee * DEPOSIT_RATE)
         : requiredDepositFor(feeLookup);
 
-    if (requestedStage !== "registration" && !forNextLevel && !forPriorBalance) {
+    if (requestedStage !== "registration" && !forNextLevel && !forPriorBalance && !forRetake) {
       const access = await getStudentAccess(studentRecord.id);
       if (!access) {
         return NextResponse.json({ error: "We couldn't verify your current tuition balance. No payment has been started; please try again." }, { status: 503 });
@@ -333,7 +365,10 @@ export async function POST(request: Request) {
     let effectivePaymentType: "registration" | "deposit" | "full";
     let amountToCharge: number;
 
-    if (requestedStage === "registration") {
+    if (forRetake) {
+      effectivePaymentType = "full";
+      amountToCharge = normalizedTuitionFee;
+    } else if (requestedStage === "registration") {
       effectivePaymentType = "registration";
       amountToCharge = REGISTRATION_FEE;
     } else if (isCustom) {
@@ -465,7 +500,7 @@ export async function POST(request: Request) {
         email: paystackEmail,
         amount: amountToCharge * 100,
         currency: "NGN",
-        reference: `easyway-${Date.now()}-${session.user.id}`,
+        reference: `easyway-${randomUUID()}-${session.user.id}`,
         callback_url: callbackUrl,
         metadata: {
           userId: session.user.id,
@@ -477,12 +512,15 @@ export async function POST(request: Request) {
           totalAmount: String(invoiceTotal),
           depositAmount: String(amountToCharge),
           tuitionFee: String(invoiceTotal),
+          baseTuitionFee: forRetake ? String(fullTuitionFee) : "",
           requiredThreshold: String(requiredThreshold),
           depositPercent: String(normalizedDepositPercent),
           paymentType: effectivePaymentType,
           paymentStage: effectivePaymentType,
           forNextLevel: forNextLevel ? "true" : "false",
           forPriorBalance: forPriorBalance ? "true" : "false",
+          forRetake: forRetake ? "true" : "false",
+          retakeDiscountPercent: forRetake ? "30" : "",
           targetLevel: billingLevel,
           level: billingLevel,
         },

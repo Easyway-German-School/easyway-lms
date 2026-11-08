@@ -182,6 +182,7 @@ export async function GET(request: Request) {
             id: true,
             studentId: true,
             level: true,
+            attempt: true,
             amount: true,
             waivedAmount: true,
             legacyArrears: true,
@@ -192,7 +193,7 @@ export async function GET(request: Request) {
         }),
         prisma.payment.findMany({
           where: { studentId: { in: studentIds }, ...receivedPaymentFilter() },
-          select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
+          select: { studentId: true, amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
         }),
       ])
     : [[], []];

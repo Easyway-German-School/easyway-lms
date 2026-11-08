@@ -7,6 +7,7 @@ import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 
 import TuitionCheckout from "@/components/TuitionCheckout";
 import NextLevelCheckout from "@/components/NextLevelCheckout";
+import RetakeCheckout from "@/components/RetakeCheckout";
 import { LEVELS } from "@/lib/levels";
 import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
 import TravelPackageShowcase from "@/components/TravelPackageShowcase";
@@ -119,6 +120,7 @@ function ProgramsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const forNextLevel = searchParams.get("forNextLevel") === "1";
+  const forRetake = searchParams.get("forRetake") === "1";
   const [selected, setSelected] = useState(programs[0].pathwayName);
   const [student, setStudent] = useState<StudentInfo | null>(null);
   // Not on the first rung of the ladder — paying for a level reached by
@@ -129,7 +131,7 @@ function ProgramsPageInner() {
   const isReturningLevel = Boolean(
     student?.level && (LEVELS as readonly string[]).indexOf(student.level.toUpperCase()) > 0,
   );
-  const showAsContinuing = forNextLevel || isReturningLevel;
+  const showAsContinuing = forNextLevel || forRetake || isReturningLevel;
   const [showUpsellPopup, setShowUpsellPopup] = useState(false);
 
   useEffect(() => {
@@ -193,20 +195,22 @@ function ProgramsPageInner() {
 
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">
-            {showAsContinuing ? "Continuing your studies" : "Tuition & pathways"}
+            {forRetake ? "Retake tuition" : showAsContinuing ? "Continuing your studies" : "Tuition & pathways"}
           </p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">
-            {showAsContinuing ? "Continue to your next level" : "Settle your tuition"}
+            {forRetake ? "Repeat your current level" : showAsContinuing ? "Continue to your next level" : "Settle your tuition"}
           </h1>
           <p className="mt-4 max-w-2xl text-[var(--muted)]">
-            {showAsContinuing
+            {forRetake
+              ? "Choose to repeat your current level with a 30% tuition discount. Your price is calculated from your current branch and pathway."
+              : showAsContinuing
               ? "You already have a pathway, a tutor and a class — this just pays for the level ahead."
               : "Your tuition is set by your level and your branch — the pathway you pick decides what you study, not what you pay. Choose a track, then complete payment below."}
           </p>
         </header>
 
         {/* The checkout comes first: it is the reason students land on this page. */}
-        {forNextLevel ? <NextLevelCheckout /> : <TuitionCheckout pathwayName={selected} />}
+        {forRetake ? <RetakeCheckout /> : forNextLevel ? <NextLevelCheckout /> : <TuitionCheckout pathwayName={selected} />}
 
         {!showAsContinuing ? (
           <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">

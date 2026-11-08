@@ -752,6 +752,26 @@ model Student {
   heldBackReason String?
 
   /**
+   * Which career/placement track the office has tagged this student onto —
+   * "nursing" today, more later. Null means untagged. Admin-set only, never
+   * self-declared at signup: this drives who shows up on the placement
+   * pipeline and nowhere else, so a wrong tag should take a deliberate click,
+   * not a dropdown a student filled in themselves.
+   */
+  careerTrack String?
+
+  /**
+   * Cached placement-readiness snapshot (see src/lib/readiness.ts) — level +
+   * attendance + skill mastery + payment standing, weighted into one 0-100
+   * score. Recomputed on demand and nightly rather than on every page load,
+   * since it touches Attendance/StudentSkillMastery/Payment on top of the
+   * student row itself. Null until the first computation.
+   */
+  readinessScore      Int?
+  readinessTag        String? // "ready" | "developing" | "not-yet"
+  readinessComputedAt DateTime?
+
+  /**
    * Stages after the classroom — documents, visa, arrival — which no database
    * of ours can observe. The student reports them and the office may verify
    * them: { "visa": { "status": "claimed", "at": "...", "note": "..." } }
@@ -911,6 +931,7 @@ model Student {
 
   @@index([tenantId])
   @@index([tags])
+  @@index([careerTrack])
 }
 
 /**
@@ -2359,6 +2380,8 @@ model Payment {
   student            Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   invoiceId          String?
   invoice            Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  tuitionChargeId    String?
+  tuitionCharge      TuitionCharge? @relation(fields: [tuitionChargeId], references: [id], onDelete: SetNull)
   amount             Int
   currency           String    @default("usd")
   status             String    @default("pending")
@@ -2377,6 +2400,7 @@ model Payment {
   /// Hash of the normalized create request; rejects reuse of a key for changed data.
   idempotencyFingerprint String?
   stripeSessionId    String?
+  paystackReference  String?   @unique
   paymentIntentId    String?
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent
   createdAt          DateTime  @default(now())
@@ -2405,6 +2429,7 @@ model Payment {
 
   @@index([tenantId])
   @@index([studentId, level])
+  @@index([tuitionChargeId])
 }
 
 /// ONE CODE, ONE TYPE — the unified promo-code system. Replaces the
@@ -2609,9 +2634,10 @@ model TuitionCharge {
   studentId String
   student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  /// The level this charge is for, e.g. "A1". One charge per level per student
-  /// (see the unique index) — mirrors how Certificate is keyed.
+  /// The level this charge is for, e.g. "A1". `attempt` distinguishes a repeat
+  /// of a completed level from its original tuition charge.
   level  String
+  attempt Int @default(1)
   /// Fee owed for this level, frozen when the charge was created. A later price
   /// change or branch retier must never move a charge already on the ledger.
   amount Int
@@ -2624,6 +2650,8 @@ model TuitionCharge {
   /// How the charge came to exist: signup | promotion | next_level_payment |
   /// admin | import | backfill.
   origin String
+  /// Stable request key for retry-safe retake charge creation.
+  requestKey String? @unique
 
   /// True for a lower level inferred by the cutover backfill. This is provenance,
   /// not a debt decision; historyStatus controls collection and access behavior.
@@ -2656,7 +2684,9 @@ model TuitionCharge {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([studentId, level])
+  payments Payment[]
+
+  @@unique([studentId, level, attempt])
   @@index([studentId])
   @@index([tenantId])
 }

@@ -8,6 +8,8 @@ import { revealTutorAfterPayment } from "@/lib/tutor-reveal";
 import { guardedFetch } from "@/lib/guarded-fetch";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
+import { ensureRetakeChargeForLevel } from "@/lib/tuition-charges";
+import { retakePrice } from "@/lib/retake-fee";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -74,6 +76,7 @@ export async function persistPaystackTransaction(data: any, fallbackStudentId?: 
   const totalAmount = tuitionFeeValue > 0 ? Math.max(tuitionFeeValue, derivedTotal) : derivedTotal;
   const forNextLevel = String(metadata.forNextLevel || "") === "true";
   const forPriorBalance = String(metadata.forPriorBalance || "") === "true";
+  const forRetake = String(metadata.forRetake || "") === "true";
   const paymentLevel = String(metadata.level || metadata.targetLevel || "").trim().toUpperCase();
   // When Paystack is asked long after the fact — Mission Control backfilling
   // a transaction the webhook missed, sometimes months old — the Payment row
@@ -119,12 +122,60 @@ export async function persistPaystackTransaction(data: any, fallbackStudentId?: 
   // carries this tenant's scope.
   const owner = await prisma.student.findUnique({
     where: { id: studentId },
-    select: { tenantId: true },
+    select: {
+      tenantId: true,
+      level: true,
+      levelCompletedFor: true,
+      levelCompletedAt: true,
+    },
   });
   if (owner?.tenantId) setTenantScope(owner.tenantId);
 
+  let tuitionChargeId: string | null = null;
+  let paymentDescription = getPaymentDescription(effectivePaymentType, pathwayName);
+  if (forRetake) {
+    const baseTuitionFee = Math.max(0, Math.round(Number(metadata.baseTuitionFee || 0)));
+    const expectedRetake = retakePrice(baseTuitionFee);
+    if (
+      !paymentLevel ||
+      !baseTuitionFee ||
+      forNextLevel ||
+      forPriorBalance ||
+      paymentStage !== "full" ||
+      owner?.level !== paymentLevel ||
+      owner.levelCompletedFor !== paymentLevel ||
+      !owner.levelCompletedAt ||
+      tuitionFeeValue !== expectedRetake.fee ||
+      paymentAmount !== expectedRetake.fee
+    ) {
+      console.error("Paystack retake payment rejected: amount did not match the quoted discount", {
+        studentId,
+        reference,
+        paymentAmount,
+        paymentLevel,
+      });
+      return;
+    }
+
+    const retakeCharge = await ensureRetakeChargeForLevel({
+      studentId,
+      level: paymentLevel,
+      amount: expectedRetake.fee,
+      requestKey: reference,
+      note: `30% retake discount on ₦${baseTuitionFee.toLocaleString("en-NG")} tuition`,
+      now: occurredAt,
+    });
+    if (!retakeCharge) {
+      throw new Error(`Could not create the retake charge for Paystack reference ${reference}`);
+    }
+    tuitionChargeId = retakeCharge.chargeId;
+    paymentDescription = `${paymentLevel} retake tuition — 30% discount`;
+  } else {
+    tuitionChargeId = String(metadata.tuitionChargeId || "").trim() || null;
+  }
+
   const existingPayment = await prisma.payment.findFirst({
-    where: { stripeSessionId: reference },
+    where: { OR: [{ paystackReference: reference }, { stripeSessionId: reference }] },
     include: { invoice: true },
   });
 
@@ -143,8 +194,10 @@ export async function persistPaystackTransaction(data: any, fallbackStudentId?: 
         amount: paymentAmount,
         currency,
         method: "paystack",
-        description: getPaymentDescription(effectivePaymentType, pathwayName),
+        description: paymentDescription,
         ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
+        ...(tuitionChargeId ? { tuitionChargeId } : {}),
+        paystackReference: reference,
         paymentIntentId: reference,
       },
     });
@@ -185,59 +238,117 @@ export async function persistPaystackTransaction(data: any, fallbackStudentId?: 
    * deserves its own invoice (see the note on `alreadyPaid` in the checkout
    * route about why a fresh level starts its own ledger).
    */
-  const openInvoice = forNextLevel || forPriorBalance
-    ? null
-    : await prisma.invoice.findFirst({
-        where: { studentId, status: "partial" },
-        orderBy: { createdAt: "asc" },
+  let recordedPayment;
+  if (forRetake) {
+    try {
+      recordedPayment = await prisma.$transaction(async (tx) => {
+        const invoice = await tx.invoice.create({
+          data: {
+            studentId,
+            totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
+            currency,
+            status: paymentClassification.invoiceStatus,
+            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            lineItems: { pathwayId, pathwayName, paymentType: effectivePaymentType, depositPercent, forRetake },
+          },
+        });
+        const payment = await tx.payment.create({
+          data: {
+            studentId,
+            invoiceId: invoice.id,
+            amount: paymentAmount,
+            currency,
+            status: settledStatus,
+            method: "paystack",
+            description: paymentDescription,
+            ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
+            ...(tuitionChargeId ? { tuitionChargeId } : {}),
+            ...(occurredAt ? { createdAt: occurredAt } : {}),
+            stripeSessionId: reference,
+            paystackReference: reference,
+            paymentIntentId: reference,
+          },
+        });
+        await tx.student.updateMany({
+          where: { id: studentId, level: paymentLevel, levelCompletedFor: paymentLevel },
+          data: { levelCompletedFor: null, levelCompletedAt: null },
+        });
+        return payment;
       });
-
-  let invoiceId: string;
-  if (openInvoice) {
-    const priorPaid = await prisma.payment.aggregate({
-      where: { invoiceId: openInvoice.id, status: { in: [...RECEIVED_PAYMENT_STATUSES] } },
-      _sum: { amount: true },
-    });
-    const runningPaid = (priorPaid._sum.amount ?? 0) + paymentAmount;
-    await prisma.invoice.update({
-      where: { id: openInvoice.id },
-      data: { status: runningPaid >= openInvoice.totalAmount ? "paid" : "partial" },
-    });
-    invoiceId = openInvoice.id;
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+        const racedPayment = await prisma.payment.findFirst({
+          where: { OR: [{ paystackReference: reference }, { stripeSessionId: reference }] },
+        });
+        if (racedPayment) return;
+      }
+      throw error;
+    }
   } else {
-    const invoice = await prisma.invoice.create({
-      data: {
-        studentId,
-        totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
-        currency,
-        status: paymentClassification.invoiceStatus,
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        lineItems: {
-          pathwayId,
-          pathwayName,
-          paymentType: effectivePaymentType,
-          depositPercent,
-        },
-      },
-    });
-    invoiceId = invoice.id;
-  }
+    try {
+      recordedPayment = await prisma.$transaction(async (tx) => {
+        const openInvoice = forNextLevel || forPriorBalance
+          ? null
+          : await tx.invoice.findFirst({
+              where: { studentId, status: "partial" },
+              orderBy: { createdAt: "asc" },
+            });
 
-  const recordedPayment = await prisma.payment.create({
-    data: {
-      studentId,
-      invoiceId,
-      amount: paymentAmount,
-      currency,
-      status: settledStatus,
-      method: "paystack",
-      description: getPaymentDescription(effectivePaymentType, pathwayName),
-      ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
-      ...(occurredAt ? { createdAt: occurredAt } : {}),
-      stripeSessionId: reference,
-      paymentIntentId: reference,
-    },
-  });
+        let invoiceId: string;
+        if (openInvoice) {
+          const priorPaid = await tx.payment.aggregate({
+            where: { invoiceId: openInvoice.id, status: { in: [...RECEIVED_PAYMENT_STATUSES] } },
+            _sum: { amount: true },
+          });
+          const runningPaid = (priorPaid._sum.amount ?? 0) + paymentAmount;
+          await tx.invoice.update({
+            where: { id: openInvoice.id },
+            data: { status: runningPaid >= openInvoice.totalAmount ? "paid" : "partial" },
+          });
+          invoiceId = openInvoice.id;
+        } else {
+          const invoice = await tx.invoice.create({
+            data: {
+              studentId,
+              totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
+              currency,
+              status: paymentClassification.invoiceStatus,
+              dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              lineItems: { pathwayId, pathwayName, paymentType: effectivePaymentType, depositPercent, forRetake },
+            },
+          });
+          invoiceId = invoice.id;
+        }
+
+        const payment = await tx.payment.create({
+          data: {
+            studentId,
+            invoiceId,
+            amount: paymentAmount,
+            currency,
+            status: settledStatus,
+            method: "paystack",
+            description: paymentDescription,
+            ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
+            ...(tuitionChargeId ? { tuitionChargeId } : {}),
+            ...(occurredAt ? { createdAt: occurredAt } : {}),
+            stripeSessionId: reference,
+            paystackReference: reference,
+            paymentIntentId: reference,
+          },
+        });
+        return payment;
+      });
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+        const racedPayment = await prisma.payment.findFirst({
+          where: { OR: [{ paystackReference: reference }, { stripeSessionId: reference }] },
+        });
+        if (racedPayment) return;
+      }
+      throw error;
+    }
+  }
 
   await enrollIfPathwayExists({ studentId, pathwayId, reference });
 

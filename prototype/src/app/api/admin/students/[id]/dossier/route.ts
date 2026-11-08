@@ -112,7 +112,7 @@ export async function GET(
       // portal and the admin remote view show. See lib/finance/ledger.ts.
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
+        select: { id: true, level: true, attempt: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
       // A Lecturer carries no name of its own — it hangs off the User row.
       tutor: {

@@ -56,6 +56,23 @@ describe("buildLedger — FIFO allocation", () => {
     expect(ledger.lifetimeOutstanding).toBe(180_000);
   });
 
+  it("allocates a retake payment to its linked charge instead of its original level charge", () => {
+    const ledger = buildLedger(
+      [
+        charge({ id: "original-a1", amount: 150_000, createdAt: new Date(NOW.getTime() - 60 * DAY) }),
+        charge({ id: "retake-a1", amount: 105_000, attempt: 2, createdAt: NOW }),
+      ],
+      105_000,
+      NOW,
+      [{ amount: 105_000, level: "A1", tuitionChargeId: "retake-a1", createdAt: NOW }],
+    );
+
+    expect(ledger.lines.map((line) => [line.chargeId, line.allocated, line.outstanding])).toEqual([
+      ["original-a1", 0, 150_000],
+      ["retake-a1", 105_000, 0],
+    ]);
+  });
+
   it("credits a recorded previous-level payment when the old charge is archived", () => {
     const ledger = buildLedger(
       [charge({ id: "new-a1", level: "A1", amount: 150_000 })],

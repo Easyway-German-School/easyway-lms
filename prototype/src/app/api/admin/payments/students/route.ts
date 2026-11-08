@@ -29,6 +29,7 @@ export type EnrolmentSnapshot = {
 
 export type LedgerLineSnapshot = {
   level: string;
+  attempt: number;
   amount: number;
   allocated: number;
   outstanding: number;
@@ -47,6 +48,8 @@ export type PaymentStudentCard = {
   currentBatchMonth: string | null;
   nextLevel: string | null;
   nextLevelFee: number;
+  currentFee: number;
+  retakeEligible: boolean;
   returning: boolean;
   enrolments: EnrolmentSnapshot[];
   paid: number;
@@ -113,6 +116,8 @@ export async function GET(request: Request) {
       id: true,
       studentCode: true,
       level: true,
+      levelCompletedFor: true,
+      levelCompletedAt: true,
       classType: true,
       pathway: true,
       status: true,
@@ -144,6 +149,7 @@ export async function GET(request: Request) {
             id: true,
             studentId: true,
             level: true,
+            attempt: true,
             amount: true,
             waivedAmount: true,
             legacyArrears: true,
@@ -154,7 +160,7 @@ export async function GET(request: Request) {
         }),
         prisma.payment.findMany({
           where: { studentId: { in: ids }, ...receivedPaymentFilter() },
-          select: { studentId: true, amount: true, level: true, description: true, createdAt: true },
+          select: { studentId: true, amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
         }),
       ])
     : [[], []];
@@ -184,7 +190,8 @@ export async function GET(request: Request) {
       batchFromAdmission(row.admission);
     const currentBatchYear =
       row.enrolments.find((enrolment) => enrolment.outcome === "ongoing")?.batchYear ?? null;
-    const currentLine = ledger.lines.find((line) => line.level === row.level);
+    const currentLines = ledger.lines.filter((line) => line.level === row.level);
+    const currentLine = currentLines.at(-1);
     const currentFee = tuitionFeeFor({
       level: row.level,
       branch: row.branch?.name ?? null,
@@ -202,7 +209,9 @@ export async function GET(request: Request) {
       : 0;
     const previous = row.enrolments.filter((enrolment) => enrolment.outcome !== "ongoing");
     const missingCurrent = !currentLine;
-    const currentOutstanding = currentLine?.outstanding ?? currentFee;
+    const currentOutstanding = currentLines.length
+      ? currentLines.reduce((sum, line) => sum + line.outstanding, 0)
+      : currentFee;
     const currentSettled = currentLine ? currentLine.settled : false;
 
     return {
@@ -217,6 +226,8 @@ export async function GET(request: Request) {
       currentBatchMonth,
       nextLevel: next,
       nextLevelFee: nextFee,
+      currentFee,
+      retakeEligible: row.levelCompletedFor === row.level && Boolean(row.levelCompletedAt),
       returning: previous.length > 0,
       enrolments: row.enrolments.map((enrolment) => ({
         id: enrolment.id,
@@ -232,13 +243,14 @@ export async function GET(request: Request) {
       lines: [
         ...ledger.lines.map((line) => ({
           level: line.level,
+          attempt: chargesByStudent.get(row.id)?.find((charge) => charge.id === line.chargeId)?.attempt ?? 1,
           amount: line.net,
           allocated: line.allocated,
           outstanding: line.outstanding,
           settled: line.settled,
         })),
         ...(missingCurrent && row.level
-          ? [{ level: row.level, amount: currentFee, allocated: 0, outstanding: currentFee, settled: false }]
+        ? [{ level: row.level, attempt: 1, amount: currentFee, allocated: 0, outstanding: currentFee, settled: false }]
           : []),
       ],
       suggested: {
