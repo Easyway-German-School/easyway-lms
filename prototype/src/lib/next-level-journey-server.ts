@@ -47,7 +47,7 @@ export type JourneyOffer = {
 };
 
 export type BatchChoice = {
-  /** Bare month name — what `admission.batch` stores. */
+  /** Bare month name. `holdSeat` writes `label` (year-qualified) to `admission.batch`, not this. */
   value: string;
   /** "November 2026" */
   label: string;
@@ -449,7 +449,12 @@ export async function holdSeat(
     audience.state === "promoted" &&
     placementOnly &&
     new Date(choice.opensOn).getTime() > nowDate.getTime() &&
-    choice.value !== batchFromAdmission(admission);
+    // Compare month + year, not the raw string — admission.batch is now
+    // written year-qualified ("October 2027"), so a bare `choice.value`
+    // string-compare would never match it and `replace` would stay true
+    // forever for a student who already holds exactly this batch.
+    (monthNameToIndex(batchFromAdmission(admission)) !== monthNameToIndex(choice.value) ||
+      (admission.batchYear as number | undefined) !== choice.year);
 
   const intent: NextLevelIntent = {
     ...(existing ?? { targetLevel }),
@@ -466,7 +471,15 @@ export async function holdSeat(
         ...admission,
         ...(intent.details?.phone ? { phone: intent.details.phone } : {}),
         ...(intent.details?.parentPhone ? { parentPhone: intent.details.parentPhone } : {}),
-        ...(replace && choice ? { batch: choice.value } : {}),
+        // Year-qualified ("October 2027"), not the bare month `choice.value`
+        // alone — batch-reservation.ts's stale-registration guard only ever
+        // reads this string, never `batchYear`, and discards a bare month
+        // more than ~6 months out as a stale label rather than a deliberate
+        // far-future hold. A student who holds a seat a year or more ahead
+        // (see the Ruth Adelusi incident, Nov 2026) needs that lock to use
+        // the year she actually picked, not the nearest October counted
+        // forward from her original registration date.
+        ...(replace && choice ? { batch: choice.label, batchYear: choice.year } : {}),
         nextLevel: intent,
       } as never,
       ...(replace && choice
