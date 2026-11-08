@@ -17,6 +17,7 @@ import {
   type Capability,
 } from "@/lib/admin-roles";
 import { tenantWhere } from "@/lib/auth";
+import { currentTenantId } from "@/lib/tenant/context";
 import { GROWTH_TITLES, GROWTH_TITLE_LABELS, normalizeGrowthTitle } from "@/lib/growth/titles";
 import { generateTempPassword } from "@/lib/student-password";
 import { sendAdminWelcomeEmail } from "@/lib/admin-welcome-email";
@@ -243,6 +244,11 @@ export async function POST(req: NextRequest) {
         role: "ADMIN",
         adminRole,
         growthTitle,
+        // User is a global model — the isolation extension does not stamp
+        // tenantId on a top-level create, only on relations nested inside
+        // one. Without this, every staff account made here landed owned by
+        // nobody (see src/lib/tenant/extension.ts).
+        tenantId: currentTenantId(),
       },
       select: { id: true, name: true, email: true, createdAt: true },
     });

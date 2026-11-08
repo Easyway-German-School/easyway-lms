@@ -121,6 +121,13 @@ export async function POST(req: NextRequest) {
                 password: await bcryptjs.hash(generatedPassword!, 10),
                 role: "ADMIN",
                 adminRole: "influencer",
+                // `User` is a global model, so the isolation extension only
+                // stamps tenantId on relations NESTED inside a create, never
+                // on the top-level row — the same gap documented for
+                // lecturers/signup in 2026-08-11 (see tenant/extension.ts),
+                // just never closed for this route. Without this, every
+                // influencer account created here landed owned by nobody.
+                tenantId: currentTenantId(),
               },
               select: { id: true },
             })
