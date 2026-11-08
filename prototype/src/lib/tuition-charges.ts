@@ -391,7 +391,15 @@ export async function reconcileCurrentLevelChargeForPathway(studentId: string, n
   if (!student) return null;
 
   const level = String(student.level ?? "").trim().toUpperCase();
-  const currentCharge = student.tuitionCharges.find((c) => c.level.trim().toUpperCase() === level && c.attempt === 1) ?? null;
+  // The LATEST attempt at this level is the one the student currently owes
+  // against — a retake (attempt 2+) supersedes the original for repricing
+  // purposes. `attempt` defaults to 1 on the column but older in-memory
+  // fixtures and pre-migration rows may omit it, so missing reads as 1.
+  const levelCharges = student.tuitionCharges.filter((c) => c.level.trim().toUpperCase() === level);
+  const currentCharge =
+    levelCharges.length === 0
+      ? null
+      : levelCharges.reduce((latest, c) => ((c.attempt ?? 1) >= (latest.attempt ?? 1) ? c : latest));
   if (!currentCharge) return { studentId, level, from: 0, to: 0, repriced: false, reason: "no_charge_yet" };
 
   const liveFee = tuitionFeeFor({
