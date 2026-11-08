@@ -321,9 +321,10 @@ export function deriveStudentAccess({
 
   const ledger = charges && charges.length ? buildLedger(charges, paid, now, payments ?? undefined) : null;
   const currentLevelKey = String(level ?? "").trim().toUpperCase();
-  const currentLine = ledger && currentLevelKey
-    ? ledger.lines.find((line) => line.level.toUpperCase() === currentLevelKey) ?? null
-    : null;
+  const currentLines = ledger && currentLevelKey
+    ? ledger.lines.filter((line) => line.level.toUpperCase() === currentLevelKey)
+    : [];
+  const currentLine = currentLines.at(-1) ?? null;
   const currentLevelPayments = currentLevelKey
     ? (payments ?? []).reduce((sum, payment) => {
         if (resolvePaymentLevel(payment) !== currentLevelKey) return sum;
@@ -387,8 +388,8 @@ export function deriveStudentAccess({
   const currentLevelOutstanding = paidOtherLevelsOnly
     ? Math.max(0, fee - currentLevelPaid)
     : ledger
-      ? currentLine
-        ? currentLine.legacyArrears ? 0 : currentLine.outstanding
+      ? currentLines.length
+        ? currentLines.reduce((sum, line) => sum + (line.legacyArrears ? 0 : line.outstanding), 0)
         : missingCurrentCharge
           ? Math.max(0, fee - currentLevelPaid)
           : Math.max(0, fee - paid)
