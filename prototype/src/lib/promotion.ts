@@ -391,7 +391,7 @@ export async function promoteStudents(
         });
         const note = `${currentCharge?.note ? `${currentCharge.note} · ` : ""}Travel Package balance follows current level as of ${now.toISOString().slice(0, 10)}`;
         const targetCharge = await unguardedPrisma.tuitionCharge.findUnique({
-          where: { studentId_level: { studentId, level: next } },
+          where: { studentId_level_attempt: { studentId, level: next, attempt: 1 } },
           select: { id: true },
         });
         if (targetCharge && targetCharge.id !== charge.chargeId) {

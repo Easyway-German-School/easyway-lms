@@ -54,6 +54,7 @@ function toWholeNaira(value: unknown): number {
 export type LedgerChargeInput = {
   id: string;
   level: string;
+  attempt?: number | null;
   amount: number;
   waivedAmount?: number | null;
   legacyArrears?: boolean | null;
@@ -66,6 +67,7 @@ export type LedgerChargeInput = {
 export type LedgerPaymentInput = {
   amount: number;
   level?: string | null;
+  tuitionChargeId?: string | null;
   description?: string | null;
   createdAt?: Date | string | null;
 };
@@ -151,7 +153,8 @@ export function buildLedger(
     const at = toDate(a.createdAt)?.getTime() ?? 0;
     const bt = toDate(b.createdAt)?.getTime() ?? 0;
     if (at !== bt) return at - bt;
-    return ladderIndex(a.level) - ladderIndex(b.level);
+    const levelOrder = ladderIndex(a.level) - ladderIndex(b.level);
+    return levelOrder || (Number(a.attempt) || 1) - (Number(b.attempt) || 1);
   });
 
   const paid = toWholeNaira(totalPaid);
@@ -222,6 +225,15 @@ export function buildLedger(
       if (remaining <= 0) break;
       const amount = Math.min(remaining, toWholeNaira(payment.amount));
       remaining -= amount;
+      const chargeIndex = payment.tuitionChargeId
+        ? lines.findIndex(
+            (line) =>
+              line.chargeId === payment.tuitionChargeId &&
+              line.historyStatus !== "unreviewed",
+          )
+        : -1;
+      const afterCharge =
+        chargeIndex >= 0 ? allocate([chargeIndex], amount) : amount;
       const level = resolvePaymentLevel({
         stamped: payment.level,
         description: payment.description,
@@ -231,7 +243,7 @@ export function buildLedger(
             line.historyStatus !== "unreviewed" && line.level.toUpperCase() === level ? [index] : [],
           )
         : [];
-      const afterLevel = allocate(matchingIndices, amount);
+      const afterLevel = allocate(matchingIndices, afterCharge);
       allocate(fifoIndices, afterLevel);
     }
   }

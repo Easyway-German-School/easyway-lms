@@ -50,11 +50,12 @@ export async function GET() {
       tutor: { select: { user: { select: { name: true } } } },
       payments: {
         where: { ...receivedPaymentFilter(), deletedAt: null },
-        select: { amount: true, level: true, description: true, createdAt: true },
+        select: { amount: true, level: true, description: true, createdAt: true, tuitionChargeId: true },
       },
       tuitionCharges: {
         where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
+        select: { id: true,         level: true,
+        attempt: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
       },
     },
   });

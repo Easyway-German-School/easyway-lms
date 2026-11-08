@@ -108,6 +108,7 @@ export function agingBucketFor(daysEnrolled: number): AgingBucketId {
 export const FINANCE_STUDENT_SELECT = {
   id: true,
   level: true,
+  attempt: true,
   status: true,
   classType: true,
   pathway: true,
@@ -130,7 +131,7 @@ export const FINANCE_STUDENT_SELECT = {
     // where type. `description` is loaded so `computeStudentFinance` drops it
     // in memory instead (see the `received` filter below).
     where: { status: { in: RECEIVED_PAYMENT_STATUSES }, deletedAt: null },
-    select: { amount: true, createdAt: true, method: true, description: true, level: true },
+    select: { amount: true, createdAt: true, method: true, description: true, level: true, tuitionChargeId: true },
   },
   // The per-level ledger — the debit side. Present for every student once the
   // cutover backfill has run; a student with none yet falls back to the
@@ -140,6 +141,7 @@ export const FINANCE_STUDENT_SELECT = {
     select: {
       id: true,
       level: true,
+      attempt: true,
       amount: true,
       waivedAmount: true,
       legacyArrears: true,
@@ -308,9 +310,9 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
    */
   const ledger = buildLedger(student.tuitionCharges ?? [], paid, now, received);
   const ledgerPopulated = ledgerIsPopulated(ledger);
-  const currentLine = ledger.lines.find(
-    (line) => line.level.toUpperCase() === String(student.level ?? "").trim().toUpperCase(),
-  );
+  const currentLine = ledger.lines
+    .filter((line) => line.level.toUpperCase() === String(student.level ?? "").trim().toUpperCase())
+    .at(-1);
   // The charge is frozen when raised. A later price-book edit must not make
   // the roster quote a different fee from the student's actual current bill.
   const tuitionFee = currentLine?.net ?? quotedTuitionFee;

@@ -6,6 +6,7 @@ import AdminShell from "@/components/AdminShell";
 import LevelHistoryManager from "@/components/admin/LevelHistoryManager";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { paymentLevelsForStudent } from "@/lib/payment-level";
+import { retakePrice } from "@/lib/retake-fee";
 
 /**
  * AMOUNTS ARE WHOLE NAIRA.
@@ -63,6 +64,7 @@ type PaymentRecord = {
 
 type LedgerLineSnapshot = {
   level: string;
+  attempt: number;
   amount: number;
   allocated: number;
   outstanding: number;
@@ -81,6 +83,8 @@ type PaymentStudentCard = {
   currentBatchMonth: string | null;
   nextLevel: string | null;
   nextLevelFee: number;
+  currentFee: number;
+  retakeEligible: boolean;
   returning: boolean;
   enrolments: Array<EnrolmentChip & { feeSnapshot: number | null; branchName: string | null }>;
   paid: number;
@@ -120,6 +124,7 @@ function PaymentsLedger() {
   const [status, setStatus] = useState("pending");
   const [paymentLevel, setPaymentLevel] = useState("");
   const [forNextLevel, setForNextLevel] = useState(false);
+  const [forRetake, setForRetake] = useState(false);
   const [formError, setFormError] = useState("");
   const [formNotice, setFormNotice] = useState("");
   const [noticeGood, setNoticeGood] = useState(false);
@@ -236,15 +241,17 @@ function PaymentsLedger() {
     setStatus("pending");
     setPaymentLevel("");
     setForNextLevel(false);
+    setForRetake(false);
   }
 
-  function applyStudent(card: PaymentStudentCard, prefill?: { amount?: number; description?: string; status?: string; method?: string; level?: string; forNextLevel?: boolean }) {
+  function applyStudent(card: PaymentStudentCard, prefill?: { amount?: number; description?: string; status?: string; method?: string; level?: string; forNextLevel?: boolean; forRetake?: boolean }) {
     setPicked(card);
     setStudentId(card.id);
     setStudentQuery("");
     setStudentMatches([]);
     setPaymentLevel(prefill?.level ?? card.level);
     setForNextLevel(Boolean(prefill?.forNextLevel));
+    setForRetake(Boolean(prefill?.forRetake));
     if (prefill?.amount !== undefined) setAmount(prefill.amount);
     if (prefill?.description !== undefined) setDescription(prefill.description);
     if (prefill?.status !== undefined) setStatus(prefill.status);
@@ -254,7 +261,7 @@ function PaymentsLedger() {
 
   async function openPaymentForm(
     student: { id: string; user: { name?: string | null; email: string } },
-    prefill?: { amount?: number; description?: string; status?: string; method?: string; level?: string; forNextLevel?: boolean },
+    prefill?: { amount?: number; description?: string; status?: string; method?: string; level?: string; forNextLevel?: boolean; forRetake?: boolean },
   ) {
     setShowForm(true);
     setFormError("");
@@ -274,6 +281,7 @@ function PaymentsLedger() {
     if (prefill?.method !== undefined) setMethod(prefill.method);
     if (prefill?.level) setPaymentLevel(prefill.level);
     setForNextLevel(Boolean(prefill?.forNextLevel));
+    setForRetake(Boolean(prefill?.forRetake));
   }
 
   function recordCurrentLevel(card: PaymentStudentCard) {
@@ -286,6 +294,7 @@ function PaymentsLedger() {
       method: "bank_transfer",
       level: card.level,
       forNextLevel: false,
+      forRetake: false,
     });
   }
 
@@ -299,6 +308,20 @@ function PaymentsLedger() {
       method: "bank_transfer",
       level: next.level,
       forNextLevel: true,
+      forRetake: false,
+    });
+  }
+
+  function recordRetake(card: PaymentStudentCard) {
+    if (!card.retakeEligible) return;
+    const fee = retakePrice(card.currentFee).fee;
+    applyStudent(card, {
+      amount: fee,
+      description: `${card.level} retake tuition — 30% discount`,
+      status: "completed",
+      method: "bank_transfer",
+      level: card.level,
+      forRetake: true,
     });
   }
 
@@ -420,6 +443,7 @@ function PaymentsLedger() {
       status,
       level: paymentLevel || null,
       forNextLevel,
+      forRetake,
     };
     const fingerprint = JSON.stringify(requestBody);
     let attempt = createAttemptRef.current;
@@ -596,6 +620,7 @@ function PaymentsLedger() {
                   }}
                   onRecordCurrent={() => recordCurrentLevel(picked)}
                   onRecordNext={() => recordNextLevel(picked)}
+                  onRecordRetake={() => recordRetake(picked)}
                 />
               ) : (
                 <>
@@ -659,8 +684,39 @@ function PaymentsLedger() {
             </div>
 
             <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 text-sm md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={forRetake}
+                  disabled={!picked || !picked.retakeEligible}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setForRetake(checked);
+                    setForNextLevel(false);
+                    if (checked && picked) {
+                      setPaymentLevel(picked.level);
+                      setDescription(`${picked.level} retake tuition — 30% discount`);
+                      setAmount(retakePrice(picked.currentFee).fee);
+                      setStatus("completed");
+                    } else if (picked) {
+                      setDescription(`${picked.level} tuition`);
+                    }
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block font-semibold text-[var(--foreground)]">Record a retake payment (30% off)</span>
+                  <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                    {picked?.retakeEligible
+                      ? `Retake tuition for ${picked.level}: ${naira(retakePrice(picked.currentFee).fee)}. Enter the actual amount received below.`
+                      : picked
+                        ? "This student's current level has not been signed off for a retake."
+                        : "Select a student to calculate the discounted fee from their current price book."}
+                  </span>
+                </span>
+              </label>
               <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Amount</span>
+                <span className="font-semibold text-[var(--muted)]">{forRetake ? "Amount actually received" : "Amount"}</span>
                 <input
                   type="number"
                   value={amount}
@@ -674,8 +730,13 @@ function PaymentsLedger() {
                 <select
                   value={paymentLevel}
                   onChange={(event) => {
-                    setPaymentLevel(event.target.value);
-                    setForNextLevel(Boolean(picked?.nextLevel && event.target.value === picked.nextLevel));
+                    const selectedLevel = event.target.value;
+                    setPaymentLevel(selectedLevel);
+                    setForNextLevel(Boolean(picked?.nextLevel && selectedLevel === picked.nextLevel));
+                    if (selectedLevel !== picked?.level) {
+                      setForRetake(false);
+                      setDescription(`${selectedLevel} tuition`);
+                    }
                   }}
                   disabled={!picked}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -730,6 +791,7 @@ function PaymentsLedger() {
                 <select
                   value={status}
                   onChange={(event) => setStatus(event.target.value)}
+                  disabled={forRetake}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="pending">Pending — money not in yet</option>
@@ -743,6 +805,11 @@ function PaymentsLedger() {
                 This will be stored as {paymentLevel || "next-level"} tuition. If their current level is already signed off, they move up; otherwise the money is on file for when they do.
               </p>
             ) : null}
+            {forRetake ? (
+              <p className="mt-3 text-xs text-[var(--muted)]">
+                This payment will be linked to a separate {paymentLevel || "current-level"} retake charge. The original tuition history will stay unchanged.
+              </p>
+            ) : null}
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 type="button"
@@ -750,7 +817,7 @@ function PaymentsLedger() {
                 disabled={formBusy}
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {formBusy ? "Saving…" : forNextLevel ? `Save ${paymentLevel || "next-level"} payment` : "Save payment"}
+                {formBusy ? "Saving…" : forRetake ? `Save ${paymentLevel || "retake"} payment` : forNextLevel ? `Save ${paymentLevel || "next-level"} payment` : "Save payment"}
               </button>
               <button
                 type="button"
@@ -1405,11 +1472,13 @@ function StudentBillingCard({
   onClear,
   onRecordCurrent,
   onRecordNext,
+  onRecordRetake,
 }: {
   card: PaymentStudentCard;
   onClear: () => void;
   onRecordCurrent: () => void;
   onRecordNext: () => void;
+  onRecordRetake: () => void;
 }) {
   const previous = card.enrolments.filter((entry) => entry.outcome !== "ongoing");
   const currentBatch = batchLabel(
@@ -1482,8 +1551,10 @@ function StudentBillingCard({
             </thead>
             <tbody>
               {card.lines.map((line) => (
-                <tr key={line.level} className="border-t border-[var(--border)]/60">
-                  <td className="py-1.5 pr-3 font-semibold">{line.level}</td>
+                <tr key={`${line.level}-${line.attempt}`} className="border-t border-[var(--border)]/60">
+                  <td className="py-1.5 pr-3 font-semibold">
+                    {line.level}{line.attempt > 1 ? ` · Retake ${line.attempt - 1}` : ""}
+                  </td>
                   <td className="py-1.5 pr-3">{naira(line.amount)}</td>
                   <td className="py-1.5 pr-3">{naira(line.allocated)}</td>
                   <td className="py-1.5 font-semibold">{line.settled ? "Settled" : naira(line.outstanding)}</td>
@@ -1522,6 +1593,15 @@ function StudentBillingCard({
             className="rounded-lg border border-sky-400 bg-[var(--surface)] px-3 py-2 text-xs font-semibold text-sky-800"
           >
             Record {card.suggested.next.level} (next level) · {naira(card.suggested.next.fee)}
+          </button>
+        ) : null}
+        {card.retakeEligible ? (
+          <button
+            type="button"
+            onClick={onRecordRetake}
+            className="rounded-lg border border-emerald-500/60 bg-[var(--surface)] px-3 py-2 text-xs font-semibold text-emerald-800"
+          >
+            Record {card.level} retake · {naira(retakePrice(card.currentFee).fee)}
           </button>
         ) : null}
       </div>

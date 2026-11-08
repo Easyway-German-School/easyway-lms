@@ -94,7 +94,7 @@ suite("findChargesOutOfStep", () => {
       deletedAt: null,
       legacyArrears: false,
       waivedAmount: 0,
-      origin: { notIn: ["admin"] },
+      origin: { notIn: ["admin", "retake"] },
     });
   });
 

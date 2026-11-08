@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction, isReceivedPayment } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
-import { enrollIfPathwayExists } from "@/lib/paystack-verify";
+import { enrollIfPathwayExists, persistPaystackTransaction } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 import { sendPaymentReceiptEmail } from "@/lib/payment-receipt-email";
@@ -126,6 +126,11 @@ async function handlePOST(request: Request) {
       return NextResponse.json({ received: true, examFee: result });
     }
 
+    if (String(metadata.forRetake || "") === "true") {
+      await persistPaystackTransaction(data);
+      return NextResponse.json({ received: true });
+    }
+
     /**
      * A student upgrading to one-to-one tuition. Recorded as its own payment,
      * separate from the tuition/deposit ledger above, and — unlike every other
@@ -140,7 +145,9 @@ async function handlePOST(request: Request) {
       const upgradeAmount = Math.round(Number(data.amount || 0) / 100);
 
       const alreadyRecorded = upgradeReference
-        ? await prisma.payment.findFirst({ where: { stripeSessionId: upgradeReference } })
+        ? await prisma.payment.findFirst({
+            where: { OR: [{ paystackReference: upgradeReference }, { stripeSessionId: upgradeReference }] },
+          })
         : null;
       if (alreadyRecorded) {
         return NextResponse.json({ received: true });
@@ -171,6 +178,7 @@ async function handlePOST(request: Request) {
           method: "paystack",
           description: "Private (one-to-one) class upgrade",
           stripeSessionId: upgradeReference,
+          paystackReference: upgradeReference,
           paymentIntentId: upgradeReference,
         },
       });
@@ -276,7 +284,9 @@ async function handlePOST(request: Request) {
     // cannot throw. See `enrollIfPathwayExists`.
 
     const existingPayment = paymentReference
-      ? await prisma.payment.findFirst({ where: { stripeSessionId: paymentReference } })
+      ? await prisma.payment.findFirst({
+          where: { OR: [{ paystackReference: paymentReference }, { stripeSessionId: paymentReference }] },
+        })
       : null;
 
     if (existingPayment) {
@@ -296,6 +306,7 @@ async function handlePOST(request: Request) {
           method: "paystack",
           description: getPaymentDescription(effectivePaymentType, pathwayName),
           ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
+          paystackReference: paymentReference,
           paymentIntentId: paymentReference,
         },
       });
@@ -341,35 +352,38 @@ async function handlePOST(request: Request) {
       return NextResponse.json({ received: true });
     }
 
-    const invoice = await prisma.invoice.create({
-      data: {
-        studentId: student.id,
-        totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
-        currency: "NGN",
-        status: paymentClassification.invoiceStatus,
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        lineItems: {
-          pathwayId,
-          pathwayName,
-          paymentType: effectivePaymentType,
-          depositPercent,
+    const payment = await prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.create({
+        data: {
+          studentId: student.id,
+          totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
+          currency: "NGN",
+          status: paymentClassification.invoiceStatus,
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          lineItems: {
+            pathwayId,
+            pathwayName,
+            paymentType: effectivePaymentType,
+            depositPercent,
+          },
         },
-      },
-    });
+      });
 
-    const payment = await prisma.payment.create({
-      data: {
-        studentId: student.id,
-        invoiceId: invoice.id,
-        amount: paymentAmount,
-        currency: "NGN",
-        status: settledStatus,
-        method: "paystack",
-        description: getPaymentDescription(effectivePaymentType, pathwayName),
-        ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
-        stripeSessionId: paymentReference,
-        paymentIntentId: paymentReference,
-      },
+      return tx.payment.create({
+        data: {
+          studentId: student.id,
+          invoiceId: invoice.id,
+          amount: paymentAmount,
+          currency: "NGN",
+          status: settledStatus,
+          method: "paystack",
+          description: getPaymentDescription(effectivePaymentType, pathwayName),
+          ...(paymentLevel && effectivePaymentType !== "registration" ? { level: paymentLevel } : {}),
+          stripeSessionId: paymentReference,
+          paystackReference: paymentReference,
+          paymentIntentId: paymentReference,
+        },
+      });
     });
 
     /**

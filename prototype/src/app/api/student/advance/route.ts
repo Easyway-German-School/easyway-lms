@@ -5,10 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { monthsSinceBatchStart } from "@/lib/promotion";
 import { nextLevelAfter, SESSION_MONTHS, WEEKS_OF_TEACHING, sessionDurationMonths, weeksOfTeachingFor } from "@/lib/levels";
 import { isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
-import { ADVANCE_PERKS, perWeekCost, type LevelAdvanceOffer } from "@/lib/level-advance";
+import { ADVANCE_PERKS, naira, perWeekCost, type LevelAdvanceOffer } from "@/lib/level-advance";
 import { buildCountdown } from "@/lib/germany-journey";
 import { KIND, notify } from "@/lib/notify";
 import { getStudentAccess } from "@/lib/student-access";
+import { retakePrice } from "@/lib/retake-fee";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +113,7 @@ export async function GET() {
       sessionMonths: sessionDurationMonths(student.sessionSlot),
       weeksOfTeaching: weeksOfTeachingFor(student.sessionSlot),
       tuitionFee: nextFee,
+      retakeTuition: retakePrice(tuitionFeeFor(feeLookup)),
       requiredDeposit: nextLevel ? requiredDepositFor({ ...feeLookup, level: nextLevel }) : 0,
       perWeek: perWeekCost(nextFee, weeksOfTeachingFor(student.sessionSlot)),
       sellableOnline: nextLevel ? isLevelSellable(nextLevel) : false,
@@ -142,10 +144,10 @@ export async function GET() {
               ? `You have completed ${currentLevel} — the top of the ladder`
               : `Your ${currentLevel} class is complete — ${nextLevel} is next`,
             message: offer.atTopOfLadder
-              ? `Congratulations. You have finished ${currentLevel}, the highest level we teach. Speak to your branch about registering for your final exam and collecting your certificate.`
+              ? `Congratulations. You have finished ${currentLevel}, the highest level we teach. Speak to your branch about registering for your final exam and collecting your certificate. You can also repeat ${currentLevel} with 30% off tuition (${naira(offer.retakeTuition?.fee ?? 0)}).`
               : currentLevelOutstanding > 0
-                ? `Congratulations on finishing ${currentLevel}. There is ₦${currentLevelOutstanding.toLocaleString()} still open on it — clear that and your place in ${nextLevel} is confirmed. ${nextLevel} runs for ${sessionDurationMonths(student.sessionSlot)} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}.`
-                : `Congratulations on finishing ${currentLevel}. ${nextLevel} runs for ${sessionDurationMonths(student.sessionSlot)} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}. Continue now to keep your tutor, your class and your streak.`,
+                ? `Congratulations on finishing ${currentLevel}. There is ₦${currentLevelOutstanding.toLocaleString()} still open on it — clear that and your place in ${nextLevel} is confirmed. ${nextLevel} runs for ${sessionDurationMonths(student.sessionSlot)} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}. Or repeat ${currentLevel} with 30% off tuition (${naira(offer.retakeTuition?.fee ?? 0)}).`
+                : `Congratulations on finishing ${currentLevel}. ${nextLevel} runs for ${sessionDurationMonths(student.sessionSlot)} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}. Continue now to keep your tutor, your class and your streak, or repeat ${currentLevel} with 30% off tuition (${naira(offer.retakeTuition?.fee ?? 0)}).`,
             channel: "in-app",
             studentId: student.id,
             branchId: student.branchId,
