@@ -49,7 +49,7 @@ function naira(amount: number): string {
 export default function TravelPackagePage() {
   const [students, setStudents] = useState<TravelPackageStudent[]>([]);
   const [packagePrice, setPackagePrice] = useState(980000);
-  const [minFirstPayment, setMinFirstPayment] = useState(200000);
+  const [minFirstPayment, setMinFirstPayment] = useState(588000);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [payModal, setPayModal] = useState<TravelPackageStudent | null>(null);
@@ -73,7 +73,7 @@ export default function TravelPackagePage() {
       if (!res.ok) throw new Error(data.error ?? "Could not load the Travel Package roster");
       setStudents(data.students ?? []);
       setPackagePrice(data.packagePrice ?? 980000);
-      setMinFirstPayment(data.minFirstPayment ?? 200000);
+      setMinFirstPayment(data.minFirstPayment ?? 588000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {

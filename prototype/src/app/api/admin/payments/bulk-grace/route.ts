@@ -5,6 +5,7 @@ import { bulkGraceBatchLabel, BULK_GRACE_PAYMENT_STATUSES, compareBulkGraceBatch
 import { computeStudentFinance, FINANCE_STUDENT_SELECT } from "@/lib/finance/receivables";
 import { LEVELS } from "@/lib/levels";
 import { prisma } from "@/lib/prisma";
+import { travelPackageChargesForAccess } from "@/lib/travel-package";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +99,10 @@ async function findTargets(
 
   for (const student of students) {
     const batch = bulkGraceBatchLabel(student);
-    const finance = computeStudentFinance(student, now);
+    const finance = computeStudentFinance(
+      { ...student, tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges) },
+      now,
+    );
     const currentCharge = finance.openCharges.find(
       (charge) => charge.level.toUpperCase() === student.level.toUpperCase(),
     );

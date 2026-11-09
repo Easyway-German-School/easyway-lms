@@ -12,6 +12,7 @@ import {
   type StudentFinance,
 } from "@/lib/finance/receivables";
 import { chaseMessage, noteHasAmount, CHASE_NOTE_MAX, type ChaseMessage } from "@/lib/finance/chase";
+import { travelPackageChargesForAccess } from "@/lib/travel-package";
 import {
   buildRosterWhereClause,
   ROSTER_INCLUDE,
@@ -243,7 +244,10 @@ export async function sendChaseChunk(request: ChunkRequest, ctx: Ctx): Promise<C
   const dedupeKey = `${CHASE_KEY_PREFIX}${dayKeyOf(now)}`;
 
   for (const student of students) {
-    const finance: StudentFinance = computeStudentFinance(student, now);
+    const finance: StudentFinance = computeStudentFinance(
+      { ...student, tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges) },
+      now,
+    );
     const category = chaseCategoryOf(finance);
     if (!category || (request.category && category !== request.category)) {
       result.noLongerOwing++;

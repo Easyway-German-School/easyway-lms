@@ -62,7 +62,12 @@ export const DEFAULT_PRICE_BOOK: PriceBook = {
   },
   private: { A1: 300000, A2: 300000, B1: 360000, B2: 360000, C1: 350000 },
   examPrep: { A1: 100000, A2: 110000, B1: 120000, B2: 130000 },
-  travelPackage: { price: 980000, minFirstPayment: 200000 },
+  // The minimum first payment is 60% of the flat price (₦588,000) — the same
+  // deposit rate every other pathway enrols on, not a separate lower floor.
+  // Once it's cleared, the student pays the rest in any amounts, across any
+  // level, with no further deposit demanded on a level move (see
+  // travelPackageChargesForAccess in lib/travel-package.ts).
+  travelPackage: { price: 980000, minFirstPayment: 588000 },
 };
 
 /** A sanity ceiling, not a business rule — catches an extra zero typed into a box. */

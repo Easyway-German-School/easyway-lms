@@ -58,6 +58,37 @@ export type TravelPackageReconcileResult = {
   minFirstPayment: number;
 };
 
+/**
+ * A Travel Package charge's `level` field is just wherever it was raised or
+ * last relabelled — it is ONE flat charge for the whole programme (see
+ * `ensureChargeForLevel`'s "look for ANY existing charge" guard above), never
+ * a second per-level ladder. But `computeStudentFinance` and
+ * `deriveStudentAccess` both pick "the charge for the student's current
+ * level" by matching that field against `student.level` exactly, and the
+ * relabelling does not happen on every path a student advances through (an
+ * imported row, a level bumped by hand). When it is stale, both of those
+ * read "no charge for this level" — which they treat as a previous,
+ * unrelated level still owing — so a student who has already paid toward
+ * their one ₦980,000 charge sees the full amount demanded again, on top of
+ * what they already paid.
+ *
+ * Call this on a Travel Package student's `tuitionCharges` wherever they feed
+ * `computeStudentFinance` or `deriveStudentAccess`, so the charge always
+ * reads as "this student's current level" regardless of what is actually
+ * stored. Display/gating only — never writes to the database. A non-Travel
+ * Package pathway, or an empty/undefined charge list, passes through
+ * untouched.
+ */
+export function travelPackageChargesForAccess<T extends { level: string }>(
+  pathway: string | null | undefined,
+  currentLevel: string | null | undefined,
+  charges: T[] | null | undefined,
+): T[] {
+  if (!charges || charges.length === 0) return charges ?? [];
+  if (!isTravelPackagePathway(pathway) || !currentLevel) return charges;
+  return charges.map((charge) => ({ ...charge, level: currentLevel }));
+}
+
 function ladderIndex(level: string): number {
   const i = (LEVELS as readonly string[]).indexOf(String(level ?? "").trim().toUpperCase());
   return i === -1 ? LEVELS.length : i;
