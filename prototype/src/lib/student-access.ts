@@ -137,10 +137,31 @@ export function accessFromStudent(
   // level" and demands the flat fee a second time.
   const charges = travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges);
 
+  // Travel Package's minimum first payment is read live off the price book
+  // (requiredDepositFor), unlike the per-level ladder's 60%, which is frozen
+  // onto the charge the moment it's raised. That means a student who was let
+  // into class on the OLD floor gets re-tested against a LATER, higher one
+  // every single time their access is checked — a floor raised from
+  // ₦200,000 to ₦588,000 locks someone out mid-course who paid ₦450,000 and
+  // has been attending for a month, with no change on their side at all.
+  // Once classes have actually started, grandfather them: the floor they
+  // need to have cleared is capped at whatever they'd already paid, so a
+  // later policy change only ever raises the bar for who gets let in next,
+  // never evicts someone already in.
+  const classesStarted = student.classesStartedAt
+    ? new Date(student.classesStartedAt as string | number | Date)
+    : null;
+  const alreadyStarted = Boolean(classesStarted && !Number.isNaN(classesStarted.getTime()) && classesStarted.getTime() <= Date.now());
+  const liveRequiredDeposit = requiredDepositFor(feeLookup);
+  const requiredDeposit =
+    isTravelPackagePathway(student.pathway) && alreadyStarted
+      ? Math.min(liveRequiredDeposit, totalPaid)
+      : liveRequiredDeposit;
+
   return deriveStudentAccess({
     totalPaid,
     tuitionFee: tuitionFeeFor(feeLookup),
-    requiredDeposit: requiredDepositFor(feeLookup),
+    requiredDeposit,
     // An online-branch student whose own `deliveryMode` column was never set
     // must still resolve to "online" here, or every consumer of the returned
     // `.deliveryMode` (the sidebar, the live-tab check) wrongly treats them as
