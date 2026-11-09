@@ -14,6 +14,7 @@ import type { LedgerChargeInput } from "@/lib/finance/ledger";
 import { batchFromAdmission } from "@/lib/batch";
 import type { IntakeStartDayOverrides } from "@/lib/intake";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { travelPackageChargesForAccess } from "@/lib/travel-package";
 
 /**
  * The exact Prisma field set the payment gate needs off a Student, as a
@@ -131,6 +132,11 @@ export function accessFromStudent(
     pathway: student.pathway,
   };
 
+  // See travelPackageChargesForAccess — a Travel Package charge's stored
+  // `level` can be stale, which otherwise reads as "no charge for this
+  // level" and demands the flat fee a second time.
+  const charges = travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges);
+
   return deriveStudentAccess({
     totalPaid,
     tuitionFee: tuitionFeeFor(feeLookup),
@@ -143,7 +149,7 @@ export function accessFromStudent(
     deliveryMode: isOnlineBranch(student.branch) ? "online" : student.deliveryMode,
     classType: student.classType,
     level: student.level,
-    charges: student.tuitionCharges,
+    charges,
     payments: receivedTuitionPayments,
     flatDeposit: isTravelPackagePathway(student.pathway),
     classesStartedAt: student.classesStartedAt,

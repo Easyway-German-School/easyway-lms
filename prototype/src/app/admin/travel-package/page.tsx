@@ -49,7 +49,7 @@ function naira(amount: number): string {
 export default function TravelPackagePage() {
   const [students, setStudents] = useState<TravelPackageStudent[]>([]);
   const [packagePrice, setPackagePrice] = useState(980000);
-  const [minFirstPayment, setMinFirstPayment] = useState(200000);
+  const [minFirstPayment, setMinFirstPayment] = useState(588000);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [payModal, setPayModal] = useState<TravelPackageStudent | null>(null);
@@ -62,6 +62,7 @@ export default function TravelPackagePage() {
   const [convertQuery, setConvertQuery] = useState("");
   const [convertHits, setConvertHits] = useState<StudentSearchHit[]>([]);
   const [convertSearching, setConvertSearching] = useState(false);
+  const [notifyingPrep, setNotifyingPrep] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,7 +73,7 @@ export default function TravelPackagePage() {
       if (!res.ok) throw new Error(data.error ?? "Could not load the Travel Package roster");
       setStudents(data.students ?? []);
       setPackagePrice(data.packagePrice ?? 980000);
-      setMinFirstPayment(data.minFirstPayment ?? 200000);
+      setMinFirstPayment(data.minFirstPayment ?? 588000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -83,6 +84,25 @@ export default function TravelPackagePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function notifyPrepReady() {
+    setNotifyingPrep(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/travel-package/prep-notify", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not send that");
+      setNotice(
+        data.sent > 0
+          ? `Becca told ${data.sent} student${data.sent === 1 ? "" : "s"} about the new Visa & Interview Prep guide.`
+          : "Everyone currently on the Travel Package has already been told about the guide.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send that");
+    } finally {
+      setNotifyingPrep(false);
+    }
+  }
 
   async function recordPayment(amount: number) {
     if (!payModal || !Number.isFinite(amount) || amount <= 0) return;
@@ -256,6 +276,15 @@ export default function TravelPackagePage() {
                   className="inline-flex items-center justify-center gap-2 rounded-full border border-white/25 px-5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10"
                 >
                   {showConvert ? "Close" : "Move an existing student here"}
+                </button>
+                <button
+                  type="button"
+                  disabled={notifyingPrep || students.length === 0}
+                  onClick={notifyPrepReady}
+                  title="Sends every Travel Package student a one-time notification pointing at their new Visa & Interview Prep page — see /travel-package."
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/25 px-5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  {notifyingPrep ? "Telling Becca…" : "Becca: announce the Prep guide"}
                 </button>
               </div>
             </div>

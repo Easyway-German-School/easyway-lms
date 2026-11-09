@@ -2,7 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { MONTH_NAMES, batchFromAdmission, monthNameToIndex } from "@/lib/batch";
 import { nextPlacement } from "@/lib/graduation";
 import { intakeMonthKey, startDayFor, type IntakeStartDayOverrides } from "@/lib/intake";
-import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { readIntakeStartDayOverrides, resolveSettingsTenantId } from "@/lib/intake-server";
+import { signupSlotIsClosed } from "@/lib/signup-availability";
+import { readClosedSignupSlots } from "@/lib/signup-availability-server";
 import { SESSION_MONTHS, sessionDurationMonths, weeksOfTeachingFor } from "@/lib/levels";
 import { DEPOSIT_RATE, isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { loadStudentLedger } from "@/lib/tuition-charges";
@@ -47,7 +49,7 @@ export type JourneyOffer = {
 };
 
 export type BatchChoice = {
-  /** Bare month name — what `admission.batch` stores. */
+  /** Bare month name. `holdSeat` writes `label` (year-qualified) to `admission.batch`, not this. */
   value: string;
   /** "November 2026" */
   label: string;
@@ -165,12 +167,42 @@ export function opensFor(
  *    that has already opened, if the move was late) plus the intakes still to
  *    open. Nobody is offered a way back into a batch that is under way.
  */
+/**
+ * Whether a (batch, year) sits on a slot the office closed for signups — see
+ * signup-availability.ts. The public signup form has always refused a closed
+ * slot; this journey did not, so a graduating student could "keep their
+ * seat" straight into a batch the office explicitly shut, with no form in
+ * between to stop them. Checked against the level they are moving into and
+ * the session slot they already sit in — they are not choosing a new one
+ * here, just which month.
+ */
+async function closedBatchPredicate(
+  student: JourneyStudent,
+  targetLevel: string,
+): Promise<(absolute: number) => boolean> {
+  const tenantId = await resolveSettingsTenantId(student.tenantId ?? null);
+  if (!tenantId) return () => false;
+  const closedSlots = await readClosedSignupSlots(tenantId);
+  if (closedSlots.length === 0) return () => false;
+  return (absolute: number) => {
+    const year = Math.floor(absolute / 12);
+    const monthIndex = absolute % 12;
+    return signupSlotIsClosed(closedSlots, {
+      batch: MONTH_NAMES[monthIndex],
+      year,
+      level: targetLevel,
+      sessionSlot: student.sessionSlot ?? "morning",
+    });
+  };
+}
+
 export function batchChoicesFor(
   audience: JourneyAudience,
   naturalOpensOn: string | null,
   overrides: IntakeStartDayOverrides,
   now: Date,
   count = 3,
+  isClosed: (absolute: number) => boolean = () => false,
 ): BatchChoice[] {
   const level = audience.targetLevel;
   const opening = (absolute: number) => {
@@ -199,15 +231,21 @@ export function batchChoicesFor(
   if (audience.state === "promoted") {
     const today = instantToZonedParts(now);
     const todayAbsolute = today.year * 12 + (today.month - 1);
+    // Already placed somewhere is kept even if that slot is now closed — it is
+    // where they already are, not a new choice being offered.
     const picks = new Set<number>(placedAt === null ? [] : [placedAt]);
     for (let m = todayAbsolute; picks.size < count && m < todayAbsolute + 24; m += 1) {
-      if (opening(m).startsOn.getTime() > now.getTime()) picks.add(m);
+      if (opening(m).startsOn.getTime() > now.getTime() && !isClosed(m)) picks.add(m);
     }
     return [...picks].sort((x, y) => x - y).slice(0, count).map(toChoice);
   }
 
   if (placedAt === null) return [];
-  return Array.from({ length: count }, (_, i) => toChoice(placedAt + i));
+  const picks: number[] = [];
+  for (let m = placedAt; picks.length < count && m < placedAt + 24; m += 1) {
+    if (!isClosed(m)) picks.push(m);
+  }
+  return picks.map(toChoice);
 }
 
 function dayLabel(date: Date): string {
@@ -324,7 +362,8 @@ export async function loadJourney(student: JourneyStudent, now = new Date()): Pr
   const fee = tuitionFeeFor({ level: target, branch: branchName, pathway: student.pathway });
   const [money, access] = await Promise.all([seatAndOwed(student.id, target), getStudentAccess(student.id)]);
   const opens = opensFor(student, audience, overrides, now);
-  const batchChoices = batchChoicesFor(audience, opens.opensOn, overrides, now);
+  const isClosed = await closedBatchPredicate(student, target);
+  const batchChoices = batchChoicesFor(audience, opens.opensOn, overrides, now, 3, isClosed);
   const certificate = await prisma.certificate
     .findFirst({
       where: { studentId: student.id, level: audience.finishedLevel, revokedAt: null },
@@ -434,7 +473,8 @@ export async function holdSeat(
   // a month, never a date.
   const overrides = await readIntakeStartDayOverrides(student.tenantId ?? null);
   const opens = opensFor(student, audience, overrides, nowDate);
-  const choices = batchChoicesFor(audience, opens.opensOn, overrides, nowDate);
+  const isClosed = await closedBatchPredicate(student, targetLevel);
+  const choices = batchChoicesFor(audience, opens.opensOn, overrides, nowDate, 3, isClosed);
   const choice = details.batch ? (choices.find((c) => c.value === details.batch) ?? null) : null;
   if (details.batch && !choice) details.batch = undefined;
   // Someone already moved up and not yet started can be re-placed on the spot;
@@ -449,7 +489,12 @@ export async function holdSeat(
     audience.state === "promoted" &&
     placementOnly &&
     new Date(choice.opensOn).getTime() > nowDate.getTime() &&
-    choice.value !== batchFromAdmission(admission);
+    // Compare month + year, not the raw string — admission.batch is now
+    // written year-qualified ("October 2027"), so a bare `choice.value`
+    // string-compare would never match it and `replace` would stay true
+    // forever for a student who already holds exactly this batch.
+    (monthNameToIndex(batchFromAdmission(admission)) !== monthNameToIndex(choice.value) ||
+      (admission.batchYear as number | undefined) !== choice.year);
 
   const intent: NextLevelIntent = {
     ...(existing ?? { targetLevel }),
@@ -466,7 +511,15 @@ export async function holdSeat(
         ...admission,
         ...(intent.details?.phone ? { phone: intent.details.phone } : {}),
         ...(intent.details?.parentPhone ? { parentPhone: intent.details.parentPhone } : {}),
-        ...(replace && choice ? { batch: choice.value } : {}),
+        // Year-qualified ("October 2027"), not the bare month `choice.value`
+        // alone — batch-reservation.ts's stale-registration guard only ever
+        // reads this string, never `batchYear`, and discards a bare month
+        // more than ~6 months out as a stale label rather than a deliberate
+        // far-future hold. A student who holds a seat a year or more ahead
+        // (see the Ruth Adelusi incident, Nov 2026) needs that lock to use
+        // the year she actually picked, not the nearest October counted
+        // forward from her original registration date.
+        ...(replace && choice ? { batch: choice.label, batchYear: choice.year } : {}),
         nextLevel: intent,
       } as never,
       ...(replace && choice
