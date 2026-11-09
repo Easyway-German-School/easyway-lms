@@ -1,8 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { cohortRoomName, roomDisplayName } from "@/lib/live-classroom";
-import { canAttendLive } from "@/lib/access";
-import { isOnlineBranch } from "@/lib/online-branch";
 import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
 import { batchOfAdmission, canonicalBatch, studentMayJoinBatch } from "@/lib/class-batch";
 
@@ -477,22 +475,16 @@ export async function liveSessionForStudent(student: {
   // room, reached through an invite (handled above), never here.
   if (student.classType === "private") return null;
 
-  // A hybrid student may walk into ANY live sitting of their branch and
-  // level — morning, afternoon, evening, or the weekend one, whichever is
-  // actually running. An online-only student attends over video too, but
-  // stays pinned to the one sitting they signed up for: they chose that slot
-  // deliberately (it is often the only one that fits their day), and letting
-  // them wander is not the same courtesy a campus-registered hybrid student
-  // gets when their usual room happens to be empty. A physical student is
-  // held to their own slot outright: the morning cohort's room is a
-  // different class from the evening one, and they sit one of them in
-  // person.
-  const attendsOverVideo =
-    canAttendLive(student.deliveryMode, student.classType) ||
-    isOnlineBranch(student.branch ?? null);
-  const mayJoinAnyCohortFlag = mayJoinAnyLiveCohort(student.deliveryMode);
+  // Every student is pinned to exactly one sitting. A hybrid student's
+  // online half can be a different slot from their on-campus half (picked at
+  // signup, or changed later) — that one matched slot is `hybridTargetSlot`,
+  // and it is the only sitting they may walk into besides their own. Nobody
+  // gets "any sitting of the level, whichever is running": that used to be
+  // the rule and let one online tutor's coverage sweep in students who were
+  // never meant to be theirs (see lib/hybrid-combo.ts).
   const hybridTargetSlot =
     student.deliveryMode === "hybrid" ? student.hybridOnlineSlot?.toLowerCase() ?? null : null;
+  const targetSlot = hybridTargetSlot ?? student.sessionSlot;
 
   // THE BATCH IS PART OF THE CLASS. A room pinned to the October batch is not
   // the September student's class even when branch, level and sitting all
@@ -521,11 +513,7 @@ export async function liveSessionForStudent(student: {
         kind: "cohort",
         branchId: student.branchId,
         level: student.level,
-        ...(attendsOverVideo && mayJoinAnyCohortFlag
-          ? hybridTargetSlot
-            ? { sessionSlot: hybridTargetSlot }
-            : {}
-          : { sessionSlot: student.sessionSlot }),
+        sessionSlot: targetSlot,
         ...liveWhere(now),
       },
       include: { lecturer: { select: { user: { select: { name: true } } } } },

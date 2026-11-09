@@ -301,8 +301,8 @@ export default function SmartCalendarClient() {
             Also open to you
           </p>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            You attend hybrid, so you can join any sitting of {data.currentLevel ?? data.level} live —
-            not just your own. Here is what else is on.
+            Your hybrid online sitting runs at a different time from your on-campus one — here it is,
+            so you can join both.
           </p>
           <div className="mt-4 space-y-4">
             {data.alsoJoinable!.map((track) => {
