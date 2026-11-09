@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { getMergedSchedule, type MergedSession } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
-import { TIME_SLOTS } from "@/lib/class-times";
 import { applyMoves } from "@/lib/schedule-moves";
 
 /**
@@ -86,37 +85,29 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
   });
 
   /**
-   * A hybrid student may join any sitting of their level, whichever time it
-   * runs (see `liveSessionForStudent`) — weekend included, since Saturday is
-   * just another sitting to this feature, not a special case: a weekday
-   * hybrid student can drop into the weekend one and vice versa. An
-   * online-only student stays on the one sitting they signed up for — see
-   * `mayJoinAnyLiveCohort` for why that split holds even though both attend
-   * over video. Their own sitting is the calendar above; every other sitting
-   * a hybrid student can reach rides along as a separate list so they can see
-   * what else is on and plan to drop in. Not merged into `months` — the node
-   * builder counts one class per day.
+   * Hybrid used to mean "join any sitting of the level, whichever is
+   * running" — that vagueness is what let one online tutor's coverage sweep
+   * in students who were never meant to be theirs (see lib/hybrid-combo.ts).
+   * A hybrid student now has exactly one matched pair of sittings: their own
+   * on-campus slot (the calendar above) and, when it differs, their picked
+   * online slot. Nothing else is theirs to see or join, so no "also open to
+   * you" list is built here any more.
    */
   let alsoJoinable: Array<{ slot: string; sessions: MergedSession[] }> | undefined;
-  const mayJoinAnyCohortFlag = student.deliveryMode === "hybrid";
-  if (!viewingNext && mayJoinAnyCohortFlag) {
-    const own = (student.sessionSlot ?? "morning").toLowerCase();
-    const otherSlots = TIME_SLOTS.filter((s) => s !== own);
-    const built = await Promise.all(
-      otherSlots.map((s) =>
-        getMergedSchedule({
-          branchId: student.branchId,
-          level,
-          batch,
-          registeredAt: student.createdAt,
-          sessionSlot: s,
-          now: new Date(),
-          months: sessionDurationMonths(s),
-        }).then((r) => ({ slot: s, sessions: applyMoves(r.months).flatMap((m) => m.sessions) })),
-      ),
-    );
-    const withClasses = built.filter((b) => b.sessions.length > 0);
-    if (withClasses.length) alsoJoinable = withClasses;
+  const onlineSlot = (student.hybridOnlineSlot ?? "").toLowerCase();
+  const ownSlot = (student.sessionSlot ?? "").toLowerCase();
+  if (!viewingNext && student.deliveryMode === "hybrid" && onlineSlot && onlineSlot !== ownSlot) {
+    const merged = await getMergedSchedule({
+      branchId: student.branchId,
+      level,
+      batch,
+      registeredAt: student.createdAt,
+      sessionSlot: onlineSlot,
+      now: new Date(),
+      months: sessionDurationMonths(onlineSlot),
+    });
+    const sessions = applyMoves(merged.months).flatMap((m) => m.sessions);
+    if (sessions.length) alsoJoinable = [{ slot: onlineSlot, sessions }];
   }
 
   return {
