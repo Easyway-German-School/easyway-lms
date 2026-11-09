@@ -180,9 +180,11 @@ suite("resolvePartialPaymentAmount — guards", () => {
 
 /**
  * Travel Package: a flat ₦980,000 that REPLACES the per-level ladder, with a
- * ₦200,000 minimum first payment instead of the usual 60% deposit. These are
- * the only two functions that decide the price and the floor — everything
- * else (cohort, lock, dashboard) just reads whatever these two return.
+ * ₦588,000 (60%) minimum first payment — the same deposit rate as every
+ * other pathway, just computed once against the flat price instead of per
+ * level. These are the only two functions that decide the price and the
+ * floor — everything else (cohort, lock, dashboard) just reads whatever
+ * these two return.
  */
 suite("isTravelPackagePathway", () => {
   it("matches the exact pathway, case- and whitespace-insensitively", () => {
@@ -222,10 +224,10 @@ suite("tuitionFeeFor — Travel Package", () => {
 });
 
 suite("requiredDepositFor — Travel Package", () => {
-  it("is the flat ₦200,000 floor, not 60% of ₦980,000", () => {
+  it("is the flat 60% floor (₦588,000) read off the price book, not recomputed per level", () => {
     const deposit = requiredDepositFor({ level: "A1", branch: null, pathway: "Travel Package" });
     expect(deposit).toBe(TRAVEL_PACKAGE_MIN_FIRST_PAYMENT);
-    expect(deposit).not.toBe(Math.round(TRAVEL_PACKAGE_PRICE * 0.6));
+    expect(deposit).toBe(Math.round(TRAVEL_PACKAGE_PRICE * 0.6));
   });
 
   it("leaves every non-Travel-Package student on the normal 60% deposit", () => {
@@ -292,29 +294,29 @@ suite("requiredDepositFor — Exam Preparatory", () => {
   });
 });
 
-suite("resolvePartialPaymentAmount — Travel Package's ₦200k-then-flexible shape", () => {
+suite("resolvePartialPaymentAmount — Travel Package's 60%-then-flexible shape", () => {
   const FEE = TRAVEL_PACKAGE_PRICE;
   const FLOOR = TRAVEL_PACKAGE_MIN_FIRST_PAYMENT;
 
-  it("rejects a first payment under ₦200,000", () => {
+  it("rejects a first payment under ₦588,000", () => {
     const result = resolvePartialPaymentAmount({
-      requestedAmount: 150_000,
+      requestedAmount: 500_000,
       tuitionFee: FEE,
       requiredDeposit: FLOOR,
       alreadyPaid: 0,
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("₦200,000");
+    if (!result.ok) expect(result.error).toContain("₦588,000");
   });
 
-  it("accepts exactly ₦200,000 as the first payment", () => {
+  it("accepts exactly ₦588,000 as the first payment", () => {
     const result = resolvePartialPaymentAmount({
       requestedAmount: FLOOR,
       tuitionFee: FEE,
       requiredDeposit: FLOOR,
       alreadyPaid: 0,
     });
-    expect(result).toEqual({ ok: true, amount: 200_000, settlesAccount: false });
+    expect(result).toEqual({ ok: true, amount: 588_000, settlesAccount: false });
   });
 
   it("once past the floor, accepts a free-form top-up of any size ≥ MIN_PART_PAYMENT", () => {
@@ -322,7 +324,7 @@ suite("resolvePartialPaymentAmount — Travel Package's ₦200k-then-flexible sh
       requestedAmount: 37_500,
       tuitionFee: FEE,
       requiredDeposit: FLOOR,
-      alreadyPaid: 200_000,
+      alreadyPaid: 588_000,
     });
     expect(result).toEqual({ ok: true, amount: 37_500, settlesAccount: false });
   });

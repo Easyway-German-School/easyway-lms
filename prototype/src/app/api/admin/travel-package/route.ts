@@ -3,7 +3,7 @@ import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT, type FinanceStudentInput } from "@/lib/finance/receivables";
 import { isTravelPackagePathway, travelPackageMinFirstPayment, TRAVEL_PACKAGE_PATHWAY, travelPackagePrice } from "@/lib/payment";
-import { reconcileTravelPackageStudent } from "@/lib/travel-package";
+import { reconcileTravelPackageStudent, travelPackageChargesForAccess } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 
 /**
@@ -29,7 +29,10 @@ export async function GET() {
   const minFirstPayment = travelPackageMinFirstPayment();
 
   const rows = students.map((student) => {
-    const finance = computeStudentFinance(student as unknown as FinanceStudentInput);
+    const finance = computeStudentFinance({
+      ...(student as unknown as FinanceStudentInput),
+      tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges),
+    });
     // What the balance SHOULD be for a flat ₦980,000 programme. When the live
     // `owed` disagrees, the student's tuition ledger still carries a per-level
     // charge (onboarded before flat pricing, a failed charge-create, or the

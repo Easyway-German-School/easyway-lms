@@ -9,6 +9,7 @@ import {
 import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS, type ChurnRisk } from "@/lib/student-risk";
 import { deriveSegments } from "@/lib/student-segments";
 import { assessProfileBackfill } from "@/lib/profile-backfill";
+import { travelPackageChargesForAccess } from "@/lib/travel-package";
 
 /**
  * ONE QUERY, TWO CALLERS.
@@ -228,7 +229,7 @@ export function scoreAndFilterRoster(
         branch: student.branch ? { id: student.branch.id, name: student.branch.name } : null,
         user: student.user,
         payments: student.payments,
-        tuitionCharges: student.tuitionCharges,
+        tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges),
       },
       now,
     );
@@ -277,7 +278,7 @@ export function scoreAndFilterRoster(
         branch: entry.student.branch ? { id: entry.student.branch.id, name: entry.student.branch.name } : null,
         user: entry.student.user,
         payments: entry.student.payments,
-        tuitionCharges: entry.student.tuitionCharges,
+        tuitionCharges: travelPackageChargesForAccess(entry.student.pathway, entry.student.level, entry.student.tuitionCharges),
       }),
     );
   }
