@@ -191,6 +191,7 @@ suite("isTravelPackagePathway", () => {
     expect(isTravelPackagePathway("Travel Package")).toBe(true);
     expect(isTravelPackagePathway("travel package")).toBe(true);
     expect(isTravelPackagePathway("  TRAVEL PACKAGE  ")).toBe(true);
+    expect(isTravelPackagePathway("Travel   Package")).toBe(true);
   });
 
   it("does not match any other pathway, or nothing at all", () => {

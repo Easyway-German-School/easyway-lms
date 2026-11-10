@@ -26,6 +26,7 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
+import { isTravelPackagePathway } from "@/lib/payment";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranch } from "@/lib/online-branch";
@@ -926,10 +927,15 @@ export default function StudentDossierPage() {
       setBalanceBusy("grace");
       setBalanceMsg(null);
       try {
+        const [year, month, day] = graceInput.split("-").map(Number);
+        const graceUntil =
+          !clear && year && month && day
+            ? new Date(year, month - 1, day, 23, 59, 59, 999).toISOString()
+            : null;
         const response = await fetch(`/api/admin/students/${id}/balance`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ graceUntil: clear ? null : graceInput || null }),
+          body: JSON.stringify({ graceUntil }),
         });
         const json = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(json?.error || "Could not save the grace date");
@@ -1158,6 +1164,7 @@ export default function StudentDossierPage() {
 
   const { identity, money, attendance, academics, journey, engagement, account, origin, email } = data;
   const failedEmail = email.log.filter((entry) => entry.status !== "sent").length;
+  const isTravelPackage = isTravelPackagePathway(identity.pathway);
 
   /**
    * No photo on file → the student's portal is walled off from every class page
@@ -1772,9 +1779,19 @@ export default function StudentDossierPage() {
             )}
           </Card>
 
-          {/* ---- Tuition balance & reminders (part-payers) --------------- */}
-          {data.viewer.canSeeMoney && money.partPayer ? (
-            <Card title="Tuition balance & reminders" hint="Part-payment — balance owed">
+          {/* ---- Tuition balance & reminders (part-payers, and every
+                Travel Package student regardless of payment state) -------
+                Travel Package doesn't fit the ladder's "deposit cleared,
+                fee still open" shape — a student who hasn't paid anything
+                yet, or who's already paid in full, still has one portal to
+                keep open or lock, so the office needs grace and reminder
+                controls on their file whatever stage they're at, not just
+                while they're mid-part-payment. */}
+          {data.viewer.canSeeMoney && (money.partPayer || isTravelPackage) ? (
+            <Card
+              title="Tuition balance & reminders"
+              hint={isTravelPackage ? "Travel Package — one flat fee, grace keeps the portal open" : "Part-payment — balance owed"}
+            >
               <div className="grid grid-cols-3 gap-4">
                 <Field label="Outstanding" value={<span className="text-red-600">{naira(money.owed ?? 0)}</span>} />
                 <Field label="Paid" value={`${money.feeProgressPercent ?? 0}% of ${naira(money.fee ?? 0)}`} />
