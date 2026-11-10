@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT, type FinanceStudentInput } from "@/lib/finance/receivables";
-import { isTravelPackagePathway, travelPackageMinFirstPayment, TRAVEL_PACKAGE_PATHWAY, travelPackagePrice } from "@/lib/payment";
+import { isTravelPackagePathway, travelPackageMinFirstPayment, travelPackagePrice } from "@/lib/payment";
 import { reconcileTravelPackageStudent, travelPackageChargesForAccess } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 
@@ -19,7 +19,7 @@ export async function GET() {
   if (!gate.ok) return gate.response;
 
   const students = await prisma.student.findMany({
-    where: { pathway: TRAVEL_PACKAGE_PATHWAY },
+    where: { pathway: { contains: "travel", mode: "insensitive" } },
     select: { ...FINANCE_STUDENT_SELECT, studentCode: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
@@ -28,7 +28,7 @@ export async function GET() {
   const packagePrice = travelPackagePrice();
   const minFirstPayment = travelPackageMinFirstPayment();
 
-  const rows = students.map((student) => {
+  const rows = students.filter((student) => isTravelPackagePathway(student.pathway)).map((student) => {
     const finance = computeStudentFinance({
       ...(student as unknown as FinanceStudentInput),
       tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges),
@@ -90,13 +90,14 @@ export async function PATCH(request: Request) {
   // ---- Bulk: reconcile every out-of-step student on the pathway ------------
   if (body.all === true) {
     const onPathway = await prisma.student.findMany({
-      where: { pathway: TRAVEL_PACKAGE_PATHWAY },
-      select: { id: true },
+      where: { pathway: { contains: "travel", mode: "insensitive" } },
+      select: { id: true, pathway: true },
     });
+    const travelStudents = onPathway.filter((student) => isTravelPackagePathway(student.pathway));
     let reconciled = 0;
     let notified = 0;
     const errors: string[] = [];
-    for (const { id } of onPathway) {
+    for (const { id } of travelStudents) {
       try {
         const r = await reconcileTravelPackageStudent({ studentId: id, setPathway: true });
         if (r && (r.pathwaySet || r.chargeFixed || r.chargesRetired > 0)) {
@@ -115,7 +116,7 @@ export async function PATCH(request: Request) {
     }
     return NextResponse.json({
       ok: true,
-      scanned: onPathway.length,
+      scanned: travelStudents.length,
       reconciled,
       notified,
       failed: errors.length,

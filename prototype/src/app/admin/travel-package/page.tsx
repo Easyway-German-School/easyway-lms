@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { AlertIcon, CheckIcon, PlaneIcon, PlusIcon } from "@/components/icons";
+import { isTravelPackagePathway } from "@/lib/payment";
 
 /**
  * The Travel Package roster — the school's premium, admin-onboarded-only
@@ -352,7 +353,7 @@ export default function TravelPackagePage() {
                         {h.email} · Level {h.level} · {h.pathway ?? "No pathway"}
                       </p>
                     </div>
-                    {h.pathway === "Travel Package" ? (
+                    {isTravelPackagePathway(h.pathway) ? (
                       <span className="text-[11px] font-semibold text-emerald-600">Already on Travel Package</span>
                     ) : (
                       <button
