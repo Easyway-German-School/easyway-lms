@@ -266,7 +266,7 @@ export function travelPackageMinFirstPayment(book: PriceBook = getActivePriceBoo
 }
 
 export function isTravelPackagePathway(pathway?: string | null): boolean {
-  return String(pathway ?? "").trim().toLowerCase() === TRAVEL_PACKAGE_PATHWAY.toLowerCase();
+  return String(pathway ?? "").trim().replace(/\s+/g, " ").toLowerCase() === TRAVEL_PACKAGE_PATHWAY.toLowerCase();
 }
 
 /**
