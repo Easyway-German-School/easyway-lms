@@ -12,7 +12,7 @@ import {
   requiredDepositFor,
   tuitionFeeFor,
 } from "@/lib/payment";
-import { deriveSegments } from "@/lib/student-segments";
+import { deriveSegments, normalizeStudentType } from "@/lib/student-segments";
 
 /**
  * One student's result sheet — the printable / downloadable version of what
@@ -365,6 +365,9 @@ export async function buildResultSheet(
               status: student.status,
               classType: student.classType,
               deliveryMode: student.deliveryMode,
+              studentType: normalizeStudentType(
+                (student.admission as Record<string, unknown> | null)?.studentType,
+              ),
               heldBackAt: student.heldBackAt,
               classesStartedAt: student.classesStartedAt,
               createdAt: student.createdAt,

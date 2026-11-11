@@ -9,7 +9,7 @@ import { accessFromStudent } from "@/lib/student-access";
 import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { computeChurnRisk } from "@/lib/student-risk";
-import { deriveSegments } from "@/lib/student-segments";
+import { deriveSegments, normalizeStudentType } from "@/lib/student-segments";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 import { isTemporaryLogin } from "@/lib/login-upgrade";
 
@@ -479,6 +479,7 @@ export async function GET(
       phone: typeof admission?.phone === "string" ? admission.phone : null,
       // The one file we do surface, because a face is the point of a file.
       photoUrl: typeof admission?.photoUrl === "string" ? admission.photoUrl : null,
+      studentType: normalizeStudentType(admission?.studentType),
       status: student.status,
       level: student.level,
       sessionSlot: student.sessionSlot,
@@ -688,6 +689,7 @@ export async function GET(
         status: student.status,
         classType: student.classType,
         deliveryMode: student.deliveryMode,
+        studentType: normalizeStudentType(admission?.studentType),
         heldBackAt: student.heldBackAt,
         classesStartedAt: student.classesStartedAt,
         createdAt: student.createdAt,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionsOverlap } from "./private-classes";
+import { PRIVATE_CLASS_RESERVING_STATUSES, sessionsOverlap } from "./private-classes";
 
 /**
  * The overlap check gates whether a private session can be booked at all, so
@@ -34,5 +34,17 @@ describe("sessionsOverlap", () => {
     const a = at("2026-09-15T15:00:00Z");
     const b = at("2026-09-15T15:30:00Z");
     expect(sessionsOverlap(a, 60, b, 60)).toBe(sessionsOverlap(b, 60, a, 60));
+  });
+});
+
+describe("private-class reserving statuses", () => {
+  it("only keeps scheduled or pending bookings as timetable conflicts", () => {
+    expect(PRIVATE_CLASS_RESERVING_STATUSES).toEqual([
+      "scheduled",
+      "requested",
+      "postponed",
+      "cancel_requested",
+      "reschedule_requested",
+    ]);
   });
 });

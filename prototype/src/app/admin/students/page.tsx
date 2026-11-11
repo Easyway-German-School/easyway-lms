@@ -246,6 +246,7 @@ function StudentsRoster() {
   // when `sharedStudentsEnabled`. Never includes `newTutorId`.
   const [newCoTutorIds, setNewCoTutorIds] = useState<string[]>([]);
   const [newStatus, setNewStatus] = useState("active");
+  const [newStudentType, setNewStudentType] = useState("new");
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
@@ -532,6 +533,7 @@ function StudentsRoster() {
       branchId: newBranchId || null,
       tutorId: newTutorId || null,
       status: newStatus,
+      studentType: newStudentType || null,
       classType: newClassType,
       sessionSlot: newSessionSlot,
       deliveryMode: effectiveDelivery,
@@ -624,6 +626,7 @@ function StudentsRoster() {
     setNewTutorId("");
     setNewCoTutorIds([]);
     setNewStatus("active");
+    setNewStudentType("new");
     setNewDeliveryMode("physical");
     setNewHybridOnlineSlot("");
     setNewBatch("");
@@ -721,6 +724,8 @@ function StudentsRoster() {
         return;
       }
       await loadStudents();
+    } catch (error) {
+      setStudentError(error instanceof Error ? error.message : "Unable to update tags.");
     } finally {
       setSavingTagsFor("");
     }
@@ -766,6 +771,12 @@ function StudentsRoster() {
     setNewTutorId(student.tutor?.id || "");
     setNewCoTutorIds((student.coTutors ?? []).map((link) => link.lecturerId));
     setNewStatus(student.status || "active");
+    const admission = ((student.admission as AdmissionData) || {}) as Record<string, unknown>;
+    setNewStudentType(
+      typeof admission.studentType === "string" && ["new", "returning"].includes(admission.studentType.trim().toLowerCase())
+        ? admission.studentType.trim().toLowerCase()
+        : "",
+    );
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
     setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
@@ -776,7 +787,6 @@ function StudentsRoster() {
         : "",
     );
     setNewPathway(student.pathway || packageOptions[0]);
-    const admission = ((student.admission as AdmissionData) || {}) as Record<string, unknown>;
     setNewCity(typeof admission.city === "string" ? admission.city : "");
     setNewStateRegion(typeof admission.state === "string" ? admission.state : "");
     setNewCountry(typeof admission.country === "string" && admission.country ? admission.country : "Nigeria");
@@ -802,6 +812,7 @@ function StudentsRoster() {
     setNewTutorId("");
     setNewCoTutorIds([]);
     setNewStatus("active");
+    setNewStudentType("new");
     setNewClassType("group");
     setNewSessionSlot("morning");
     setNewDeliveryMode("physical");
@@ -1736,6 +1747,18 @@ function StudentsRoster() {
                 </select>
               </label>
               <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Student type</span>
+                <select
+                  value={newStudentType}
+                  onChange={(event) => setNewStudentType(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">Automatic from enrolment history</option>
+                  <option value="new">New</option>
+                  <option value="returning">Returning</option>
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Session</span>
                 <select
                   value={newSessionSlot}
@@ -2166,7 +2189,7 @@ function StudentsRoster() {
                       {(student._segments?.length || student.tags?.length) ? (
                         <p className="mt-1 flex flex-wrap gap-1">
                           {(student._segments ?? [])
-                            .filter((id) => id !== "new" && id !== "group" && id !== "campus")
+                            .filter((id) => id !== "group" && id !== "campus")
                             .map((id) => (
                               <span
                                 key={id}

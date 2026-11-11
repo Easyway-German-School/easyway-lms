@@ -39,11 +39,19 @@ export const STUDENT_STATUSES = [
 ] as const;
 
 export type StudentStatusValue = (typeof STUDENT_STATUSES)[number]["value"];
+export type StudentTypeValue = "new" | "returning";
+
+export function normalizeStudentType(value: unknown): StudentTypeValue | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "new" || normalized === "returning" ? normalized : null;
+}
 
 export type SegmentInput = {
   status: string;
   classType: string;
   deliveryMode: string;
+  studentType?: StudentTypeValue | null;
   heldBackAt: Date | null;
   classesStartedAt: Date | null;
   createdAt: Date;
@@ -80,7 +88,7 @@ export function deriveSegments(student: SegmentInput, ctx: DeriveSegmentsContext
   const now = ctx.now ?? new Date();
   const segments: string[] = [];
 
-  segments.push((student.enrolmentCount ?? 1) > 1 ? "returning" : "new");
+  segments.push(student.studentType ?? ((student.enrolmentCount ?? 1) > 1 ? "returning" : "new"));
   segments.push(student.classType === "private" ? "private" : "group");
 
   if (student.deliveryMode === "online") segments.push("online");

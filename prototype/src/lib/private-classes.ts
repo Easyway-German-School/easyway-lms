@@ -76,11 +76,18 @@ export function sessionsOverlap(aStart: Date, aMinutes: number, bStart: Date, bM
   return a0 < b1 && b0 < a1;
 }
 
+export const PRIVATE_CLASS_RESERVING_STATUSES = [
+  "scheduled",
+  "requested",
+  "postponed",
+  "cancel_requested",
+  "reschedule_requested",
+] as const;
+
 /**
  * True when a proposed session overlaps an existing one for the same tutor or
- * the same student, using each existing row's own duration — not the old fixed
- * 240-minute lookback that flagged harmless back-to-back sessions and missed
- * genuine clashes.
+ * the same student. Only scheduled or pending bookings reserve a slot;
+ * completed, cancelled, declined, skipped, and obsolete statuses do not.
  */
 export async function privateOverlaps(args: {
   scope: { lecturerId?: string | null; studentId?: string };
@@ -96,7 +103,7 @@ export async function privateOverlaps(args: {
     where: {
       ...(args.scope.lecturerId ? { lecturerId: args.scope.lecturerId } : {}),
       ...(args.scope.studentId ? { studentId: args.scope.studentId } : {}),
-      status: { notIn: ["cancelled", "declined", "skipped"] },
+      status: { in: [...PRIVATE_CLASS_RESERVING_STATUSES] },
       scheduledAt: { gte: new Date(newStart - 240 * 60_000), lt: new Date(newEnd) },
       ...(args.excludeId ? { id: { not: args.excludeId } } : {}),
     },

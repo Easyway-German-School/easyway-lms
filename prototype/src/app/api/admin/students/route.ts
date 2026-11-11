@@ -203,6 +203,15 @@ export async function POST(request: Request) {
     ? (body.coTutorIds.filter((v): v is string => typeof v === "string" && v.trim().length > 0))
     : [];
   const status = typeof body.status === "string" ? body.status : "active";
+  const studentType = body.studentType === "new" || body.studentType === "returning" ? body.studentType : null;
+  if (
+    body.studentType !== undefined &&
+    body.studentType !== null &&
+    body.studentType !== "" &&
+    studentType === null
+  ) {
+    return NextResponse.json({ error: "Student type must be new or returning." }, { status: 400 });
+  }
   const classType = body.classType === "private" ? "private" : "group";
   const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
@@ -316,6 +325,7 @@ export async function POST(request: Request) {
     // came through signup.
     onboardedVia: "manual-add",
     ...(phone ? { phone } : {}),
+    ...(studentType ? { studentType } : {}),
     ...(batch ? { batch } : {}),
     ...(city ? { city } : {}),
     ...(stateRegion ? { state: stateRegion } : {}),
@@ -543,6 +553,15 @@ export async function PATCH(request: Request) {
         )
       : undefined;
   const status = typeof body.status === "string" ? body.status : undefined;
+  const studentType =
+    body.studentType === null || body.studentType === ""
+      ? null
+      : body.studentType === "new" || body.studentType === "returning"
+        ? body.studentType
+        : undefined;
+  if (body.studentType !== undefined && studentType === undefined) {
+    return NextResponse.json({ error: "Student type must be new or returning." }, { status: 400 });
+  }
   const classType = body.classType === "private" || body.classType === "group" ? body.classType : undefined;
   const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
@@ -715,6 +734,7 @@ export async function PATCH(request: Request) {
      */
     if (
       phone !== undefined ||
+      body.studentType !== undefined ||
       batch !== undefined ||
       city !== undefined ||
       stateRegion !== undefined ||
@@ -724,6 +744,10 @@ export async function PATCH(request: Request) {
       const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
       const nextAdmission = { ...existingAdmission };
       if (phone !== undefined) nextAdmission.phone = phone || undefined;
+      if (body.studentType !== undefined) {
+        if (studentType) nextAdmission.studentType = studentType;
+        else delete nextAdmission.studentType;
+      }
       if (batch !== undefined) {
         if (batch) {
           nextAdmission.batch = batch;
