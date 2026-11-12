@@ -2519,34 +2519,36 @@ export default function StudentDossierPage() {
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Batch</span>
                 <select
-                  value={editForm.batch ? `${editForm.batch}|${editForm.batchYear}` : ""}
+                  value={editForm.batch}
                   onChange={(event) => {
-                    const [month, year] = event.target.value.split("|");
                     setEditForm((form) => ({
                       ...form,
-                      batch: month || "",
-                      batchYear: Number(year) || new Date().getFullYear(),
+                      batch: event.target.value,
                     }));
                   }}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">No batch</option>
-                  {editForm.batch &&
-                    !availableBatchOptions().some(
-                      (option) => option.value === editForm.batch && option.year === editForm.batchYear,
-                    ) && (
-                      <option value={`${editForm.batch}|${editForm.batchYear}`}>
-                        {editForm.batch} {editForm.batchYear} (current)
-                      </option>
-                    )}
-                  {availableBatchOptions().map((option) => (
-                    <option key={`${option.value}|${option.year}`} value={`${option.value}|${option.year}`}>
-                      {option.label}
-                    </option>
-                  ))}
+                  {[...new Set([...availableBatchOptions().map((option) => option.value), editForm.batch].filter(Boolean))]
+                    .map((month) => (
+                      <option key={month} value={month}>{month}</option>
+                    ))}
                 </select>
+                <span className="mt-2 block font-semibold text-[var(--muted)]">Batch year</span>
+                <input
+                  type="number"
+                  min={1900}
+                  max={2200}
+                  step={1}
+                  value={editForm.batchYear}
+                  onChange={(event) =>
+                    setEditForm((form) => ({ ...form, batchYear: Number(event.target.value) || form.batchYear }))
+                  }
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  aria-label="Batch year"
+                />
                 <span className="block text-xs font-normal text-[var(--muted)]">
-                  Changing the batch updates this student&apos;s roster and current enrolment only.
+                  Changing the batch or year updates this student&apos;s roster and current enrolment only.
                 </span>
               </label>
               <label className="space-y-2 text-sm">
