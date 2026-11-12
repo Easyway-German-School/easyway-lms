@@ -71,6 +71,7 @@ type Dossier = {
     email: string | null;
     phone: string | null;
     photoUrl: string | null;
+    studentType: "new" | "returning" | null;
     status: string;
     level: string;
     sessionSlot: string;
@@ -640,6 +641,7 @@ export default function StudentDossierPage() {
   const id = params?.id;
   const [tagDraft, setTagDraft] = useState("");
   const [tagBusy, setTagBusy] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   const [data, setData] = useState<Dossier | null>(null);
   const [loading, setLoading] = useState(true);
@@ -708,6 +710,7 @@ export default function StudentDossierPage() {
     hybridOnlineSlot: "",
     branchId: "",
     status: "active",
+    studentType: "",
     pathway: "",
     // The structured profile — see lib/student-profile.ts. Sent as one nested
     // object so the server's PATCH handler can merge it against the existing
@@ -829,6 +832,7 @@ export default function StudentDossierPage() {
       hybridOnlineSlot: data.identity.hybridOnlineSlot || "",
       branchId: data.identity.branch?.id || "",
       status: data.identity.status || "active",
+      studentType: data.identity.studentType ?? "",
       pathway: data.identity.pathway || "",
       profile: {
         city: data.profile?.city || "",
@@ -907,13 +911,20 @@ export default function StudentDossierPage() {
     async (nextTags: string[]) => {
       if (!id) return;
       setTagBusy(true);
+      setTagError(null);
       try {
         const response = await fetch("/api/admin/students", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ studentId: id, tags: nextTags }),
         });
-        if (response.ok) await load(false);
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload?.error || "Unable to update tags.");
+        }
+        await load(false);
+      } catch (error) {
+        setTagError(error instanceof Error ? error.message : "Unable to update tags.");
       } finally {
         setTagBusy(false);
       }
@@ -2271,7 +2282,9 @@ export default function StudentDossierPage() {
                       <p className="mt-1 text-xs text-[var(--muted)]">
                         {row.branchName ?? "No branch on record"} · {row.classType} · {row.sessionSlot} ·{" "}
                         {row.deliveryMode}
-                        {row.tutorName ? ` · ${row.tutorName}` : ""}
+                        {(row.outcome === "ongoing" ? identity.tutor?.name : row.tutorName)
+                          ? ` · ${row.outcome === "ongoing" ? identity.tutor?.name : row.tutorName}`
+                          : ""}
                       </p>
                       <p className="mt-1 text-xs text-[var(--muted)]">
                         {when(row.startedAt)} – {ongoing ? "now" : when(row.endedAt)}
@@ -2314,7 +2327,7 @@ export default function StudentDossierPage() {
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Classification</p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {data.segments
-                  .filter((seg) => seg !== "new" && seg !== "group" && seg !== "campus")
+                  .filter((seg) => seg !== "group" && seg !== "campus")
                   .map((seg) => (
                     <span
                       key={seg}
@@ -2358,6 +2371,7 @@ export default function StudentDossierPage() {
                   />
                 </form>
               </div>
+              {tagError ? <p className="mt-2 text-sm text-[var(--danger)]">{tagError}</p> : null}
             </div>
           </Card>
 
@@ -2577,7 +2591,7 @@ export default function StudentDossierPage() {
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   {editSessionOptions.map((slot) => (
-                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot as keyof typeof SLOT_DEFAULTS]?.label ?? slot}</option>
                   ))}
                 </select>
                 {editMode === "hybrid" ? (
@@ -2680,6 +2694,21 @@ export default function StudentDossierPage() {
                     <option key={status.value} value={status.value}>{status.label}</option>
                   ))}
                 </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Student type</span>
+                <select
+                  value={editForm.studentType}
+                  onChange={(event) => setEditForm((form) => ({ ...form, studentType: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">Automatic from enrolment history</option>
+                  <option value="new">New</option>
+                  <option value="returning">Returning</option>
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Choose a type to override the automatic classification, or clear it to use enrolment history.
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Pathway</span>

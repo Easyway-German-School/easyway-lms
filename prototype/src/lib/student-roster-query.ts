@@ -7,7 +7,7 @@ import {
   type StudentFinance,
 } from "@/lib/finance/receivables";
 import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS, type ChurnRisk } from "@/lib/student-risk";
-import { deriveSegments } from "@/lib/student-segments";
+import { deriveSegments, normalizeStudentType } from "@/lib/student-segments";
 import { assessProfileBackfill } from "@/lib/profile-backfill";
 import { travelPackageChargesForAccess } from "@/lib/travel-package";
 
@@ -147,6 +147,11 @@ export const ROSTER_INCLUDE = {
   branch: true,
   tutor: { include: { user: true } },
   coTutors: { include: { lecturer: { include: { user: true } } } },
+  enrolments: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: "desc" as const },
+    select: { batchMonth: true, batchYear: true, outcome: true },
+  },
   profile: true,
   payments: {
     where: { deletedAt: null },
@@ -250,6 +255,9 @@ export function scoreAndFilterRoster(
         status: student.status,
         classType: student.classType,
         deliveryMode: student.deliveryMode,
+        studentType: normalizeStudentType(
+          (student.admission as Record<string, unknown> | null)?.studentType,
+        ),
         heldBackAt: student.heldBackAt,
         classesStartedAt: student.classesStartedAt,
         createdAt: student.createdAt,

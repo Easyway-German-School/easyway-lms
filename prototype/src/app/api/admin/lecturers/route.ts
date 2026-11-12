@@ -609,6 +609,10 @@ export async function DELETE(request: NextRequest) {
   for (const lecturer of lecturers) {
     await prisma.session.deleteMany({ where: { userId: lecturer.userId } });
     await prisma.student.updateMany({ where: { tutorId: lecturer.id }, data: { tutorId: null } });
+    await prisma.studentEnrolment.updateMany({
+      where: { tutorId: lecturer.id, outcome: "ongoing", deletedAt: null },
+      data: { tutorId: null },
+    });
     // Co-tutor links are a hard delete — the lecturer row is only soft-deleted
     // (prisma-guard), so a cascade never fires; a stale link would leave a
     // student shared onto a tutor who no longer exists.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveBatchAbsolute, resolveBatchWindow } from "./batch";
+import { batchLabelFromAdmission, resolveBatchAbsolute, resolveBatchWindow } from "./batch";
 
 const absoluteLabel = (absolute: number | null) => {
   if (absolute === null) return null;
@@ -7,6 +7,29 @@ const absoluteLabel = (absolute: number | null) => {
   const monthIndex = absolute % 12;
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
 };
+
+describe("batchLabelFromAdmission", () => {
+  it("includes the explicitly selected batch year", () => {
+    expect(batchLabelFromAdmission({ batch: "October", batchYear: 2027 })).toBe("October 2027");
+  });
+
+  it("preserves a year already embedded in the batch label", () => {
+    expect(batchLabelFromAdmission({ batch: "October 2027", batchYear: 2026 })).toBe("October 2027");
+  });
+
+  it("uses the current enrolment year ahead of a stale admission year", () => {
+    expect(
+      batchLabelFromAdmission(
+        { batch: "October", batchYear: 2027 },
+        { batchMonth: "October", batchYear: 2026 },
+      ),
+    ).toBe("October 2026");
+  });
+
+  it("keeps a month-only label when no valid year was saved", () => {
+    expect(batchLabelFromAdmission({ batch: "October", batchYear: "2027" })).toBe("October");
+  });
+});
 
 describe("resolveBatchAbsolute", () => {
   it("resolves forward from a recent registration, same-year", () => {

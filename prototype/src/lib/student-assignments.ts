@@ -61,11 +61,19 @@ function sittingMatch(student: VisibilityStudent, onlineBranchId: string | null 
 export function assignmentVisibleToWhere(student: VisibilityStudent, onlineBranchId?: string | null) {
   return {
     published: true,
-    level: student.level,
     AND: [
-      sittingMatch(student, onlineBranchId),
-      // Untargeted (everyone) or targeted at me.
-      { OR: [{ targets: { none: {} } }, { targets: { some: { studentId: student.id } } }] },
+      {
+        OR: [
+          {
+            AND: [
+              { level: student.level },
+              sittingMatch(student, onlineBranchId),
+              { targets: { none: {} } },
+            ],
+          },
+          { targets: { some: { studentId: student.id } } },
+        ],
+      },
     ],
   };
 }

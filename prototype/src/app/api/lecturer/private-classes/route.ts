@@ -440,15 +440,22 @@ export async function PUT(req: NextRequest) {
     }
 
     const duration = Number(durationMinutes);
+    const nextLecturerId =
+      typeof lecturerId === "string" ? lecturerId || null : existing.lecturerId;
 
     // A reschedule (new time, or a longer session on the same start) must not
-    // land on top of another booking for this tutor or student.
-    if (when || (Number.isFinite(duration) && duration > 0)) {
+    // land on top of another booking for the selected tutor or student. When
+    // the admin changes the tutor without moving the time, the destination
+    // tutor still needs a conflict check; checking only existing.lecturerId
+    // allowed the save and left the new tutor with overlapping classes.
+    const timingChanged = Boolean(when || (Number.isFinite(duration) && duration > 0));
+    const tutorChanged = nextLecturerId !== existing.lecturerId;
+    if (timingChanged || tutorChanged) {
       const checkStart = when ?? existing.scheduledAt;
       const checkDuration = Number.isFinite(duration) && duration > 0 ? Math.round(duration) : existing.durationMinutes;
       const clash =
-        (existing.lecturerId &&
-          (await privateOverlaps({ scope: { lecturerId: existing.lecturerId }, start: checkStart, durationMinutes: checkDuration, excludeId: existing.id }))) ||
+        (nextLecturerId &&
+          (await privateOverlaps({ scope: { lecturerId: nextLecturerId }, start: checkStart, durationMinutes: checkDuration, excludeId: existing.id }))) ||
         (await privateOverlaps({ scope: { studentId: existing.student.id }, start: checkStart, durationMinutes: checkDuration, excludeId: existing.id }));
       if (clash) {
         return NextResponse.json({ error: "That clashes with another private session for this tutor or student." }, { status: 409 });
@@ -463,7 +470,7 @@ export async function PUT(req: NextRequest) {
         topic: typeof topic === "string" ? topic.trim() || null : undefined,
         notes: typeof notes === "string" ? notes.trim() || null : undefined,
         status: status ?? undefined,
-        lecturerId: typeof lecturerId === "string" ? lecturerId || null : undefined,
+        lecturerId: typeof lecturerId === "string" ? nextLecturerId : undefined,
         materialId: materialId === null ? null : typeof materialId === "string" && materialId ? materialId : undefined,
         deliveryMode: deliveryMode === null ? null : typeof deliveryMode === "string" && deliveryMode ? deliveryMode : undefined,
         location: typeof location === "string" ? location.trim() || null : undefined,
