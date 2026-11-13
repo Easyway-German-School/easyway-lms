@@ -52,6 +52,9 @@ export async function nudgeStudentsWithAssignmentsAvailable() {
       sessionSlot: true,
       deliveryMode: true,
       hybridOnlineSlot: true,
+      tutorId: true,
+      admission: true,
+      coTutors: { select: { lecturerId: true } },
     },
   });
 

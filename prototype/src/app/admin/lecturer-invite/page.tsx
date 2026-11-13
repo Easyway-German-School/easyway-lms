@@ -1089,6 +1089,45 @@ function ClassRoster({
     }
   }
 
+  /** Replace each student's current primary tutor with this one — bulk Move. */
+  async function moveAll(students: RosterStudent[]) {
+    if (!students.length) return;
+    setMessage("");
+    setSkipped([]);
+    const ids = students.map((student) => student.id);
+    const single = ids.length === 1;
+    if (single) setBusyId(ids[0]);
+    else setBulk({ done: 0, total: ids.length });
+
+    let moved = 0;
+    try {
+      for (let i = 0; i < ids.length; i += 25) {
+        const chunk = ids.slice(i, i + 25);
+        const res = await fetch("/api/admin/lecturers/students", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lecturerId, studentIds: chunk, replace: true }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Could not move these students");
+        moved += data.moved ?? 0;
+        if (!single) setBulk({ done: Math.min(i + chunk.length, ids.length), total: ids.length });
+      }
+      setMessage(
+        moved
+          ? `${moved} student${moved === 1 ? "" : "s"} now have ${tutorName} as their tutor. Their previous tutor has been removed from their file, and they can see it on their dashboard.`
+          : "Nothing was moved.",
+      );
+      await load();
+      onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not move these students");
+    } finally {
+      setBusyId("");
+      setBulk(null);
+    }
+  }
+
   /** Outside the class: add as an extra tutor by hand, keeping the current primary. */
   async function addCoTutorManually(student: RosterStudent) {
     setBusyId(student.id);
@@ -1118,6 +1157,9 @@ function ClassRoster({
   const rosterIds = new Set(roster.map((student) => student.id));
   const linkable = roster.filter(
     (student) => student.plan?.action === "add_primary" || student.plan?.action === "add_co_tutor",
+  );
+  const movable = roster.filter(
+    (student) => student.plan?.action === "shares_class" || student.plan?.action === "conflict",
   );
   const linkedCount = roster.filter((student) => student.namedByOffice).length;
   const needDecision = (summary?.shares_class ?? 0) + (summary?.conflict ?? 0) + (summary?.blocked ?? 0);
@@ -1317,6 +1359,26 @@ function ClassRoster({
             className={primaryButton}
           >
             {bulk ? `Linking ${bulk.done} / ${bulk.total}…` : `Link all ${linkable.length}`}
+          </button>
+        </div>
+      ) : null}
+
+      {movable.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+          <p className="text-xs text-[var(--foreground)]">
+            <span className="font-semibold">
+              {movable.length} student{movable.length === 1 ? "" : "s"} still named to another tutor.
+            </span>{" "}
+            They already appear on {tutorName}&apos;s register because they sit in this class, but their dashboard and
+            the admin roster still show the previous tutor until you move them.
+          </p>
+          <button
+            type="button"
+            onClick={() => moveAll(movable)}
+            disabled={Boolean(bulk) || Boolean(busyId)}
+            className={primaryButton}
+          >
+            {bulk ? `Moving ${bulk.done} / ${bulk.total}…` : `Move all ${movable.length} to ${tutorName}`}
           </button>
         </div>
       ) : null}

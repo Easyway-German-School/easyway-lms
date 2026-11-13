@@ -11,7 +11,7 @@ import { notify, KIND } from "@/lib/notify";
 import { studentsVisibleToAssignment } from "@/lib/student-assignments";
 import { resolveOnlineBranchId } from "@/lib/online-branch-server";
 import { groupStudentsByTutorPhrase } from "@/lib/tutor-attribution";
-import { batchOfAdmission } from "@/lib/class-batch";
+import { batchOfAdmission, canonicalBatch } from "@/lib/class-batch";
 
 /** Tutors create and review assignments for a level (optionally one branch). */
 
@@ -486,6 +486,7 @@ export async function POST(req: NextRequest) {
          * rather than for three cohorts taught by three different people.
          */
         sessionSlot: resolvedSessionSlot,
+        batch: canonicalBatch(resolvedBatch) || null,
         type: kind,
         timeLimitMinutes: kind === "quiz" && timeLimitMinutes ? Number(timeLimitMinutes) : null,
         questions: kind === "quiz" ? (parsed as object[]) : undefined,
@@ -517,7 +518,12 @@ export async function POST(req: NextRequest) {
         : (
             await prisma.student.findMany({
               where: studentsVisibleToAssignment(
-                { level: normalizedLevel, branchId: resolvedBranchId, sessionSlot: resolvedSessionSlot },
+                {
+                  level: normalizedLevel,
+                  branchId: resolvedBranchId,
+                  sessionSlot: resolvedSessionSlot,
+                  lecturerId: auth.lecturerId ?? null,
+                },
                 onlineBranchId,
               ),
               select: { id: true, admission: true },

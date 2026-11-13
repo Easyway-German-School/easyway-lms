@@ -293,6 +293,51 @@ export async function POST(request: NextRequest) {
   const studentId = typeof body?.studentId === "string" ? body.studentId : "";
   const lecturerId = typeof body?.lecturerId === "string" && body.lecturerId ? body.lecturerId : null;
 
+  /**
+   * Bulk Move: replace each student's primary tutor with this one, and detach
+   * the previous tutor from the student file (enrolment + co-tutor row). The
+   * per-row Move button already did this; without a bulk path the office
+   * moved a class on the tutor roster and the students' dashboards stayed on
+   * the old name.
+   */
+  if (body?.replace === true && Array.isArray(body.studentIds)) {
+    if (!lecturerId) return NextResponse.json({ error: "lecturerId is required" }, { status: 400 });
+    const ids = [...new Set((body.studentIds as unknown[]).filter((id): id is string => typeof id === "string" && id.length > 0))];
+    if (!ids.length) return NextResponse.json({ error: "studentIds is required" }, { status: 400 });
+    if (ids.length > 25) {
+      return NextResponse.json({ error: "Move at most 25 students per request" }, { status: 400 });
+    }
+
+    let moved = 0;
+    const failed: Array<{ studentId: string; error: string }> = [];
+    for (const id of ids) {
+      const result = await setStudentTutor({ studentId: id, lecturerId, notifyTutor: false });
+      if (!result.ok) failed.push({ studentId: id, error: result.error });
+      else if (result.changed) moved += 1;
+    }
+
+    if (moved > 0) {
+      const lecturer = await prisma.lecturer.findUnique({
+        where: { id: lecturerId },
+        select: { user: { select: { id: true } } },
+      });
+      if (lecturer) {
+        const { notify, KIND } = await import("@/lib/notify");
+        await notify({
+          to: { userIds: [lecturer.user.id] },
+          kind: KIND.announcement,
+          severity: "info",
+          title: `${moved} student${moved === 1 ? "" : "s"} moved to your class`,
+          message: `The office moved ${moved} student${moved === 1 ? "" : "s"} to you as their tutor. They are on your roster, register and gradebook from now, and their previous tutor has been removed.`,
+          link: "/lecturer/students",
+          push: true,
+        }).catch((error) => console.error("Bulk tutor move summary notification failed", error));
+      }
+    }
+
+    return NextResponse.json({ success: true, moved, failed });
+  }
+
   if (!studentId) {
     return NextResponse.json({ error: "studentId is required" }, { status: 400 });
   }

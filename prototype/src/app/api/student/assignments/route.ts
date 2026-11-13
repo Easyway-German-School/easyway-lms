@@ -40,6 +40,8 @@ async function currentStudent(userId: string | undefined) {
       deliveryMode: true,
       hybridOnlineSlot: true,
       tutorId: true,
+      admission: true,
+      coTutors: { select: { lecturerId: true } },
       user: { select: { tenantId: true } },
     },
   });
