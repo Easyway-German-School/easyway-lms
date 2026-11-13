@@ -62,19 +62,32 @@ export async function setStudentTutor(input: {
   const studentName = student.user.name || student.user.email;
   const tutorName = lecturer ? lecturer.user.name || lecturer.user.email : null;
 
-  // Nothing to do, and nothing to announce. Saving a form that happens to
-  // contain the tutor it already had must not buzz two people about it.
-  if ((student.tutorId ?? null) === (lecturerId ?? null)) {
-    return { ok: true, tutorName, studentName, changed: false };
+  const previousTutorId = student.tutorId ?? null;
+  const changed = previousTutorId !== (lecturerId ?? null);
+
+  if (changed) {
+    await prisma.student.update({ where: { id: studentId }, data: { tutorId: lecturerId } });
   }
 
-  await prisma.student.update({ where: { id: studentId }, data: { tutorId: lecturerId } });
+  // Student.tutorId is what the student portal and the admin roster read.
+  // The ongoing enrolment is the same fact on the history ledger — both have
+  // to move, or the tutor's register updates and the student's file does not.
+  await prisma.studentEnrolment.updateMany({
+    where: { studentId, outcome: "ongoing", deletedAt: null },
+    data: { tutorId: lecturerId },
+  });
 
-  // The primary tutor is never also a co-tutor (see setStudentCoTutors): a
-  // co-tutor who is promoted must not stay behind as a second row, or every
-  // roster query counts the student twice and "Remove" clears only one of them.
-  if (lecturerId) {
-    await prisma.studentCoTutor.deleteMany({ where: { studentId, lecturerId } });
+  // Detach BOTH the tutor they are leaving AND the tutor they are joining
+  // from the co-tutor list. Leaving A as a co-tutor after a Move is how A
+  // stayed on the student's file; keeping B as a co-tutor after promoting
+  // them is how the roster counted the student twice.
+  const detach = [...new Set([previousTutorId, lecturerId].filter((id): id is string => Boolean(id)))];
+  if (detach.length) {
+    await prisma.studentCoTutor.deleteMany({ where: { studentId, lecturerId: { in: detach } } });
+  }
+
+  if (!changed) {
+    return { ok: true, tutorName, studentName, changed: false };
   }
 
   // A student moved OFF one tutor onto another used to leave the first tutor

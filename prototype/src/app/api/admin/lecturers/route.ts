@@ -26,6 +26,8 @@ import { lecturerFeatures, parseLecturerFeatures } from "@/lib/lecturer-features
 import { generateTempPassword } from "@/lib/student-password";
 import { sendTutorWelcomeEmail } from "@/lib/tutor-welcome-email";
 
+export const maxDuration = 60;
+
 /**
  * Tutor administration.
  *
@@ -518,10 +520,21 @@ export async function PATCH(request: NextRequest) {
     Object.assign(data, assignment);
   }
 
+  const previousAssignment = readAssignment(lecturer);
   const updated = await prisma.lecturer.update({ where: { id: lecturerId }, data });
 
   if (assignment?.levels.length) {
     await syncLecturerClasses(lecturerId, assignment.levels);
+  }
+
+  if (touchesAssignment) {
+    const { rehomeStudentsAfterTutorAssignmentChange } = await import("@/lib/tutor-rehome");
+    await rehomeStudentsAfterTutorAssignmentChange({
+      lecturerId,
+      previous: previousAssignment,
+      next: readAssignment(updated),
+      tenantId: lecturer.tenantId ?? gate.session.user.tenantId ?? null,
+    }).catch((error) => console.error("Tutor rehome after assignment change failed", { lecturerId, error }));
   }
 
   /**

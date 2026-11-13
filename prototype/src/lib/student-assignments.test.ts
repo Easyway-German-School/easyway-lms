@@ -22,14 +22,15 @@ const hybridStudent = {
 describe("assignmentVisibleToWhere (what a student may see)", () => {
   it("a physical student only gets the campus match — unchanged from before hybrid combos", () => {
     const where = assignmentVisibleToWhere(campusStudent, ONLINE) as any;
-    const sitting = where.AND[0];
+    const sitting = where.AND[0].OR[0].AND[1];
     expect(sitting.OR).toBeUndefined();
     expect(JSON.stringify(sitting)).not.toContain(ONLINE);
   });
 
   it("a hybrid student ALSO matches assignments scoped to the online branch + their online sitting", () => {
     const where = assignmentVisibleToWhere(hybridStudent, ONLINE) as any;
-    const sitting = where.AND[0];
+    const audience = where.AND[0].OR[0].AND[1];
+    const sitting = audience;
     expect(sitting.OR).toHaveLength(2);
     const online = JSON.stringify(sitting.OR[1]);
     expect(online).toContain(ONLINE);
@@ -40,12 +41,60 @@ describe("assignmentVisibleToWhere (what a student may see)", () => {
 
   it("without an online branch id a hybrid student falls back to the campus match (no crash, no widening)", () => {
     const where = assignmentVisibleToWhere(hybridStudent, null) as any;
-    expect(where.AND[0].OR).toBeUndefined();
+    expect(where.AND[0].OR[0].AND[1].OR).toBeUndefined();
   });
 
   it("a hybrid student with no online slot yet (hasn't answered the combo popup) gets campus only", () => {
     const where = assignmentVisibleToWhere({ ...hybridStudent, hybridOnlineSlot: null }, ONLINE) as any;
-    expect(where.AND[0].OR).toBeUndefined();
+    expect(where.AND[0].OR[0].AND[1].OR).toBeUndefined();
+  });
+
+  it("an assignment targeted directly at a student is visible even if its class metadata no longer matches them", () => {
+    const where = assignmentVisibleToWhere(campusStudent, ONLINE) as any;
+    expect(where.level).toBeUndefined();
+    expect(where.AND[0].OR[1]).toEqual({ targets: { some: { studentId: campusStudent.id } } });
+  });
+
+  it("untargeted assignments still require the student's level and sitting", () => {
+    const where = assignmentVisibleToWhere(campusStudent, ONLINE) as any;
+    const cohort = where.AND[0].OR[0].AND;
+    expect(cohort[0]).toEqual({ level: campusStudent.level });
+    expect(cohort[2]).toEqual({ targets: { none: {} } });
+    expect(JSON.stringify(cohort[1])).toContain(campusStudent.branchId);
+  });
+
+  it("a student sees their own tutor's homework for this class even when a named-target snapshot missed them", () => {
+    const where = assignmentVisibleToWhere(
+      { ...campusStudent, tutorId: "lec-1", admission: { batch: "September" } },
+      ONLINE,
+    ) as any;
+    const tutorPath = where.AND[0].OR[2];
+    expect(tutorPath.AND).toEqual(
+      expect.arrayContaining([
+        { level: "A1" },
+        { lecturerId: { in: ["lec-1"] } },
+        { OR: [{ batch: null }, { batch: "September" }] },
+      ]),
+    );
+  });
+
+  it("a student with a year-suffixed intake still matches the canonical batch on the assignment", () => {
+    const where = assignmentVisibleToWhere(
+      { ...campusStudent, tutorId: "lec-1", coTutorIds: ["lec-online"], admission: { batch: "September 2026" } },
+      ONLINE,
+    ) as any;
+    const tutorPath = where.AND[0].OR[2];
+    expect(tutorPath.AND).toEqual(
+      expect.arrayContaining([
+        { lecturerId: { in: ["lec-1", "lec-online"] } },
+        { OR: [{ batch: null }, { batch: "September" }] },
+      ]),
+    );
+  });
+
+  it("without a named tutor the extra class-path is not added — targeting and untargeted rules stay as they were", () => {
+    const where = assignmentVisibleToWhere(campusStudent, ONLINE) as any;
+    expect(where.AND[0].OR).toHaveLength(2);
   });
 });
 
@@ -78,5 +127,16 @@ describe("studentsVisibleToAssignment (who hears about it)", () => {
     expect(where.branchId).toBeUndefined();
     expect(where.sessionSlot).toBeUndefined();
     expect(where.status).toBe("active");
+  });
+
+  it("a tutor-owned assignment reaches that tutor's students, not the whole sitting", () => {
+    const where = studentsVisibleToAssignment(
+      { level: "A1", branchId: "branch-lagos", sessionSlot: "afternoon", lecturerId: "lec-1" },
+      ONLINE,
+    ) as any;
+    expect(where.AND).toEqual([
+      { OR: [{ tutorId: "lec-1" }, { coTutors: { some: { lecturerId: "lec-1" } } }] },
+    ]);
+    expect(where.branchId).toBe("branch-lagos");
   });
 });

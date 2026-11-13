@@ -425,8 +425,7 @@ export function studentWhereForLecturerScope(
 
 /** The student's intake month, lower-cased, or "" when they have none. */
 function admissionBatch(admission: unknown): string {
-  const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
-  return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
+  return batchOfAdmission(admission).toLowerCase();
 }
 
 /**

@@ -3529,6 +3529,19 @@ model Assignment {
    */
   sessionSlot String?
 
+  /**
+   * Intake month this is for ("September"). NULL means every intake at the
+   * sitting — the same as assignments written before batches were a boundary,
+   * so existing homework keeps reaching exactly who it always did.
+   *
+   * Stored on the row rather than snapshotted as AssignmentTarget names,
+   * because a snapshot goes stale the moment a student joins the batch (or
+   * had a "September 2026" label the snapshot writer did not recognise). The
+   * student list asks "is this MY tutor's homework for MY class?" at read
+   * time; this is the batch half of that question.
+   */
+  batch String?
+
   lecturerId String?
   lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
 

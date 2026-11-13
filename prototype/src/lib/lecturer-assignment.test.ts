@@ -239,6 +239,15 @@ describe("per-group batch", () => {
     // August must not leak onto the September A1 group.
     expect(belongsToLecturer(twoGroups, "lec-1", augA1)).toBe(false);
     expect(belongsToLecturer(twoGroups, "lec-1", augB2)).toBe(true);
+    // Production stores "September 2026" as often as "September".
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", {
+        branchId: "b1",
+        level: "A1",
+        sessionSlot: "afternoon",
+        admission: { batch: "September 2026" },
+      }),
+    ).toBe(true);
   });
 
   it("drops a named student after a level and intake move outside the tutor's assigned groups", () => {

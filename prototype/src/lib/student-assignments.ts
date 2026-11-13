@@ -12,7 +12,13 @@
  *
  * The targeting rule: an assignment with NO targets goes to the whole level,
  * which is how every assignment behaved before targeting existed. One or more
- * targets narrows it to exactly those students.
+ * targets used to be the only other way in, which is how a student in the
+ * right level, batch and tutor silently saw nothing: batch-scoped creates
+ * froze the current roster as named targets, and anyone the snapshot missed
+ * (joined later, intake stored as "September 2026" instead of "September")
+ * matched neither hole. Their own tutor's homework for this class is now a
+ * third path, still sitting-scoped, still batch-scoped when the assignment
+ * names a month.
  *
  * The sitting works the same way as the branch: NULL means every sitting, so
  * nothing set before sessions became a boundary changes who it reaches. It
@@ -30,6 +36,8 @@
  * the campus match, an online one the online match.
  */
 
+import { batchOfAdmission } from "@/lib/class-batch";
+
 type VisibilityStudent = {
   id: string;
   level: string;
@@ -37,6 +45,10 @@ type VisibilityStudent = {
   sessionSlot: string | null;
   deliveryMode?: string | null;
   hybridOnlineSlot?: string | null;
+  tutorId?: string | null;
+  coTutorIds?: string[] | null;
+  coTutors?: { lecturerId: string }[] | null;
+  admission?: unknown;
 };
 
 function sittingMatch(student: VisibilityStudent, onlineBranchId: string | null | undefined) {
@@ -58,15 +70,40 @@ function sittingMatch(student: VisibilityStudent, onlineBranchId: string | null 
   return { OR: [campusMatch, onlineMatch] };
 }
 
+function tutorIdsOf(student: VisibilityStudent): string[] {
+  const ids = [
+    student.tutorId,
+    ...(student.coTutorIds ?? []),
+    ...(student.coTutors ?? []).map((row) => row.lecturerId),
+  ].filter((id): id is string => Boolean(id));
+  return [...new Set(ids)];
+}
+
 export function assignmentVisibleToWhere(student: VisibilityStudent, onlineBranchId?: string | null) {
+  const tutorIds = tutorIdsOf(student);
+  const studentBatch = batchOfAdmission(student.admission) || null;
+  const classMatch = [{ level: student.level }, sittingMatch(student, onlineBranchId)];
+
+  const audience: Record<string, unknown>[] = [
+    {
+      AND: [...classMatch, { targets: { none: {} } }],
+    },
+    { targets: { some: { studentId: student.id } } },
+  ];
+
+  if (tutorIds.length) {
+    audience.push({
+      AND: [
+        ...classMatch,
+        { lecturerId: { in: tutorIds } },
+        studentBatch ? { OR: [{ batch: null }, { batch: studentBatch }] } : { batch: null },
+      ],
+    });
+  }
+
   return {
     published: true,
-    level: student.level,
-    AND: [
-      sittingMatch(student, onlineBranchId),
-      // Untargeted (everyone) or targeted at me.
-      { OR: [{ targets: { none: {} } }, { targets: { some: { studentId: student.id } } }] },
-    ],
+    AND: [{ OR: audience }],
   };
 }
 
@@ -77,9 +114,17 @@ export function assignmentVisibleToWhere(student: VisibilityStudent, onlineBranc
  * filter `notify()`'s generic `students` target uses — which, being shared
  * by announcements that must stay campus-only or online-only, cannot itself
  * learn the hybrid-online exception without breaking those.
+ *
+ * When the assignment has a named tutor, the audience is that tutor's
+ * students (primary or co-tutor), not every student at the sitting.
  */
 export function studentsVisibleToAssignment(
-  assignment: { level: string; branchId: string | null; sessionSlot: string | null },
+  assignment: {
+    level: string;
+    branchId: string | null;
+    sessionSlot: string | null;
+    lecturerId?: string | null;
+  },
   onlineBranchId: string | null | undefined,
 ) {
   // `assignment.branchId`/`sessionSlot` are fixed values here (this is the
@@ -92,12 +137,26 @@ export function studentsVisibleToAssignment(
     ...(assignment.sessionSlot === null ? {} : { sessionSlot: assignment.sessionSlot }),
   };
 
+  const taughtBy = assignment.lecturerId
+    ? {
+        OR: [
+          { tutorId: assignment.lecturerId },
+          { coTutors: { some: { lecturerId: assignment.lecturerId } } },
+        ],
+      }
+    : null;
+
   if (!onlineBranchId || assignment.branchId !== onlineBranchId) {
     // Campus-scoped (or school-wide) assignment. A hybrid student already
     // matches through this same clause — `branchId`/`sessionSlot` on their
     // row ARE their campus side, so no hybrid-specific handling is needed
     // for anything that isn't actually scoped to the Online branch.
-    return { status: "active", level: assignment.level, ...campusMatch };
+    return {
+      status: "active",
+      level: assignment.level,
+      ...campusMatch,
+      ...(taughtBy ? { AND: [taughtBy] } : {}),
+    };
   }
 
   // Scoped to the Online branch: reach online-only students through their
@@ -113,9 +172,11 @@ export function studentsVisibleToAssignment(
     ...(assignment.sessionSlot === null ? {} : { hybridOnlineSlot: assignment.sessionSlot }),
   };
 
+  const sittingAudience = { OR: [onlineOnlyMatch, hybridOnlineMatch] };
+
   return {
     status: "active",
     level: assignment.level,
-    OR: [onlineOnlyMatch, hybridOnlineMatch],
+    ...(taughtBy ? { AND: [sittingAudience, taughtBy] } : sittingAudience),
   };
 }
