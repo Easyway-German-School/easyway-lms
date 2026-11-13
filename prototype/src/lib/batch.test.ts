@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { resolveBatchAbsolute, resolveBatchWindow } from "./batch";
+import {
+  assessBatchYear,
+  batchLabelFromAdmission,
+  nearestBatchYear,
+  resolveBatchAbsolute,
+  resolveBatchWindow,
+} from "./batch";
+import { nextPlacement } from "./graduation";
 
 const absoluteLabel = (absolute: number | null) => {
   if (absolute === null) return null;
@@ -7,6 +14,29 @@ const absoluteLabel = (absolute: number | null) => {
   const monthIndex = absolute % 12;
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
 };
+
+describe("batchLabelFromAdmission", () => {
+  it("includes the explicitly selected batch year", () => {
+    expect(batchLabelFromAdmission({ batch: "October", batchYear: 2027 })).toBe("October 2027");
+  });
+
+  it("preserves a year already embedded in the batch label", () => {
+    expect(batchLabelFromAdmission({ batch: "October 2027", batchYear: 2026 })).toBe("October 2027");
+  });
+
+  it("uses the current enrolment year ahead of a stale admission year", () => {
+    expect(
+      batchLabelFromAdmission(
+        { batch: "October", batchYear: 2027 },
+        { batchMonth: "October", batchYear: 2026 },
+      ),
+    ).toBe("October 2026");
+  });
+
+  it("keeps a month-only label when no valid year was saved", () => {
+    expect(batchLabelFromAdmission({ batch: "October", batchYear: "2027" })).toBe("October");
+  });
+});
 
 describe("resolveBatchAbsolute", () => {
   it("resolves forward from a recent registration, same-year", () => {
@@ -16,11 +46,26 @@ describe("resolveBatchAbsolute", () => {
     expect(absoluteLabel(resolveBatchAbsolute("October", { registeredAt, now }))).toBe("2026-10");
   });
 
-  it("resolves forward to NEXT year when the named month has already passed this year", () => {
-    // Registering in August for "July" means next July, not the one just gone.
-    const registeredAt = new Date("2026-08-01T00:00:00Z");
-    const now = new Date("2026-08-15T00:00:00Z");
+  it("resolves forward to NEXT year when the named month passed more than a session ago", () => {
+    // Registering in December for "July" means next July, not the one long gone.
+    const registeredAt = new Date("2026-12-01T00:00:00Z");
+    const now = new Date("2026-12-15T00:00:00Z");
     expect(absoluteLabel(resolveBatchAbsolute("July", { registeredAt, now }))).toBe("2027-07");
+  });
+
+  it("keeps a returning student re-added after their batch began in THAT batch", () => {
+    // Re-added in November for the September batch: September 2026, not 2027.
+    const registeredAt = new Date("2026-11-05T00:00:00Z");
+    const now = new Date("2026-11-13T00:00:00Z");
+    expect(absoluteLabel(resolveBatchAbsolute("September", { registeredAt, now }))).toBe("2026-09");
+    expect(absoluteLabel(resolveBatchAbsolute("August", { registeredAt, now }))).toBe("2026-08");
+    expect(absoluteLabel(resolveBatchAbsolute("July", { registeredAt, now }))).toBe("2027-07");
+  });
+
+  it("honours a year written into the label", () => {
+    const registeredAt = new Date("2026-11-05T00:00:00Z");
+    expect(absoluteLabel(resolveBatchAbsolute("September 2026", { registeredAt }))).toBe("2026-09");
+    expect(absoluteLabel(resolveBatchAbsolute("January 2027", { registeredAt }))).toBe("2027-01");
   });
 
   it("does not re-anchor a registration from under a year ago", () => {
@@ -57,6 +102,103 @@ describe("resolveBatchAbsolute", () => {
     const now = new Date("2026-10-13T00:00:00Z");
     expect(absoluteLabel(resolveBatchAbsolute("October", { now }))).toBe("2026-10");
     expect(absoluteLabel(resolveBatchAbsolute("December", { now }))).toBe("2025-12");
+  });
+});
+
+describe("moving a returning student up a level", () => {
+  const now = new Date("2026-10-25T10:00:00Z");
+
+  it("September 2026 moves into November 2026, not November 2027", () => {
+    // Account re-created in October for a student already in the September batch.
+    const place = nextPlacement({ batch: "September", registeredAt: new Date("2026-10-03T00:00:00Z"), now });
+    expect(place?.label).toBe("November 2026");
+  });
+
+  it("uses the saved year over the account's creation date", () => {
+    const place = nextPlacement({ batch: "September 2026", registeredAt: new Date("2026-12-01T00:00:00Z"), now });
+    expect(place?.label).toBe("November 2026");
+  });
+
+  it("a November 2026 batch moves into January 2027", () => {
+    const place = nextPlacement({ batch: "November 2026", now: new Date("2026-12-28T10:00:00Z") });
+    expect(place?.label).toBe("January 2027");
+  });
+});
+
+describe("nearestBatchYear", () => {
+  it("picks the occurrence a month name plainly means today", () => {
+    const now = new Date("2026-11-13T10:00:00Z");
+    expect(nearestBatchYear("September", now)).toBe(2026);
+    expect(nearestBatchYear("January", now)).toBe(2027);
+    expect(nearestBatchYear("May", now)).toBe(2027);
+    expect(nearestBatchYear("June", now)).toBe(2026);
+  });
+});
+
+describe("assessBatchYear", () => {
+  const now = new Date("2026-11-13T10:00:00Z");
+
+  it("flags a moved-up student booked a year ahead and corrects to this year", () => {
+    const result = assessBatchYear({
+      admissionBatch: "November",
+      admissionYear: 2027,
+      enrolment: { batchMonth: "November", batchYear: 2027 },
+      classesStartedAt: new Date("2027-11-02T23:00:00Z"),
+      returning: true,
+      now,
+    });
+    expect(result?.effectiveYear).toBe(2027);
+    expect(result?.correctYear).toBe(2026);
+    expect(result?.issues.length).toBeGreaterThan(0);
+  });
+
+  it("flags a stale admission year left behind by a promotion", () => {
+    const result = assessBatchYear({
+      admissionBatch: "January",
+      admissionYear: 2026,
+      enrolment: { batchMonth: "January", batchYear: 2027 },
+      classesStartedAt: new Date("2027-01-11T23:00:00Z"),
+      returning: true,
+      now,
+    });
+    expect(result?.correctYear).toBe(2027);
+    expect(result?.issues.length).toBeGreaterThan(0);
+  });
+
+  it("leaves a correct batch alone", () => {
+    const result = assessBatchYear({
+      admissionBatch: "November",
+      admissionYear: 2026,
+      enrolment: { batchMonth: "November", batchYear: 2026 },
+      classesStartedAt: new Date("2026-11-11T23:00:00Z"),
+      returning: true,
+      now,
+    });
+    expect(result?.issues).toEqual([]);
+  });
+
+  it("leaves a student nobody has moved up yet in their old batch", () => {
+    const result = assessBatchYear({
+      admissionBatch: "March",
+      admissionYear: 2026,
+      enrolment: { batchMonth: "March", batchYear: 2026 },
+      classesStartedAt: null,
+      returning: false,
+      now,
+    });
+    expect(result?.issues).toEqual([]);
+  });
+
+  it("leaves a new signup's deliberate far-ahead booking alone", () => {
+    const result = assessBatchYear({
+      admissionBatch: "October",
+      admissionYear: 2027,
+      enrolment: { batchMonth: "October", batchYear: 2027 },
+      classesStartedAt: null,
+      returning: false,
+      now,
+    });
+    expect(result?.issues).toEqual([]);
   });
 });
 

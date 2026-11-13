@@ -20,7 +20,16 @@ import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/stu
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import { describePhone, studentPhoneRaw } from "@/lib/phone-display";
 import { enrolmentYearOptions } from "@/lib/student-enrolment-years";
-import { batchFromAdmission } from "@/lib/batch";
+import { batchFromAdmission, MONTH_NAMES, monthNameToIndex, nearestBatchYear, yearFromBatchLabel } from "@/lib/batch";
+
+/** Two years back to two ahead, plus whatever is saved now — so a wrong year can always be put right. */
+function batchYearChoices(current: number) {
+  const thisYear = new Date().getFullYear();
+  const years = new Set<number>();
+  for (let year = thisYear - 2; year <= thisYear + 2; year += 1) years.add(year);
+  if (Number.isInteger(current) && current >= 1900 && current <= 2200) years.add(current);
+  return [...years].sort((a, b) => a - b);
+}
 
 /**
  * The roster's "Batch" column used to print the bare month off
@@ -256,6 +265,7 @@ function StudentsRoster() {
   // Which sittings/modes the school still runs, per level — set on /admin/settings.
   const [sessionCfg, setSessionCfg] = useState<SessionSettings | null>(null);
   const [newBatch, setNewBatch] = useState("");
+  const [newBatchYear, setNewBatchYear] = useState<number>(() => new Date().getFullYear());
   const [newPathway, setNewPathway] = useState(
     addStudentPathwayOptions.includes(params.get("pathway") ?? "") ? (params.get("pathway") as string) : packageOptions[0],
   );
@@ -539,6 +549,7 @@ function StudentsRoster() {
       deliveryMode: effectiveDelivery,
       pathway: newPathway,
       batch: newBatch,
+      ...(newBatch ? { batchYear: newBatchYear } : {}),
       hybridOnlineSlot: effectiveDelivery === "hybrid" && !editingStudentId ? newSessionSlot : newHybridOnlineSlot,
       city: newCity.trim(),
       state: newStateRegion.trim(),
@@ -630,6 +641,7 @@ function StudentsRoster() {
     setNewDeliveryMode("physical");
     setNewHybridOnlineSlot("");
     setNewBatch("");
+    setNewBatchYear(new Date().getFullYear());
     setNewPathway(packageOptions[0]);
     resetExtraStudentFields();
     setShowStudentForm(false);
@@ -781,11 +793,11 @@ function StudentsRoster() {
     setNewSessionSlot(student.sessionSlot || "morning");
     setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
     setNewHybridOnlineSlot(student.hybridOnlineSlot || "");
-    setNewBatch(
-      typeof (student.admission as AdmissionData)?.batch === "string"
-        ? String((student.admission as AdmissionData)?.batch)
-        : "",
-    );
+    // Month and year shown exactly as the roster's Batch column reads them.
+    const batchLabel = batchCellLabel(student.admission);
+    const batchMonthIndex = monthNameToIndex(batchLabel);
+    setNewBatch(batchMonthIndex === null ? "" : MONTH_NAMES[batchMonthIndex]);
+    setNewBatchYear(yearFromBatchLabel(batchLabel) ?? nearestBatchYear(batchLabel) ?? new Date().getFullYear());
     setNewPathway(student.pathway || packageOptions[0]);
     setNewCity(typeof admission.city === "string" ? admission.city : "");
     setNewStateRegion(typeof admission.state === "string" ? admission.state : "");
@@ -818,6 +830,7 @@ function StudentsRoster() {
     setNewDeliveryMode("physical");
     setNewHybridOnlineSlot("");
     setNewBatch("");
+    setNewBatchYear(new Date().getFullYear());
     setNewPathway(packageOptions[0]);
     setNewAmountPaid("");
     resetExtraStudentFields();
@@ -1620,17 +1633,35 @@ function StudentsRoster() {
                 </select>
               </label>
               <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Batch month</span>
-                <select
-                  value={newBatch}
-                  onChange={(event) => setNewBatch(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="">No batch set</option>
-                  {BATCH_MONTHS.map((month) => (
-                    <option key={month} value={month}>{month}</option>
-                  ))}
-                </select>
+                <span className="font-semibold text-[var(--muted)]">Batch month and year</span>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <select
+                    value={newBatch}
+                    onChange={(event) => {
+                      const month = event.target.value;
+                      if (month && month !== newBatch) setNewBatchYear(nearestBatchYear(month) ?? newBatchYear);
+                      setNewBatch(month);
+                    }}
+                    aria-label="Batch month"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">No batch set</option>
+                    {BATCH_MONTHS.map((month) => (
+                      <option key={month} value={month}>{month}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={newBatchYear}
+                    disabled={!newBatch}
+                    onChange={(event) => setNewBatchYear(Number(event.target.value) || newBatchYear)}
+                    aria-label="Batch year"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    {batchYearChoices(newBatchYear).map((year) => (
+                      <option key={year} value={year}>{year}</option>
+                    ))}
+                  </select>
+                </div>
                 <span className="block text-xs font-normal text-[var(--muted)]">
                   The month this student&apos;s level started. The timetable and the level-end date are
                   worked out from it — without it neither exists and they never auto-promote.

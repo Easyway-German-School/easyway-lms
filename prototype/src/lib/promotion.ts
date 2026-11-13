@@ -1,5 +1,6 @@
 import { prisma, unguardedPrisma } from "@/lib/prisma";
-import { resolveBatchAbsolute } from "@/lib/batch";
+import { batchLabelFromAdmission, MONTH_NAMES, resolveBatchAbsolute, yearFromBatchLabel } from "@/lib/batch";
+import { instantToZonedParts } from "@/lib/school-time";
 import { nextLevelAfter, SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
 import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
@@ -231,7 +232,7 @@ export async function promoteStudents(
 
   const result: PromotionResult = { promoted: [], skipped: [], overridden: [] };
 
-  const monthName = now.toLocaleString("en-US", { month: "long" });
+  const monthName = MONTH_NAMES[instantToZonedParts(now).month - 1];
   const startDaysByTenant = new Map<string, Awaited<ReturnType<typeof readIntakeStartDayOverrides>>>();
 
   for (const studentId of studentIds) {
@@ -252,6 +253,12 @@ export async function promoteStudents(
         tenantId: true,
         createdAt: true,
         classesStartedAt: true,
+        enrolments: {
+          where: { outcome: "ongoing", deletedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { batchMonth: true, batchYear: true },
+        },
       },
     });
 
@@ -354,7 +361,9 @@ export async function promoteStudents(
         startDaysByTenant.set(tenantKey, overrides);
       }
       place = nextPlacement({
-        batch: typeof admission.batch === "string" ? admission.batch : null,
+        // Month AND year: the bare month re-resolved from the account's
+        // creation date is how "September 2026" became November 2027.
+        batch: batchLabelFromAdmission(admission, student.enrolments?.[0]),
         sessionSlot: student.sessionSlot,
         registeredAt: student.createdAt,
         now,
@@ -366,6 +375,7 @@ export async function promoteStudents(
       });
     }
     const landingMonth = place?.month ?? monthName;
+    const landingYear = place?.year ?? instantToZonedParts(now).year;
 
     let charge: { chargeId: string; amount: number } | null = null;
     try {
@@ -427,6 +437,7 @@ export async function promoteStudents(
         admission: {
           ...admission,
           batch: landingMonth,
+          batchYear: landingYear,
           ...(place && student.classesStartedAt
             ? { classesStartedAtBeforePromotion: student.classesStartedAt.toISOString() }
             : {}),
@@ -479,6 +490,7 @@ export async function promoteStudents(
           classType: student.classType,
           deliveryMode: student.deliveryMode,
           batch: typeof admission.batch === "string" ? admission.batch : null,
+          batchYear: yearFromBatchLabel(batchLabelFromAdmission(admission)),
           registeredAt: student.createdAt,
           tenantId: student.tenantId,
           startedAt: student.classesStartedAt,
@@ -495,6 +507,7 @@ export async function promoteStudents(
         classType: student.classType,
         deliveryMode: student.deliveryMode,
         batch: landingMonth,
+        batchYear: landingYear,
         registeredAt: now,
         tenantId: student.tenantId,
         startedAt: place?.startsOn ?? now,

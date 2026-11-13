@@ -75,7 +75,7 @@ export async function openEnrolment(input: OpenEnrolmentInput) {
       classType: input.classType,
       deliveryMode: input.deliveryMode,
       batchMonth: input.batch ?? null,
-      batchYear: input.batchYear !== undefined ? input.batchYear : window?.year ?? null,
+      batchYear: input.batchYear ?? window?.year ?? null,
       startedAt: input.startedAt ?? null,
       outcome: "ongoing",
       tuitionChargeId: input.tuitionChargeId ?? null,

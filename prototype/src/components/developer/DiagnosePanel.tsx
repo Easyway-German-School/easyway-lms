@@ -31,7 +31,7 @@ const SEVERITY = {
   info: { dot: "bg-sky-500", ring: "border-sky-400/40", label: "Explained", text: "text-sky-600" },
 } as const;
 
-const BATCHABLE_REPAIRS = new Set<RepairId>(["sync_tuition_charge", "assign_student_code"]);
+const BATCHABLE_REPAIRS = new Set<RepairId>(["sync_tuition_charge", "assign_student_code", "fix_batch_year"]);
 const BATCH_SIZE = 10;
 const RULE_NAMES = [
   "Paystack has a payment we did not record",
@@ -311,7 +311,7 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
           </div>
         )}
         <p className="mt-2 text-xs text-[var(--muted)]">
-          Bulk repair only syncs tuition/enrolment records or issues missing student IDs. It does not create payment records,
+          Bulk repair only syncs tuition/enrolment records, corrects wrong batch years or issues missing student IDs. It does not create payment records,
           change or waive balances, and does not contact Paystack. Run an individual deep check to compare payments with Paystack.
         </p>
         {scanError && <p className="mt-3 rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-xs text-red-500">{scanError}</p>}
@@ -510,7 +510,7 @@ export default function DiagnosePanel({ target, onTargetUsed }: { target: Diagno
                         ) : (
                           <div className="mt-4 space-y-2">
                             {f.offers.map((offer) => {
-                              const key = `${offer.id}:${offer.params.reference ?? ""}`;
+                              const key = `${offer.id}:${offer.params.reference ?? offer.params.liveSessionId ?? ""}`;
                               return (
                                 <div key={key} className="rounded-2xl border border-[var(--border)] p-3">
                                   {confirming === key ? (
