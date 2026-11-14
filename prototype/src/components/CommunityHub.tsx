@@ -8,6 +8,7 @@ import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
 import CommunityWins from "@/components/CommunityWins";
+import CommunityMentionsMoment from "@/components/moment/CommunityMentionsMoment";
 import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import StoryTour from "@/components/StoryTour";
 import Avatar from "@/components/Avatar";
@@ -33,11 +34,21 @@ import {
   MicIcon,
   PaletteIcon,
   PauseIcon,
+  PencilIcon,
   PlayIcon,
   SendIcon,
   TrashIcon,
 } from "@/components/icons";
 import { ZoomableImage } from "@/components/ImageLightbox";
+import {
+  activeMentionQuery,
+  insertMentionToken,
+  mentionHref,
+  mentionToken,
+  MENTION_TYPE_LABEL,
+  splitMentions,
+  type MentionType,
+} from "@/lib/chat-mentions";
 import { TypingAvatars, TypingBubble, TypingDots } from "@/components/typing/TypingUI";
 import { useTypingFeed } from "@/lib/client/typing-feed";
 import { useTypingSender } from "@/lib/client/use-typing-sender";
@@ -117,6 +128,8 @@ type ChatMessage = {
   stickerId?: string | null;
   /** This message IS an invite card — somebody started a game in this room. */
   gameMatch?: { id: string; title: string; status: string } | null;
+  /** This message IS a card — a tutor's new assignment just reached this room. */
+  assignment?: { id: string; title: string; type: string; dueAt: string | null } | null;
   /** Staff have held this at the top of the room. */
   pinned?: boolean;
   /** Set on a bubble we have drawn but the server has not confirmed. */
@@ -346,6 +359,38 @@ function timeOf(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * A message body with `@[Label](type:id)` tokens drawn as tappable chips
+ * instead of literal brackets. A person mention has no href — see
+ * `mentionHref` — so it renders as a highlighted name, not a link.
+ */
+function MentionText({ body }: { body: string }) {
+  const segments = useMemo(() => splitMentions(body), [body]);
+  if (segments.length === 1 && segments[0].kind === "text") {
+    return <>{body}</>;
+  }
+  return (
+    <>
+      {segments.map((segment, i) => {
+        if (segment.kind === "text") return <span key={i}>{segment.text}</span>;
+        const href = mentionHref(segment.type, segment.id);
+        const chip = (
+          <span className="mx-0.5 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-1.5 py-0.5 text-[0.92em] font-semibold text-[var(--accent)]">
+            @{segment.label}
+          </span>
+        );
+        return href ? (
+          <a key={i} href={href} className="no-underline">
+            {chip}
+          </a>
+        ) : (
+          <span key={i}>{chip}</span>
+        );
+      })}
+    </>
+  );
+}
+
 /** "Today" / "Yesterday" / a date — the separator every chat has. */
 function dayLabel(iso: string) {
   const date = new Date(iso);
@@ -427,6 +472,24 @@ function CommunityHubInner({
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [attachment, setAttachment] = useState<{ url: string; type: string | null; name: string | null } | null>(null);
   const [uploading, setUploading] = useState(false);
+  /**
+   * The "@" dropdown. `anchor` is where the "@query" being typed starts and
+   * how long it currently is, so picking a result knows exactly what to
+   * replace; `results` comes back grouped by type from the search API.
+   * `highlight` is which row Up/Down/Enter currently points at.
+   */
+  const [mentionAnchor, setMentionAnchor] = useState<{ start: number; query: string } | null>(null);
+  const [mentionResults, setMentionResults] = useState<Record<MentionType, Array<{ type: MentionType; id: string; label: string; sub?: string }>>>({
+    person: [],
+    assignment: [],
+    material: [],
+    video: [],
+  });
+  const [mentionHighlight, setMentionHighlight] = useState(0);
+  const mentionFlatResults = useMemo(
+    () => (["person", "assignment", "material", "video"] as MentionType[]).flatMap((type) => mentionResults[type]),
+    [mentionResults],
+  );
   /** Id of the message being corrected, and the text in its box. */
   const [editing, setEditing] = useState<string | null>(null);
   /** Which message currently has the emoji row open. One at a time. */
@@ -907,6 +970,7 @@ function CommunityHubInner({
       },
     ]);
     setDraft("");
+    setMentionAnchor(null);
     // Sent, so no longer "typing" — resets the throttle for the next message.
     stopTyping();
     setReplyTo(null);
@@ -1083,12 +1147,60 @@ function CommunityHubInner({
 
   // Every keystroke in the box: keep the draft, and let the sender decide
   // whether it is time to re-stamp "typing" (see useTypingSender above).
+  const mentionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Debounced so every keystroke after the "@" doesn't fire its own request. */
+  const fetchMentionResults = useCallback(
+    (query: string) => {
+      if (!activeId) return;
+      if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+      mentionDebounceRef.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/community/mentions/search?channelId=${activeId}&q=${encodeURIComponent(query)}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          setMentionResults(data.results ?? { person: [], assignment: [], material: [], video: [] });
+          setMentionHighlight(0);
+        } catch {
+          // Silent — the dropdown just stays empty; typing is never interrupted.
+        }
+      }, 150);
+    },
+    [activeId],
+  );
+
   const handleDraftChange = useCallback(
-    (value: string) => {
+    (value: string, cursor: number) => {
       setDraft(value);
       onTypingDraftChange(value);
+      const anchor = activeMentionQuery(value, cursor);
+      setMentionAnchor(anchor);
+      if (anchor) fetchMentionResults(anchor.query);
     },
-    [onTypingDraftChange],
+    [onTypingDraftChange, fetchMentionResults],
+  );
+
+  /** Finish an "@" mention: swap the "@query" being typed for the real token. */
+  const pickMention = useCallback(
+    (result: { type: MentionType; id: string; label: string }) => {
+      if (!mentionAnchor) return;
+      const { value, cursor } = insertMentionToken(
+        draft,
+        mentionAnchor.start,
+        mentionAnchor.query,
+        result.type,
+        result.id,
+        result.label,
+      );
+      setDraft(value);
+      onTypingDraftChange(value);
+      setMentionAnchor(null);
+      requestAnimationFrame(() => {
+        composerRef.current?.focus();
+        composerRef.current?.setSelectionRange(cursor, cursor);
+      });
+    },
+    [mentionAnchor, draft, onTypingDraftChange],
   );
 
   /**
@@ -1369,6 +1481,8 @@ function CommunityHubInner({
   }
 
   return (
+    <>
+    <CommunityMentionsMoment />
     <div
       // Phones: edge to edge, as tall as the visible screen (`dvh`, not `vh` — on an
       // iPhone `vh` includes the address bar, which pushed the message box below the fold),
@@ -1795,10 +1909,11 @@ function CommunityHubInner({
                           stickers bare for the same reason.
                         */
                         const isSticker = Boolean(message.stickerId && stickerById(message.stickerId));
-                        // A game invite is a card, not a chat bubble — it needs
-                        // its own border and background regardless of theme or
-                        // "mine", the same reasoning that keeps a sticker bare.
-                        const isGameInvite = Boolean(message.gameMatch);
+                        // A game invite (or an assignment card) is a card, not
+                        // a chat bubble — it needs its own border and
+                        // background regardless of theme or "mine", the same
+                        // reasoning that keeps a sticker bare.
+                        const isGameInvite = Boolean(message.gameMatch) || Boolean(message.assignment);
                         return (
                       <div
                         className={`text-sm leading-6 ${
@@ -1906,6 +2021,33 @@ function CommunityHubInner({
                               </span>
                             </span>
                           </a>
+                        ) : message.assignment ? (
+                          /*
+                            THE ASSIGNMENT CARD — auto-posted the moment a
+                            tutor publishes new work for this room. Tapping it
+                            goes straight to the assignment, which is the whole
+                            point: "where did the tutor post it" stops being a
+                            question anyone has to ask in the room.
+                          */
+                          <a
+                            href={`/assignment?id=${message.assignment.id}`}
+                            className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-[var(--foreground)] transition hover:border-[var(--accent)]"
+                          >
+                            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                              <PencilIcon className="h-5 w-5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
+                                New {message.assignment.type === "quiz" ? "quiz" : "assignment"}
+                              </span>
+                              <span className="block truncate text-sm font-semibold">{message.assignment.title}</span>
+                              <span className="block text-xs text-[var(--muted)]">
+                                {message.assignment.dueAt
+                                  ? `Due ${new Date(message.assignment.dueAt).toLocaleDateString()} · tap to open`
+                                  : "Tap to open"}
+                              </span>
+                            </span>
+                          </a>
                         ) : message.stickerId && stickerById(message.stickerId) ? (
                           /*
                             A sticker fills the bubble instead of sitting in it.
@@ -1915,7 +2057,9 @@ function CommunityHubInner({
                           */
                           <StickerArt sticker={stickerById(message.stickerId)!} size={116} />
                         ) : (
-                          <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                          <p className="whitespace-pre-wrap break-words">
+                            <MentionText body={message.body} />
+                          </p>
                         )}
 
                         {message.attachment ? (
@@ -2122,7 +2266,53 @@ function CommunityHubInner({
 
         {/* ------------------------------------------------------- composer */}
         {canPost ? (
-          <div className={`border-t border-[var(--border)] p-3 ${isChat ? "bg-[var(--surface-alt)]" : ""}`}>
+          <div className={`relative border-t border-[var(--border)] p-3 ${isChat ? "bg-[var(--surface-alt)]" : ""}`}>
+            {mentionAnchor && mentionFlatResults.length > 0 ? (
+              /*
+                THE "@" DROPDOWN. Grouped by type (person/assignment/material/
+                video) rather than one flat list, because the same letters
+                typed after "@" could plausibly mean a classmate OR a lesson —
+                the label under each row is what tells them apart at a glance.
+              */
+              <div className="absolute inset-x-3 bottom-full z-20 mb-2 max-h-64 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-lg">
+                {(["person", "assignment", "material", "video"] as MentionType[]).map((type) => {
+                  const rows = mentionResults[type];
+                  if (!rows.length) return null;
+                  return (
+                    <div key={type} className="mb-1 last:mb-0">
+                      <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                        {MENTION_TYPE_LABEL[type]}
+                      </p>
+                      {rows.map((row) => {
+                        const flatIndex = mentionFlatResults.findIndex((r) => r.type === row.type && r.id === row.id);
+                        const highlighted = flatIndex === mentionHighlight;
+                        return (
+                          <button
+                            key={`${row.type}:${row.id}`}
+                            type="button"
+                            onMouseDown={(event) => {
+                              // mousedown, not click: fires before the
+                              // textarea's own blur, so the cursor position
+                              // this reads is still the one the user typed at.
+                              event.preventDefault();
+                              pickMention(row);
+                            }}
+                            onMouseEnter={() => setMentionHighlight(flatIndex)}
+                            className={`flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-left text-sm transition ${
+                              highlighted ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "hover:bg-[var(--surface-alt)]"
+                            }`}
+                          >
+                            <span className="truncate font-medium">{row.label}</span>
+                            {row.sub ? <span className="shrink-0 text-xs text-[var(--muted)]">{row.sub}</span> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
             {replyTo ? (
               <div className="mb-2 flex items-start gap-2 rounded-xl border-l-2 border-[var(--accent)] bg-[var(--surface-alt)] px-3 py-2">
                 <div className="min-w-0 flex-1">
@@ -2327,8 +2517,32 @@ function CommunityHubInner({
               <textarea
                 ref={composerRef}
                 value={draft}
-                onChange={(event) => handleDraftChange(event.target.value)}
+                onChange={(event) => handleDraftChange(event.target.value, event.target.selectionStart ?? event.target.value.length)}
                 onKeyDown={(event) => {
+                  // The "@" dropdown gets first refusal on every key that
+                  // would otherwise send, navigate, or just type through it.
+                  if (mentionAnchor && mentionFlatResults.length > 0) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setMentionHighlight((i) => (i + 1) % mentionFlatResults.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setMentionHighlight((i) => (i - 1 + mentionFlatResults.length) % mentionFlatResults.length);
+                      return;
+                    }
+                    if (event.key === "Enter" || event.key === "Tab") {
+                      event.preventDefault();
+                      pickMention(mentionFlatResults[mentionHighlight]);
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setMentionAnchor(null);
+                      return;
+                    }
+                  }
                   // Enter sends, Shift+Enter breaks the line — the convention
                   // everybody already has in their fingers. Not on a phone,
                   // where Enter is the only way to get a new line at all.
@@ -2390,5 +2604,6 @@ function CommunityHubInner({
           student opens the games tray, never again. */}
       {showStoryTour ? <StoryTour onDone={() => setShowStoryTour(false)} /> : null}
     </div>
+    </>
   );
 }

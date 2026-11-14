@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Mascot from "@/components/Mascot";
 import StudentShell from "@/components/StudentShell";
@@ -37,7 +38,12 @@ const DOCUMENT_FILTERS = [
 ] as const;
 
 export default function MaterialsPage() {
-  const [tab, setTab] = useState<Tab>("watch");
+  const searchParams = useSearchParams();
+  // A `@[Title](material:id)` tag in community chat lands here — jump
+  // straight to the Documents tab and the exact card, instead of leaving
+  // someone to scroll a list for the thing they just tapped.
+  const openId = searchParams.get("open");
+  const [tab, setTab] = useState<Tab>(openId ? "documents" : "watch");
 
   const [materials, setMaterials] = useState<Material[]>([]);
   const [videos, setVideos] = useState<LibraryVideo[]>([]);
@@ -104,6 +110,16 @@ export default function MaterialsPage() {
 
     void load();
   }, [refreshTick]);
+
+  // Scroll the tagged material into view once the list has actually loaded —
+  // doing it before that just scrolls to nothing, since the card doesn't
+  // exist in the DOM yet.
+  useEffect(() => {
+    if (!openId || loading) return;
+    const el = document.getElementById(`material-${openId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [openId, loading, materials]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshTick((value) => value + 1), 10_000);
@@ -275,9 +291,12 @@ export default function MaterialsPage() {
                   {filteredDocuments.map((material) => (
                     <motion.div
                       key={material.id}
+                      id={`material-${material.id}`}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="flex items-center gap-4 rounded-3xl cinematic-card p-6 transition hover:bg-[var(--surface-alt)]"
+                      className={`flex items-center gap-4 rounded-3xl cinematic-card p-6 transition hover:bg-[var(--surface-alt)] ${
+                        openId === material.id ? "ring-2 ring-[var(--accent)]" : ""
+                      }`}
                     >
                       <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                         {fileTypeIcon(material.fileType)}

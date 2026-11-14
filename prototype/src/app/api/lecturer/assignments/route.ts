@@ -11,7 +11,9 @@ import { notify, KIND } from "@/lib/notify";
 import { studentsVisibleToAssignment } from "@/lib/student-assignments";
 import { resolveOnlineBranchId } from "@/lib/online-branch-server";
 import { groupStudentsByTutorPhrase } from "@/lib/tutor-attribution";
-import { batchOfAdmission } from "@/lib/class-batch";
+import { batchOfAdmission, canonicalBatch } from "@/lib/class-batch";
+import { announceChatMessage } from "@/lib/community-notify";
+import { mentionToken } from "@/lib/chat-mentions";
 
 /** Tutors create and review assignments for a level (optionally one branch). */
 
@@ -386,6 +388,62 @@ async function resolveTargets(
   };
 }
 
+/**
+ * Auto-post the "new assignment" card into every community room this
+ * assignment reaches. Best-effort: a community outage must never stop an
+ * assignment from being created, which is why this is called after the
+ * assignment already exists and swallows its own errors.
+ */
+async function postAssignmentCardToCommunity(
+  assignment: { id: string; title: string; dueAt: Date | null },
+  authorId: string,
+  level: string,
+  branchId: string | null,
+  sessionSlot: string | null,
+  batch: string | null,
+) {
+  try {
+    const spaces = await prisma.space.findMany({
+      where: {
+        level,
+        ...(branchId ? { branchId } : {}),
+        ...(sessionSlot ? { sessionSlot } : {}),
+        ...(batch ? { batch: canonicalBatch(batch) } : {}),
+      },
+      select: { id: true },
+    });
+    if (!spaces.length) return;
+
+    const channels = await prisma.channel.findMany({
+      where: { spaceId: { in: spaces.map((s) => s.id) }, kind: "announcement" },
+      select: { id: true, name: true, spaceId: true },
+    });
+    if (!channels.length) return;
+
+    const dueLine = assignment.dueAt ? ` Due ${assignment.dueAt.toLocaleDateString()}.` : "";
+    const body = `${mentionToken("assignment", assignment.id, assignment.title)}was just set.${dueLine}`;
+
+    for (const channel of channels) {
+      const posted = await prisma.message.create({
+        data: { channelId: channel.id, authorId, body, kind: "assignment_invite", assignmentId: assignment.id },
+        select: { id: true },
+      });
+      announceChatMessage({
+        channelId: channel.id,
+        channelName: channel.name,
+        spaceId: channel.spaceId,
+        messageId: posted.id,
+        authorId,
+        authorName: "Your tutor",
+        body: `New assignment: ${assignment.title}`,
+        hasAttachment: false,
+      });
+    }
+  } catch (error) {
+    console.error("Assignment community card failed:", error);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireStaff();
   if ("error" in auth) return auth.error;
@@ -486,6 +544,7 @@ export async function POST(req: NextRequest) {
          * rather than for three cohorts taught by three different people.
          */
         sessionSlot: resolvedSessionSlot,
+        batch: canonicalBatch(resolvedBatch) || null,
         type: kind,
         timeLimitMinutes: kind === "quiz" && timeLimitMinutes ? Number(timeLimitMinutes) : null,
         questions: kind === "quiz" ? (parsed as object[]) : undefined,
@@ -517,7 +576,12 @@ export async function POST(req: NextRequest) {
         : (
             await prisma.student.findMany({
               where: studentsVisibleToAssignment(
-                { level: normalizedLevel, branchId: resolvedBranchId, sessionSlot: resolvedSessionSlot },
+                {
+                  level: normalizedLevel,
+                  branchId: resolvedBranchId,
+                  sessionSlot: resolvedSessionSlot,
+                  lecturerId: auth.lecturerId ?? null,
+                },
                 onlineBranchId,
               ),
               select: { id: true, admission: true },
@@ -548,6 +612,16 @@ export async function POST(req: NextRequest) {
             : `"${created.title}" was just set for you.${dueLine} Go to Assignments in the portal to submit it.`,
         }).catch((error) => console.error("Assignment-created notification failed", error));
       }
+
+      // Drop a card into Announcements for every room this reaches, so
+      // "where did the tutor post it" stops being the most-asked question in
+      // the community — the card opens straight to the assignment. Posted to
+      // whichever rooms actually match this assignment's scope: when a
+      // sitting/branch was picked (the ordinary case), that is one or a
+      // handful of rooms; when it was left open ("every sitting"/"every
+      // branch"), it reaches every room at the level, the same audience the
+      // notification above already reaches.
+      await postAssignmentCardToCommunity(created, auth.userId, normalizedLevel, resolvedBranchId, resolvedSessionSlot, resolvedBatch);
     }
 
     return NextResponse.json({ assignment: created, targeted: targetIds.length });
