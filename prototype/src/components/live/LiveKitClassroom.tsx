@@ -604,6 +604,8 @@ export default function LiveKitClassroom({
     null,
   );
   const [quizDismissed, setQuizDismissed] = useState(false);
+  /** Is the school's recorder capturing this class? Null until first known. */
+  const [serverRecording, setServerRecording] = useState<boolean | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   // Room state lives on the Room object, not in React. Rather than mirroring it
   // (and drifting), events bump this counter and the component re-reads.
@@ -685,6 +687,35 @@ export default function LiveKitClassroom({
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  // The self-hosted recorder is a hidden participant, invisible to this
+  // browser, so the recording badge asks the server (the same ClassRecording
+  // row the admin recorder screen reads). The tutor's join is what starts the
+  // capture, so the first answers can lag it by a few seconds.
+  const connectedForRecording = status === "connected" || status === "reconnecting";
+  useEffect(() => {
+    if (!liveSessionId || !connectedForRecording) return;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const response = await fetch(
+          `/api/live/session/recording-status?liveSessionId=${encodeURIComponent(liveSessionId)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const body = (await response.json().catch(() => ({}))) as { recording?: boolean | null };
+        if (!stopped && typeof body.recording === "boolean") setServerRecording(body.recording);
+      } catch {
+        /* keep the last known answer; the next poll tries again */
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 20_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [liveSessionId, connectedForRecording]);
 
   // When the link went bad, or null if it is currently fine.
   useEffect(() => {
@@ -779,6 +810,7 @@ export default function LiveKitClassroom({
         joinedAtRef.current = Date.now();
         setStatus("connected");
         bumpAll();
+        if (room.isRecording) setServerRecording(true);
 
         if (role === "student" && liveSessionId) {
           void fetch("/api/live/presence", {
@@ -844,6 +876,7 @@ export default function LiveKitClassroom({
       })
       .on(RoomEvent.ParticipantConnected, bumpAll)
       .on(RoomEvent.ParticipantDisconnected, bumpAll)
+      .on(RoomEvent.RecordingStatusChanged, (recording) => setServerRecording((known) => (recording ? true : known)))
       .on(RoomEvent.TrackSubscribed, bumpAll)
       .on(RoomEvent.TrackUnsubscribed, bumpAll)
       .on(RoomEvent.TrackMuted, bumpAll)
@@ -1922,11 +1955,27 @@ export default function LiveKitClassroom({
                 <ReactionLayer reactions={interactions.reactions} />
 
                 <div
-                  title="For everyone's privacy, please don't record or share this class."
-                  aria-label={`Please do not record or share this EasyWay live class. Participant: ${displayName}.`}
-                  className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[70%] truncate rounded-lg border border-white/10 bg-black/55 px-2.5 py-1.5 text-[10px] font-medium text-white/80 shadow-lg backdrop-blur-sm"
+                  title={
+                    serverRecording
+                      ? "This class is being recorded by the school for the class library. Please don't make your own recording."
+                      : "For everyone's privacy, please don't record or share this class."
+                  }
+                  aria-label={
+                    serverRecording
+                      ? `This EasyWay live class is being recorded by the school. ${displayName}.`
+                      : `Please do not record or share this EasyWay live class. ${displayName}.`
+                  }
+                  className="pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[70%] items-center gap-1.5 truncate rounded-lg border border-white/10 bg-black/55 px-2.5 py-1.5 text-[10px] font-medium text-white/80 shadow-lg backdrop-blur-sm"
                 >
-                  No recording · {displayName}
+                  {serverRecording ? (
+                    <>
+                      <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" aria-hidden />
+                      <span className="font-semibold text-white">Recording</span>
+                    </>
+                  ) : (
+                    <span>Please don&apos;t screen-record</span>
+                  )}
+                  <span className="truncate">· {displayName}</span>
                 </div>
 
                 {/*

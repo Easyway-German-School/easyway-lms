@@ -21,15 +21,30 @@
  * having started in September 2025 — eleven months ago — so the portal
  * congratulated them on finishing a level they had not attended one day of.
  *
- * The fix is to anchor on the date they REGISTERED. A batch month can never
- * be before the month a student walked in, so the batch is the first
- * occurrence of that month at or after their registration month. Where the
+ * The fix is to anchor on the date they REGISTERED: the batch is the first
+ * occurrence of that month at or after one session before their registration
+ * month (a returning student re-added mid-batch was already in it). A label
+ * that carries its own year ("September 2026") always wins. Where the
  * registration date is unknown (imported rows, old data) it falls back to the
  * old backwards-looking rule, which is still the right answer for a student
  * who is mid-course.
  */
 
-import { SESSION_MONTHS } from "@/lib/levels";
+import { SESSION_MONTHS, WEEKEND_SESSION_MONTHS } from "@/lib/levels";
+import { instantToZonedParts } from "@/lib/school-time";
+
+/**
+ * How far BEFORE the registration month a bare batch month may sit and still
+ * mean the batch the student was already in. One full (weekend-length) session:
+ * a returning student re-added by hand in November for the "September" batch
+ * was in September of THIS year, not next year. Without this window that
+ * student read as September 2027, and moving them up placed them in
+ * November 2027.
+ */
+export const RECENT_BATCH_LOOKBACK_MONTHS = WEEKEND_SESSION_MONTHS;
+
+/** Furthest ahead a batch can sensibly be booked; matches MAX_BARE_MONTH_LEAD_MONTHS. */
+export const MAX_BATCH_LEAD_MONTHS = 6;
 
 export const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -60,6 +75,15 @@ export function monthNameToIndex(name: unknown): number | null {
   const cleaned = name.trim().replace(/\s+\d{4}$/, "");
   const index = MONTH_NAMES.findIndex((m) => m.toLowerCase() === cleaned.toLowerCase());
   return index >= 0 ? index : null;
+}
+
+/** "September 2026" → 2026. A bare month, or a year outside 1900–2200, → null. */
+export function yearFromBatchLabel(label: unknown): number | null {
+  if (typeof label !== "string") return null;
+  const match = label.trim().match(/\s(\d{4})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  return year >= 1900 && year <= 2200 ? year : null;
 }
 
 export type BatchWindow = {
@@ -102,13 +126,18 @@ export function resolveBatchAbsolute(
   const monthIndex = monthNameToIndex(batch);
   if (monthIndex === null) return null;
 
+  // A label that carries its own year ("September 2026") is unambiguous.
+  const explicitYear = yearFromBatchLabel(batch);
+  if (explicitYear !== null) return explicitYear * 12 + monthIndex;
+
   if (registeredAt instanceof Date && !Number.isNaN(registeredAt.getTime())) {
-    // Forwards from registration: the first occurrence at or after the month
-    // they signed up in. A student registering in August for "July" means next
-    // July, not the July that had already gone when they walked in.
-    const year =
-      monthIndex >= registeredAt.getMonth() ? registeredAt.getFullYear() : registeredAt.getFullYear() + 1;
-    let absolute = year * 12 + monthIndex;
+    // Forwards from registration, allowing one session of look-back: the first
+    // occurrence at or after RECENT_BATCH_LOOKBACK_MONTHS before the month they
+    // registered in. Registering in November for "September" means the
+    // September just gone (a returning student re-added mid-flight), while
+    // registering in December for "July" still means next July.
+    const floor = absoluteOf(registeredAt) - RECENT_BATCH_LOOKBACK_MONTHS;
+    let absolute = floor + ((monthIndex - (floor % 12) + 12) % 12);
 
     /**
      * STALE-REGISTRATION GUARD.
@@ -215,4 +244,163 @@ export function batchFromAdmission(admission: unknown): string | null {
   if (!admission || typeof admission !== "object") return null;
   const value = (admission as Record<string, unknown>).batch;
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** Read the batch as a month plus its explicitly selected year, when present. */
+export function batchLabelFromAdmission(
+  admission: unknown,
+  currentEnrolment?: { batchMonth?: string | null; batchYear?: number | null } | null,
+): string | null {
+  const batch = currentEnrolment?.batchMonth?.trim() || batchFromAdmission(admission);
+  if (!batch || /\b\d{4}\b/.test(batch)) return batch;
+  const admissionYear =
+    admission && typeof admission === "object" && !Array.isArray(admission)
+      ? (admission as Record<string, unknown>).batchYear
+      : null;
+  const year =
+    currentEnrolment?.batchYear ??
+    (typeof admissionYear === "number" ? admissionYear : null);
+  return typeof year === "number" && Number.isInteger(year) && year >= 1900 && year <= 2200
+    ? `${batch} ${year}`
+    : batch;
+}
+
+function zonedAbsolute(date: Date): number {
+  const parts = instantToZonedParts(date);
+  return parts.year * 12 + (parts.month - 1);
+}
+
+/**
+ * The one occurrence of a batch month inside the twelve-month window that runs
+ * from (12 - 1 - MAX_BATCH_LEAD_MONTHS) months ago to MAX_BATCH_LEAD_MONTHS
+ * ahead — the batch a month name plainly means today, whether it is running,
+ * just finished or booked ahead. School timezone, like the intake calendar.
+ */
+export function nearestBatchAbsolute(batch: unknown, now: Date = new Date()): number | null {
+  const monthIndex = monthNameToIndex(batch);
+  if (monthIndex === null) return null;
+  const lowest = zonedAbsolute(now) - (11 - MAX_BATCH_LEAD_MONTHS);
+  return lowest + ((monthIndex - (lowest % 12) + 12) % 12);
+}
+
+export function nearestBatchYear(batch: unknown, now: Date = new Date()): number | null {
+  const absolute = nearestBatchAbsolute(batch, now);
+  return absolute === null ? null : Math.floor(absolute / 12);
+}
+
+export type BatchYearAssessment = {
+  /** Bare month name. */
+  month: string;
+  /** Year on the admission record (its own label first, then `batchYear`). */
+  admissionYear: number | null;
+  /** Year on the ongoing enrolment, when it is for the same month. */
+  enrolmentYear: number | null;
+  /** The year the portal lock, roster and payment clock read today. */
+  effectiveYear: number | null;
+  /** The year this batch should carry. */
+  correctYear: number;
+  /** Plain-language reasons the recorded year is wrong. Empty when it is right. */
+  issues: string[];
+};
+
+/**
+ * Is the YEAR on this student's batch right?
+ *
+ * The month is what people choose; the year is derived, and a wrong one
+ * scatters a student: the roster prints "November 2027", the portal either
+ * padlocks them for a year or never locks at all, the 30-day payment clock
+ * anchors on the wrong date and they land in the wrong cohort's class.
+ *
+ * The right year, in order of trust:
+ *   1. A confirmed first day in the same month, within the sensible window.
+ *   2. A recorded year (admission or enrolment) within the sensible window —
+ *      the LATEST of them, because moves only go forward and a stale year
+ *      always lags behind.
+ *   3. The nearest occurrence of the month (see nearestBatchAbsolute).
+ *
+ * A non-returning student booked further ahead than the window is left alone:
+ * a new signup can genuinely reserve a seat that far out.
+ */
+export function assessBatchYear(input: {
+  admissionBatch: string | null;
+  admissionYear: number | null;
+  enrolment: { batchMonth: string | null; batchYear: number | null } | null;
+  classesStartedAt: Date | null;
+  /** Moved up before, or above A1 — a booking a year ahead is never deliberate for them. */
+  returning: boolean;
+  now?: Date;
+}): BatchYearAssessment | null {
+  const now = input.now ?? new Date();
+  // The admission record is what the office edits and promotion writes, so its
+  // month leads; a different month on the enrolment is a separate drift.
+  const monthIndex = monthNameToIndex(input.admissionBatch) ?? monthNameToIndex(input.enrolment?.batchMonth);
+  if (monthIndex === null) return null;
+  const month = MONTH_NAMES[monthIndex];
+
+  const admissionYear =
+    monthNameToIndex(input.admissionBatch) === monthIndex
+      ? yearFromBatchLabel(input.admissionBatch) ?? validYear(input.admissionYear)
+      : null;
+  const enrolmentYear =
+    input.enrolment && monthNameToIndex(input.enrolment.batchMonth) === monthIndex
+      ? yearFromBatchLabel(input.enrolment.batchMonth) ?? validYear(input.enrolment.batchYear)
+      : null;
+  const effectiveLabel = batchLabelFromAdmission(
+    { batch: input.admissionBatch, batchYear: input.admissionYear },
+    input.enrolment,
+  );
+  const effectiveYear = monthNameToIndex(effectiveLabel) === monthIndex ? yearFromBatchLabel(effectiveLabel) : null;
+
+  const nowAbsolute = zonedAbsolute(now);
+  const inWindow = (absolute: number) =>
+    absolute - nowAbsolute <= MAX_BATCH_LEAD_MONTHS && nowAbsolute - absolute <= 11 - MAX_BATCH_LEAD_MONTHS;
+
+  let confirmedYear: number | null = null;
+  if (input.classesStartedAt && !Number.isNaN(input.classesStartedAt.getTime())) {
+    const started = zonedAbsolute(input.classesStartedAt);
+    if (started % 12 === monthIndex && inWindow(started)) confirmedYear = Math.floor(started / 12);
+  }
+
+  const recorded = [admissionYear, enrolmentYear].filter((year): year is number => year !== null);
+  const plausible = recorded.filter((year) => inWindow(year * 12 + monthIndex));
+  // Long past is not proof of a wrong year — a student nobody has moved up yet
+  // is still in the batch they started in. Only "too far ahead" is.
+  const notTooFarAhead = recorded.filter((year) => year * 12 + monthIndex - nowAbsolute <= MAX_BATCH_LEAD_MONTHS);
+  const nearest = Math.floor((nearestBatchAbsolute(month, now) as number) / 12);
+
+  const correctYear =
+    confirmedYear ??
+    (plausible.length
+      ? Math.max(...plausible)
+      : notTooFarAhead.length
+        ? Math.max(...notTooFarAhead)
+        : recorded.length && !input.returning
+          ? Math.max(...recorded)
+          : nearest);
+
+  const issues: string[] = [];
+  if (admissionYear !== null && enrolmentYear !== null && admissionYear !== enrolmentYear) {
+    issues.push(`the admission record says ${month} ${admissionYear} but the current enrolment says ${month} ${enrolmentYear}`);
+  }
+  if (effectiveYear !== null && effectiveYear !== correctYear) {
+    const ahead = effectiveYear * 12 + monthIndex - nowAbsolute;
+    if (confirmedYear !== null) {
+      issues.push(`their confirmed first day is in ${month} ${confirmedYear}, but the batch reads ${month} ${effectiveYear}`);
+    } else if (ahead > MAX_BATCH_LEAD_MONTHS) {
+      issues.push(`${month} ${effectiveYear} is ${ahead} months away — a moved-up or returning student is never booked that far ahead`);
+    } else if (!issues.length) {
+      issues.push(`the batch reads ${month} ${effectiveYear}, but ${month} ${correctYear} is the batch they are in`);
+    }
+  }
+  for (const year of [admissionYear, enrolmentYear]) {
+    if (year !== null && year !== correctYear && issues.length === 0) {
+      issues.push(`a saved year (${year}) disagrees with ${month} ${correctYear}`);
+    }
+  }
+
+  return { month, admissionYear, enrolmentYear, effectiveYear, correctYear, issues };
+}
+
+function validYear(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1900 && value <= 2200 ? value : null;
 }

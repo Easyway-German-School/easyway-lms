@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const REFERENCE = /^[A-Za-z0-9_.\-]{4,120}$/;
+const ID = /^[A-Za-z0-9_\-]{6,64}$/;
 
 /**
  * Run ONE repair from the developer console's whitelist.
@@ -39,6 +40,11 @@ export async function POST(request: Request) {
     if (typeof reference === "string") {
       if (!REFERENCE.test(reference)) return NextResponse.json({ error: "That does not look like a Paystack reference" }, { status: 400 });
       params.reference = reference;
+    }
+    const liveSessionId = (body.params as Record<string, unknown>).liveSessionId;
+    if (typeof liveSessionId === "string") {
+      if (!ID.test(liveSessionId)) return NextResponse.json({ error: "That does not look like a live class id" }, { status: 400 });
+      params.liveSessionId = liveSessionId;
     }
   }
 

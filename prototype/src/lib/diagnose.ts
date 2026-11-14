@@ -42,6 +42,7 @@ import type { Capability } from "@/lib/admin-roles";
 // how the paywall drifted apart in thirteen places.
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { studentMayJoinBatch } from "@/lib/class-batch";
+import { assessBatchYear, type BatchYearAssessment } from "@/lib/batch";
 
 // ---------------------------------------------------------------------------
 // Facts — everything the rules may look at. Plain data; no Prisma, no fetch.
@@ -109,6 +110,9 @@ export type Facts = {
       batch: string | null;
       lecturerId: string | null;
       privateClassId: string | null;
+      startedAt?: string;
+      /** An active ClassRecording exists for this room. Absent when not checked. */
+      recording?: boolean;
     }>;
   };
   user: { id: string; email: string; name: string | null; tenantId: string | null };
@@ -148,6 +152,16 @@ export type Facts = {
     expectedBatchMonth: string | null;
     expectedBatchYear: number | null;
   };
+  /** Raw inputs for the batch-year check (see assessBatchYear in lib/batch.ts). */
+  batchYear?: {
+    input: {
+      admissionBatch: string | null;
+      admissionYear: number | null;
+      enrolment: { batchMonth: string | null; batchYear: number | null } | null;
+      classesStartedAt: string | null;
+      returning: boolean;
+    };
+  };
   hasPhoto: boolean;
   verdict: PortalVerdict;
   payments: PaymentFact[];
@@ -172,7 +186,9 @@ export type RepairId =
   | "record_paystack_payment"
   | "assign_student_code"
   | "sync_tuition_charge"
-  | "reprice_current_tuition";
+  | "reprice_current_tuition"
+  | "fix_batch_year"
+  | "start_live_recording";
 
 export type RepairOffer = {
   id: RepairId;
@@ -478,10 +494,11 @@ const ruleCurrentEnrolmentMismatch: Rule = {
         enrolment.feeSnapshot !== alignment.currentChargeAmount)
         ? "enrolment fee snapshot does not match the current tuition charge"
         : null,
+      // A wrong YEAR alone is the batch-year rule's finding, with its own fix.
       enrolment &&
       alignment.expectedBatchMonth !== null &&
       (enrolment.batchMonth !== alignment.expectedBatchMonth ||
-        enrolment.batchYear !== alignment.expectedBatchYear)
+        (enrolment.batchYear === null && alignment.expectedBatchYear !== null))
         ? "enrolment batch does not match the student's current batch"
         : null,
     ].filter((issue): issue is string => issue !== null);
@@ -526,6 +543,66 @@ const ruleCurrentEnrolmentMismatch: Rule = {
             "No payment is created or changed.",
           needs: "payments",
           params: {},
+        },
+      ],
+    };
+  },
+};
+
+/** The batch-year check on a fact bundle, or null when there is no readable batch. */
+export function batchYearAssessment(facts: Pick<Facts, "batchYear">, now: Date = new Date()): BatchYearAssessment | null {
+  const input = facts.batchYear?.input;
+  if (!input) return null;
+  return assessBatchYear({
+    ...input,
+    classesStartedAt: input.classesStartedAt ? new Date(input.classesStartedAt) : null,
+    now,
+  });
+}
+
+/**
+ * THE WRONG-YEAR BATCH. A returning student moved from September to November
+ * shows as "November 2027"; one moved from November to January keeps last
+ * year's "January 2026". Either way the month is right and the year is not,
+ * and everything keyed on the batch follows it: the portal padlocks them for
+ * a year or never locks at all, the 30-day payment clock anchors on the wrong
+ * date, and the cohort and live-class matching put them with the wrong group.
+ */
+const ruleBatchYearDrift: Rule = {
+  id: "batch-year-drift",
+  run(facts) {
+    if (facts.student.status !== undefined && facts.student.status !== "active") return null;
+    const assessment = batchYearAssessment(facts);
+    if (!assessment || assessment.issues.length === 0) return null;
+    const { month, correctYear } = assessment;
+    const reads = assessment.effectiveYear !== null ? `${month} ${assessment.effectiveYear}` : month;
+    return {
+      rule: "batch-year-drift",
+      severity: "problem",
+      title: `Batch year is wrong: reads ${reads}, should be ${month} ${correctYear}`,
+      detail:
+        `This student's batch is saved with the wrong year (${assessment.issues.join("; ")}). ` +
+        "The portal lock, the payment clock, the roster and live-class matching all read this year, so the student " +
+        "can be locked out for a year, never locked, chased on the wrong dates, or placed with the wrong cohort.",
+      evidence: [
+        { label: "Portal and roster read", value: reads },
+        { label: "Admission record", value: assessment.admissionYear !== null ? `${month} ${assessment.admissionYear}` : "no year saved" },
+        {
+          label: "Current enrolment",
+          value: assessment.enrolmentYear !== null ? `${month} ${assessment.enrolmentYear}` : facts.batchYear?.input.enrolment ? "no year saved" : "none",
+        },
+        { label: "Confirmed first day", value: facts.batchYear?.input.classesStartedAt ? when(facts.batchYear.input.classesStartedAt) : "not set" },
+        { label: "Correct batch", value: `${month} ${correctYear}` },
+      ],
+      offers: [
+        {
+          id: "fix_batch_year",
+          label: `Move to ${month} ${correctYear}`,
+          preview:
+            `Set the batch to ${month} ${correctYear} on the admission record and the current enrolment, and move a confirmed ` +
+            `${month} first day onto ${month} ${correctYear}'s opening day. No payment, charge or level is changed.`,
+          needs: "students",
+          params: { month, year: String(correctYear) },
         },
       ],
     };
@@ -963,6 +1040,49 @@ const ruleLiveTutorRoomMismatch: Rule = {
   },
 };
 
+/** How long a class may run before a missing recording is a fault, not a slow start. */
+export const LIVE_RECORDING_GRACE_MS = 3 * 60_000;
+
+/** Live classes for this student that have run past the grace period with nothing recording them. */
+export function unrecordedLiveSessions(facts: Facts, now: number = Date.now()) {
+  return (facts.classSetup?.liveSessions ?? []).filter(
+    (session) =>
+      session.recording === false &&
+      session.startedAt !== undefined &&
+      now - new Date(session.startedAt).getTime() > LIVE_RECORDING_GRACE_MS,
+  );
+}
+
+const ruleLiveClassNotRecording: Rule = {
+  id: "live-class-not-recording",
+  run(facts) {
+    const sessions = unrecordedLiveSessions(facts);
+    if (sessions.length === 0) return null;
+    return {
+      rule: "live-class-not-recording",
+      severity: "problem",
+      title: `${sessions.length === 1 ? "A live class is" : `${sessions.length} live classes are`} running with nothing recording ${sessions.length === 1 ? "it" : "them"}`,
+      detail:
+        "The tutor is teaching, but there is no active recording for the room. The capture starts when the tutor connects; " +
+        "if that call failed (a recorder that was down, a dropped request) nothing retries it, and the class library will be " +
+        "missing this lesson. Starting it now records the rest of the class.",
+      evidence: sessions.map((session) => ({
+        label: session.title,
+        value: `live since ${when(session.startedAt ?? null)} · room ${session.id}`,
+      })),
+      offers: sessions.map((session) => ({
+        id: "start_live_recording" as const,
+        label: `Start recording ${session.title}`,
+        preview:
+          `Start the school's recorder for "${session.title}" now. It is the same start the tutor's own join makes, ` +
+          "and does nothing if a recording has begun in the meantime.",
+        needs: "students" as Capability,
+        params: { liveSessionId: session.id },
+      })),
+    };
+  },
+};
+
 /** The order is the order findings are computed in; severity decides display order. */
 export const RULES: Rule[] = [
   ruleUnrecordedPayment,
@@ -975,8 +1095,10 @@ export const RULES: Rule[] = [
   rulePrivateClassCoverage,
   rulePrivateLiveSessionMissing,
   ruleLiveTutorRoomMismatch,
+  ruleLiveClassNotRecording,
   ruleStaleScreen,
   ruleMissingLevelCharge,
+  ruleBatchYearDrift,
   ruleCurrentEnrolmentMismatch,
   ruleCurrentTuitionUnderpricedByRegistrationFee,
   ruleRegistrationFeeCountedTowardTuition,

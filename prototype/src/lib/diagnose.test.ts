@@ -422,6 +422,52 @@ describe("the rules", () => {
     const locked = portalVerdict({ hasAccess: false, lockReason: "unpaid_deposit" }, true);
     expect(diagnose(base({ verdict: locked, snapshot: snap })).findings.some((f) => f.rule === "screen-out-of-sync")).toBe(false);
   });
+
+  it("batch-year-drift: flags a moved-up student booked a year ahead and offers the correction", () => {
+    const year = new Date().getFullYear();
+    const month = new Date().toLocaleString("en-US", { month: "long" });
+    const facts = base({
+      batchYear: {
+        input: {
+          admissionBatch: month,
+          admissionYear: year + 1,
+          enrolment: { batchMonth: month, batchYear: year + 1 },
+          classesStartedAt: null,
+          returning: true,
+        },
+      },
+    });
+    const finding = diagnose(facts).findings.find((f) => f.rule === "batch-year-drift");
+    expect(finding?.offers[0]).toMatchObject({ id: "fix_batch_year", params: { month, year: String(year) } });
+
+    const fine = base({
+      batchYear: { input: { ...facts.batchYear!.input, admissionYear: year, enrolment: { batchMonth: month, batchYear: year } } },
+    });
+    expect(diagnose(fine).findings.some((f) => f.rule === "batch-year-drift")).toBe(false);
+  });
+
+  it("live-class-not-recording: fires only once a class has run past the grace period unrecorded", () => {
+    const session = {
+      id: "live1",
+      kind: "cohort",
+      title: "Online · A1 · Evening",
+      level: "A1",
+      sessionSlot: "evening",
+      batch: null,
+      lecturerId: "l1",
+      privateClassId: null,
+      startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+      recording: false,
+    };
+    const setup = { hybridOnlineSlot: null, tutors: [], upcomingPrivateClasses: [], liveSessions: [session] };
+    const finding = diagnose(base({ classSetup: setup })).findings.find((f) => f.rule === "live-class-not-recording");
+    expect(finding?.offers[0]).toMatchObject({ id: "start_live_recording", params: { liveSessionId: "live1" } });
+
+    const recording = { ...setup, liveSessions: [{ ...session, recording: true }] };
+    expect(diagnose(base({ classSetup: recording })).findings.some((f) => f.rule === "live-class-not-recording")).toBe(false);
+    const justStarted = { ...setup, liveSessions: [{ ...session, startedAt: new Date().toISOString() }] };
+    expect(diagnose(base({ classSetup: justStarted })).findings.some((f) => f.rule === "live-class-not-recording")).toBe(false);
+  });
 });
 
 describe("the engine", () => {

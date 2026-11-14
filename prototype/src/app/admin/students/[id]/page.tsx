@@ -30,8 +30,7 @@ import { isTravelPackagePathway } from "@/lib/payment";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranch } from "@/lib/online-branch";
-import { availableBatchOptions } from "@/lib/intake";
-import { resolveBatchWindow } from "@/lib/batch";
+import { MONTH_NAMES, monthNameToIndex, nearestBatchYear, resolveBatchWindow, yearFromBatchLabel } from "@/lib/batch";
 import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
 import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 import SchedulePreview from "@/components/admin/SchedulePreview";
@@ -278,6 +277,15 @@ const ADMISSION_LABELS: Record<string, string> = {
   transportRoute: "Transport route",
   heardFrom: "Heard about us via",
 };
+
+/** Two years back to two ahead, plus whatever is saved now — so a wrong year can always be put right. */
+function batchYearChoices(current: number) {
+  const thisYear = new Date().getFullYear();
+  const years = new Set<number>();
+  for (let year = thisYear - 2; year <= thisYear + 2; year += 1) years.add(year);
+  if (Number.isInteger(current) && current >= 1900 && current <= 2200) years.add(current);
+  return [...years].sort((a, b) => a - b);
+}
 
 function labelFor(key: string) {
   return (
@@ -811,14 +819,24 @@ export default function StudentDossierPage() {
   function openEdit() {
     if (!data) return;
     const currentEnrolment = data.enrolments.find((row) => row.outcome === "ongoing");
-    const admissionBatch = data.admissionEntries.find((entry) => entry.key === "batch")?.value || currentEnrolment?.batchMonth || "";
+    const admissionLabel = data.admissionEntries.find((entry) => entry.key === "batch")?.value || currentEnrolment?.batchMonth || "";
+    const admissionMonthIndex = monthNameToIndex(admissionLabel);
+    // The month alone — a label saved as "September 2026" carries its year separately below.
+    const admissionBatch = admissionMonthIndex === null ? "" : MONTH_NAMES[admissionMonthIndex];
     const admissionYear = Number(data.admissionEntries.find((entry) => entry.key === "batchYear")?.value);
+    // Same order the roster and portal read: a year written into the label, then
+    // the current enrolment's year for this month, then the admission year.
+    const enrolmentYear =
+      currentEnrolment?.batchYear && monthNameToIndex(currentEnrolment.batchMonth) === admissionMonthIndex
+        ? currentEnrolment.batchYear
+        : null;
     const batchYear =
-      Number.isInteger(admissionYear) && admissionYear > 0
+      yearFromBatchLabel(admissionLabel) ??
+      enrolmentYear ??
+      (Number.isInteger(admissionYear) && admissionYear > 0
         ? admissionYear
-        : currentEnrolment?.batchYear ??
-          resolveBatchWindow(admissionBatch, { registeredAt: new Date(data.identity.registeredAt) })?.year ??
-          new Date().getFullYear();
+        : resolveBatchWindow(admissionBatch, { registeredAt: new Date(data.identity.registeredAt) })?.year ??
+          new Date().getFullYear());
     setEditForm({
       name: data.identity.name || "",
       email: data.identity.email || "",
@@ -2530,35 +2548,51 @@ export default function StudentDossierPage() {
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Batch</span>
-                <select
-                  value={editForm.batch ? `${editForm.batch}|${editForm.batchYear}` : ""}
-                  onChange={(event) => {
-                    const [month, year] = event.target.value.split("|");
-                    setEditForm((form) => ({
-                      ...form,
-                      batch: month || "",
-                      batchYear: Number(year) || new Date().getFullYear(),
-                    }));
-                  }}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="">No batch</option>
-                  {editForm.batch &&
-                    !availableBatchOptions().some(
-                      (option) => option.value === editForm.batch && option.year === editForm.batchYear,
-                    ) && (
-                      <option value={`${editForm.batch}|${editForm.batchYear}`}>
-                        {editForm.batch} {editForm.batchYear} (current)
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <select
+                    value={editForm.batch}
+                    onChange={(event) => {
+                      const batch = event.target.value;
+                      // A new month starts on the year it plainly means today
+                      // (see nearestBatchYear); the year box can still override it.
+                      setEditForm((form) => ({
+                        ...form,
+                        batch,
+                        batchYear: batch && batch !== form.batch ? nearestBatchYear(batch) ?? form.batchYear : form.batchYear,
+                      }));
+                    }}
+                    aria-label="Batch month"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">No batch</option>
+                    {MONTH_NAMES.map((month) => (
+                      <option key={month} value={month}>
+                        {month}
                       </option>
-                    )}
-                  {availableBatchOptions().map((option) => (
-                    <option key={`${option.value}|${option.year}`} value={`${option.value}|${option.year}`}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                    ))}
+                  </select>
+                  <select
+                    value={editForm.batchYear}
+                    disabled={!editForm.batch}
+                    onChange={(event) =>
+                      setEditForm((form) => ({ ...form, batchYear: Number(event.target.value) || form.batchYear }))
+                    }
+                    aria-label="Batch year"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    {batchYearChoices(editForm.batchYear).map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <span className="block text-xs font-normal text-[var(--muted)]">
-                  Changing the batch updates this student&apos;s roster and current enrolment only.
+                  {editForm.batch
+                    ? `Saves as ${editForm.batch} ${editForm.batchYear}. `
+                    : ""}
+                  Changing the batch or its year updates this student&apos;s roster, current enrolment, portal lock and first
+                  class day together.
                 </span>
               </label>
               <label className="space-y-2 text-sm">

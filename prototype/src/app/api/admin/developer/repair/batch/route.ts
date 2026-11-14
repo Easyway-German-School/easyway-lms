@@ -13,7 +13,7 @@ type RepairRequest = { studentId: string; repairId: RepairId };
 type BatchResult = RepairRequest & { outcome: RepairOutcome };
 
 function isBatchableRepair(id: unknown): id is RepairId {
-  return id === "sync_tuition_charge" || id === "assign_student_code";
+  return id === "sync_tuition_charge" || id === "assign_student_code" || id === "fix_batch_year";
 }
 
 /** Run only deterministic, non-payment-recording repairs from a reviewed scan. */

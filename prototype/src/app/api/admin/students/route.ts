@@ -24,7 +24,9 @@ import {
   FRESH_ENROLMENT_STUDENT_RESET,
   lookupEmailAccount,
 } from "@/lib/deleted-account";
-import { batchFromAdmission, monthNameToIndex, resolveBatchWindow } from "@/lib/batch";
+import { batchFromAdmission, MONTH_NAMES, monthNameToIndex, resolveBatchWindow, yearFromBatchLabel } from "@/lib/batch";
+import { intakeMonthKey, startDayFor } from "@/lib/intake";
+import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { HYBRID_SESSION_SLOTS } from "@/lib/hybrid-combo";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
@@ -233,6 +235,10 @@ export async function POST(request: Request) {
     typeof body.batch === "string" && body.batch.trim()
       ? body.batch.trim()
       : await defaultBatchMonth(gate.session.user.tenantId);
+  const addBatchYear =
+    typeof body.batchYear === "number" && Number.isInteger(body.batchYear) && body.batchYear >= 1900 && body.batchYear <= 2200
+      ? body.batchYear
+      : null;
   // Where the student lives — the signup form collects this into the admission
   // blob; the manual-add form now offers it too, chiefly for online students
   // who have no branch to place them.
@@ -327,6 +333,7 @@ export async function POST(request: Request) {
     ...(phone ? { phone } : {}),
     ...(studentType ? { studentType } : {}),
     ...(batch ? { batch } : {}),
+    ...(batch && addBatchYear ? { batchYear: addBatchYear } : {}),
     ...(city ? { city } : {}),
     ...(stateRegion ? { state: stateRegion } : {}),
     ...(country ? { country } : {}),
@@ -462,6 +469,7 @@ export async function POST(request: Request) {
           classType,
           deliveryMode,
           batch,
+          batchYear: batch ? addBatchYear : null,
           tenantId: gate.session.user.tenantId,
           tuitionChargeId: manualAddCharge?.chargeId ?? null,
           feeSnapshot: manualAddCharge?.amount ?? null,
@@ -582,7 +590,7 @@ export async function PATCH(request: Request) {
   // the phone number (a status change, a tutor swap) never clobbers it. Batch
   // month follows the same rule — both live inside the admission JSON blob.
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
-  const batch = typeof body.batch === "string" ? body.batch.trim() : undefined;
+  const batchRaw = typeof body.batch === "string" ? body.batch.trim() : undefined;
   const batchYear = typeof body.batchYear === "number" ? body.batchYear : undefined;
   if (
     body.batchYear !== undefined &&
@@ -590,7 +598,7 @@ export async function PATCH(request: Request) {
   ) {
     return NextResponse.json({ error: "Batch year must be a valid year." }, { status: 400 });
   }
-  if (batch && monthNameToIndex(batch) === null) {
+  if (batchRaw && monthNameToIndex(batchRaw) === null) {
     return NextResponse.json({ error: "Choose a valid batch month." }, { status: 400 });
   }
   // Location + photo live in the same admission blob — only touched when their
@@ -617,6 +625,12 @@ export async function PATCH(request: Request) {
         user: true,
         branch: { select: { tenantId: true } },
         profile: true,
+        enrolments: {
+          where: { outcome: "ongoing", deletedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { batchMonth: true, batchYear: true },
+        },
       },
     });
     if (!student) {
@@ -634,20 +648,43 @@ export async function PATCH(request: Request) {
       typeof existingAdmission.batch === "string" && existingAdmission.batch.trim()
         ? existingAdmission.batch.trim()
         : null;
+    const existingMonthIndex = monthNameToIndex(existingBatch);
+    const ongoingEnrolment = student.enrolments?.[0] ?? null;
+    // The year the roster and portal show today: a year written into the
+    // label, the current enrolment's year for this month, then the admission year.
     const existingBatchYear =
-      typeof existingAdmission.batchYear === "number"
+      yearFromBatchLabel(existingBatch) ??
+      (ongoingEnrolment?.batchYear && monthNameToIndex(ongoingEnrolment.batchMonth) === existingMonthIndex
+        ? ongoingEnrolment.batchYear
+        : null) ??
+      (typeof existingAdmission.batchYear === "number"
         ? existingAdmission.batchYear
         : existingBatch
           ? resolveBatchWindow(existingBatch, { registeredAt: student.createdAt })?.year ?? null
-          : null;
+          : null);
+    // Stored as the bare month plus `batchYear`. A year sent on its own edits
+    // the year of the batch already on file.
+    const batch: string | undefined =
+      batchRaw !== undefined
+        ? batchRaw
+          ? MONTH_NAMES[monthNameToIndex(batchRaw) as number]
+          : ""
+        : batchYear !== undefined && existingMonthIndex !== null
+          ? MONTH_NAMES[existingMonthIndex]
+          : undefined;
     const effectiveBatch =
       batch !== undefined
         ? batch || null
         : existingBatch;
+    // Never re-guess the year of an unchanged month from the account's creation
+    // date: an edit that only touched a phone number used to rewrite a correct
+    // "September 2026" as "September 2027" that way.
     const effectiveBatchYear =
       batch !== undefined
         ? batch
           ? batchYear ??
+            yearFromBatchLabel(batchRaw) ??
+            (monthNameToIndex(batch) === existingMonthIndex ? existingBatchYear : null) ??
             resolveBatchWindow(batch, { registeredAt: student.createdAt })?.year ??
             null
           : null
@@ -789,17 +826,18 @@ export async function PATCH(request: Request) {
      * instead of requiring the office to re-toggle the batch dropdown.
      */
     if (batch !== undefined) {
+      const batchMonthIndex = batch ? monthNameToIndex(batch) : null;
       const batchChanged =
-        batch !== batchFromAdmission(student.admission) ||
+        batchMonthIndex !== existingMonthIndex ||
         (batch ? effectiveBatchYear !== existingBatchYear : existingBatchYear !== null);
-      const batchAnchor =
-        batch && effectiveBatchYear !== null
-          ? new Date(effectiveBatchYear, monthNameToIndex(batch) ?? 0, 1)
-          : student.createdAt;
-      const nowMovedToUpcoming = resolveUpcomingBatch(batch, {
-        registeredAt: batchAnchor,
-        now: new Date(),
-      });
+      const now = new Date();
+      // Year-qualified, so the lock reads exactly the year chosen here.
+      const nowMovedToUpcoming = batch
+        ? resolveUpcomingBatch(effectiveBatchYear !== null ? `${batch} ${effectiveBatchYear}` : batch, {
+            registeredAt: student.createdAt,
+            now,
+          })
+        : null;
       const staleLock =
         !batchChanged &&
         nowMovedToUpcoming !== null &&
@@ -809,6 +847,31 @@ export async function PATCH(request: Request) {
         updateStudent.classesStartedAt = null;
         updateStudent.startConfirmedAt = null;
         updateStudent.startConfirmedVia = null;
+      } else if (
+        batchChanged &&
+        batchMonthIndex !== null &&
+        effectiveBatchYear !== null &&
+        student.classesStartedAt
+      ) {
+        /**
+         * Moved to a batch that has already begun. A confirmed first day from
+         * a different month or year would otherwise stay behind — a first day
+         * in November 2027 on a student now in November 2026 reads as "never
+         * started" to graduation and keeps the level countdown a year out.
+         * It moves onto the chosen batch's opening day for their level.
+         */
+        const started = instantToZonedParts(student.classesStartedAt);
+        if (started.year !== effectiveBatchYear || started.month - 1 !== batchMonthIndex) {
+          const overrides = await readIntakeStartDayOverrides(student.tenantId);
+          const key = intakeMonthKey(effectiveBatchYear, batchMonthIndex);
+          const day = startDayFor(overrides, key, level || student.level);
+          const opensOn = zonedTimeToInstant(`${key}-${String(day).padStart(2, "0")}`, "00:00");
+          if (opensOn.getTime() <= now.getTime()) {
+            updateStudent.classesStartedAt = opensOn;
+            updateStudent.startConfirmedAt = now;
+            updateStudent.startConfirmedVia = "admin-batch-edit";
+          }
+        }
       }
     }
 
@@ -910,6 +973,7 @@ export async function PATCH(request: Request) {
         const activeEnrolmentData: {
           batchMonth?: string | null;
           batchYear?: number | null;
+          startedAt?: Date;
           sessionSlot?: string;
           classType?: string;
           deliveryMode?: string;
@@ -920,6 +984,7 @@ export async function PATCH(request: Request) {
           if (batch !== undefined) {
             activeEnrolmentData.batchMonth = batch || null;
             activeEnrolmentData.batchYear = effectiveBatchYear;
+            if (updateStudent.classesStartedAt) activeEnrolmentData.startedAt = updateStudent.classesStartedAt;
           }
           if (sessionSlot) activeEnrolmentData.sessionSlot = sessionSlot;
           if (classType) activeEnrolmentData.classType = classType;

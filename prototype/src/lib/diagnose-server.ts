@@ -22,6 +22,7 @@
 import type { Capability } from "@/lib/admin-roles";
 import { hasProfilePhoto } from "@/lib/access";
 import {
+  batchYearAssessment,
   diagnose,
   naira,
   toPaystackTx,
@@ -48,7 +49,12 @@ import { portalVerdict } from "@/lib/portal-verdict";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
-import { batchFromAdmission, resolveBatchWindow } from "@/lib/batch";
+import { batchFromAdmission, monthNameToIndex } from "@/lib/batch";
+import { startDayFor, intakeMonthKey } from "@/lib/intake";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
+import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
+import { ensureRecordingStarted } from "@/lib/class-recorder";
+import { recordingConfigured } from "@/lib/recording";
 import { assignStudentCode } from "@/lib/student-code";
 import { openEnrolment } from "@/lib/student-enrolment";
 import { ensureChargeForLevel, reconcileCurrentLevelChargeForPathway } from "@/lib/tuition-charges";
@@ -180,6 +186,9 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       user: { select: { id: true, email: true, name: true, tenantId: true } },
       ...STUDENT_ACCESS_SELECT,
       hybridOnlineSlot: true,
+      startConfirmedVia: true,
+      levelCompletedAt: true,
+      _count: { select: { enrolments: { where: { outcome: "completed", deletedAt: null } } } },
       enrolments: {
         where: { outcome: "ongoing", deletedAt: null },
         orderBy: { createdAt: "desc" },
@@ -255,7 +264,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
       ? [{ kind: "private", privateClassId: { in: privateClasses.map((session) => session.id) } }]
       : []),
   ];
-  const liveSessions =
+  const liveRows =
     options.includeLive && liveConditions.length > 0
       ? await prisma.liveClassSession.findMany({
           where: {
@@ -265,9 +274,38 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
           },
           orderBy: { startedAt: "desc" },
           take: 20,
-          select: { id: true, kind: true, title: true, level: true, sessionSlot: true, batch: true, lecturerId: true, privateClassId: true },
+          select: {
+            id: true,
+            kind: true,
+            title: true,
+            level: true,
+            sessionSlot: true,
+            batch: true,
+            lecturerId: true,
+            privateClassId: true,
+            roomName: true,
+            startedAt: true,
+          },
         })
       : [];
+  // Only asked when recording is switched on at all — otherwise every live
+  // class would read as "not recording" with a repair that cannot work.
+  const recordingRooms =
+    liveRows.length > 0 && recordingConfigured()
+      ? new Set(
+          (
+            await prisma.classRecording.findMany({
+              where: { roomName: { in: liveRows.map((row) => row.roomName) }, status: { in: ["active", "restarting"] } },
+              select: { roomName: true },
+            })
+          ).map((row) => row.roomName),
+        )
+      : null;
+  const liveSessions = liveRows.map(({ roomName, startedAt, ...row }) => ({
+    ...row,
+    ...(startedAt ? { startedAt: startedAt.toISOString() } : {}),
+    ...(recordingRooms ? { recording: recordingRooms.has(roomName) } : {}),
+  }));
 
   const access = accessFromStudent(student, planSuppressesLock(plan?.adherence ?? null));
   const hasPhoto = hasProfilePhoto(student.admission);
@@ -276,10 +314,30 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
   const currentLevelCharge = isTravelPackagePathway(student.pathway)
     ? tuitionCharges[0] ?? null
     : tuitionCharges.find((charge) => charge.level.trim().toUpperCase() === currentLevelChargeKey) ?? null;
-  const expectedBatchMonth = batchFromAdmission(student.admission);
-  const expectedBatch = expectedBatchMonth
-    ? resolveBatchWindow(expectedBatchMonth, { registeredAt: student.createdAt })
-    : null;
+  const admissionRecord =
+    student.admission && typeof student.admission === "object" && !Array.isArray(student.admission)
+      ? (student.admission as Record<string, unknown>)
+      : {};
+  const admissionBatch = batchFromAdmission(student.admission);
+  const ongoingEnrolment = student.enrolments?.[0] ?? null;
+  const batchFacts: NonNullable<Facts["batchYear"]>["input"] = {
+    admissionBatch,
+    admissionYear: typeof admissionRecord.batchYear === "number" ? admissionRecord.batchYear : null,
+    enrolment: ongoingEnrolment ? { batchMonth: ongoingEnrolment.batchMonth, batchYear: ongoingEnrolment.batchYear } : null,
+    classesStartedAt: student.classesStartedAt?.toISOString() ?? null,
+    // Moved up before, or above A1. A seat the student chose a year ahead on the
+    // next-level journey is deliberate, so that one is not "returning" here.
+    returning:
+      student.startConfirmedVia !== "next-level-choice" &&
+      ((student._count?.enrolments ?? 0) > 0 ||
+        student.levelCompletedAt != null ||
+        student.startConfirmedVia === "promotion" ||
+        typeof admissionRecord.classesStartedAtBeforePromotion === "string" ||
+        String(student.level ?? "").trim().toUpperCase() !== "A1"),
+  };
+  const batchAssessment = batchYearAssessment({ batchYear: { input: batchFacts } });
+  // The month without any year suffix — what the enrolment row stores.
+  const expectedBatchMonth = batchAssessment?.month ?? null;
 
   // Same ledger `deriveStudentAccess` builds internally, rebuilt here because
   // the summary `access` object does not expose per-charge lines. `student.payments`
@@ -377,8 +435,9 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
         : null,
       ongoingEnrolment: student.enrolments?.[0] ?? null,
       expectedBatchMonth,
-      expectedBatchYear: expectedBatch?.year ?? null,
+      expectedBatchYear: batchAssessment?.correctYear ?? null,
     },
+    batchYear: { input: batchFacts },
     hasPhoto,
     verdict: portalVerdict(access, hasPhoto),
     priorLevelArrears,
@@ -521,6 +580,8 @@ type RepairDef = {
   /** Does this finding, in the freshly derived diagnosis, still call for this repair with these params? */
   stillApplies: (finding: Finding, params: Record<string, string>) => boolean;
   needsPaystack: boolean;
+  /** Re-derive with the live-room check, which a plain diagnosis skips. */
+  needsLive?: boolean;
   act: (facts: Facts, params: Record<string, string>) => Promise<{ ok: boolean; message: string }>;
   /** After acting: is the problem gone? */
   resolved: (diagnosis: Diagnosis, params: Record<string, string>) => boolean;
@@ -689,6 +750,135 @@ const REPAIRS: Record<RepairId, RepairDef> = {
       !diagnosis.findings.some((finding) => finding.rule === "current-tuition-underpriced-by-registration-fee"),
   },
 
+  fix_batch_year: {
+    needs: "students",
+    needsPaystack: false,
+    // A bulk fix from the school-wide scan sends no params; it then applies
+    // whatever the fresh diagnosis says, never what the browser says.
+    stillApplies: (finding, params) =>
+      finding.rule === "batch-year-drift" &&
+      finding.offers.some(
+        (o) => o.id === "fix_batch_year" && (!params.year || (o.params.month === params.month && o.params.year === params.year)),
+      ),
+    async act(facts) {
+      const assessment = batchYearAssessment(facts);
+      if (!assessment || assessment.issues.length === 0) return { ok: false, message: "The batch year no longer needs correcting." };
+      const year = assessment.correctYear;
+      const monthIndex = monthNameToIndex(assessment.month);
+      if (monthIndex === null) return { ok: false, message: "The corrected batch could not be read." };
+      const params = { month: assessment.month };
+
+      const row = await prisma.student.findUnique({
+        where: { id: facts.student.id },
+        select: { admission: true, level: true, tenantId: true, classesStartedAt: true },
+      });
+      if (!row) return { ok: false, message: "The student could not be found." };
+      const admission =
+        row.admission && typeof row.admission === "object" && !Array.isArray(row.admission)
+          ? (row.admission as Record<string, unknown>)
+          : {};
+
+      // A confirmed first day in the batch month moves with it, onto that
+      // intake's real opening day for this level (A1 and A2+ can differ).
+      let classesStartedAt: Date | undefined;
+      if (row.classesStartedAt) {
+        const started = instantToZonedParts(row.classesStartedAt);
+        if (started.month - 1 === monthIndex && started.year !== year) {
+          const overrides = await readIntakeStartDayOverrides(row.tenantId);
+          const key = intakeMonthKey(year, monthIndex);
+          const day = startDayFor(overrides, key, row.level);
+          classesStartedAt = zonedTimeToInstant(`${key}-${String(day).padStart(2, "0")}`, "00:00");
+        }
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.student.update({
+          where: { id: facts.student.id },
+          data: {
+            admission: { ...admission, batch: params.month, batchYear: year } as never,
+            ...(classesStartedAt ? { classesStartedAt } : {}),
+          },
+        });
+        await tx.studentEnrolment.updateMany({
+          where: { studentId: facts.student.id, outcome: "ongoing", deletedAt: null },
+          data: {
+            batchMonth: params.month,
+            batchYear: year,
+            ...(classesStartedAt ? { startedAt: classesStartedAt } : {}),
+          },
+        });
+      });
+
+      await writeAudit(unguardedPrisma, {
+        action: "correctedBatchYear",
+        model: "Student",
+        recordId: facts.student.id,
+        before: {
+          batch: admission.batch ?? null,
+          batchYear: admission.batchYear ?? null,
+          enrolment: facts.levelAlignment?.ongoingEnrolment
+            ? { batchMonth: facts.levelAlignment.ongoingEnrolment.batchMonth, batchYear: facts.levelAlignment.ongoingEnrolment.batchYear }
+            : null,
+          classesStartedAt: row.classesStartedAt?.toISOString() ?? null,
+        },
+        after: { batch: params.month, batchYear: year, classesStartedAt: classesStartedAt?.toISOString() ?? null },
+        severity: "medium",
+        summary: `Corrected the batch year to ${params.month} ${year}.`,
+      }).catch(() => {});
+
+      return {
+        ok: true,
+        message:
+          `Batch set to ${params.month} ${year} on the student and their current enrolment` +
+          (classesStartedAt ? `; first day moved to ${classesStartedAt.toISOString().slice(0, 10)}` : "") +
+          ". No payment or level was changed.",
+      };
+    },
+    resolved: (diagnosis) => !diagnosis.findings.some((f) => f.rule === "batch-year-drift"),
+  },
+
+  start_live_recording: {
+    needs: "students",
+    needsPaystack: false,
+    needsLive: true,
+    stillApplies: (finding, params) =>
+      finding.rule === "live-class-not-recording" &&
+      finding.offers.some((o) => o.id === "start_live_recording" && o.params.liveSessionId === params.liveSessionId),
+    async act(_facts, params) {
+      const live = await prisma.liveClassSession.findUnique({
+        where: { id: params.liveSessionId },
+        select: {
+          roomName: true,
+          tenantId: true,
+          branchId: true,
+          branch: { select: { name: true } },
+          level: true,
+          sessionSlot: true,
+          privateClassId: true,
+          startedByUserId: true,
+          endedAt: true,
+        },
+      });
+      if (!live || live.endedAt) return { ok: false, message: "That class has ended, so there is nothing left to record." };
+      const egressId = await ensureRecordingStarted({
+        roomName: live.roomName,
+        tenantId: live.tenantId,
+        branchId: live.branchId,
+        branchName: live.branch?.name ?? null,
+        level: live.level,
+        sessionSlot: live.sessionSlot,
+        startedByUserId: live.startedByUserId,
+        privateClassId: live.privateClassId,
+      });
+      return egressId
+        ? { ok: true, message: "The recorder has started on this class." }
+        : { ok: false, message: "The recorder did not start — check the recorder service and storage on the Recorder page." };
+    },
+    resolved: (diagnosis, params) =>
+      !diagnosis.findings.some(
+        (f) => f.rule === "live-class-not-recording" && f.offers.some((o) => o.params.liveSessionId === params.liveSessionId),
+      ),
+  },
 };
 
 /**
@@ -710,6 +900,7 @@ export async function runRepair(input: { studentId: string; repairId: string; pa
   // 1. RE-DERIVE. Never act on what the browser says is wrong; rebuild the picture.
   const facts = await loadFacts(input.studentId, {
     paystack: def.needsPaystack,
+    includeLive: def.needsLive === true,
     extraReferences: params.reference ? [params.reference] : [],
   });
   if (!facts) return { ok: false, verified: false, message: "That student could not be found." };
@@ -728,7 +919,7 @@ export async function runRepair(input: { studentId: string; repairId: string; pa
   }
 
   // 3. VERIFY. Re-run the same rules; reuse Paystack's earlier answer rather than asking again.
-  const after = await loadFacts(input.studentId, { reusePaystack: facts.paystack });
+  const after = await loadFacts(input.studentId, { reusePaystack: facts.paystack, includeLive: def.needsLive === true });
   const afterDiagnosis = after ? diagnose(after) : null;
   const verified = Boolean(acted.ok && afterDiagnosis && def.resolved(afterDiagnosis, params));
 

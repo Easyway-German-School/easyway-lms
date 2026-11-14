@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { runWithTenant } from "@/lib/tenant/context";
 import { notify } from "@/lib/notify";
-import { batchFromAdmission } from "@/lib/batch";
+import { batchFromAdmission, batchLabelFromAdmission } from "@/lib/batch";
 import { buildLedger } from "@/lib/finance/ledger";
 import { naira } from "@/lib/finance/receivables";
 import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
@@ -193,10 +193,16 @@ async function scan(options: {
       tutorId: true,
       branch: { select: { name: true } },
       user: { select: { name: true, email: true } },
+      enrolments: {
+        where: { outcome: "ongoing", deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { batchMonth: true, batchYear: true },
+      },
     },
   });
 
-  const due: Array<{ student: (typeof students)[number]; batch: string; timing: CohortTiming }> = [];
+  const due: Array<{ student: (typeof students)[number]; batch: string; batchLabel: string; timing: CohortTiming }> = [];
   const runningMap = new Map<string, RunningBatch>();
   const accounting: DeskAccounting = { total: students.length, onDesk: 0, running: 0, notOpenYet: 0, noBatch: 0, topOfLadder: 0 };
 
@@ -210,8 +216,9 @@ async function scan(options: {
       accounting.noBatch += 1;
       continue;
     }
+    const batchLabel = batchLabelFromAdmission(student.admission, student.enrolments?.[0]) ?? batch;
     const timing = cohortTiming({
-      batch,
+      batch: batchLabel,
       sessionSlot: student.sessionSlot,
       registeredAt: student.createdAt,
       now,
@@ -223,7 +230,7 @@ async function scan(options: {
 
     if (timing.graduatable) {
       accounting.onDesk += 1;
-      due.push({ student, batch, timing });
+      due.push({ student, batch, batchLabel, timing });
     } else if (timing.startsOn.getTime() <= now.getTime()) {
       // Mid-course. Listed so the office can see what is coming, never actionable.
       accounting.running += 1;
@@ -289,7 +296,7 @@ async function scan(options: {
     paidBy.set(payment.studentId, (paidBy.get(payment.studentId) ?? 0) + (payment.amount || 0));
   }
 
-  const candidates: Scanned[] = due.map(({ student, batch, timing }) => {
+  const candidates: Scanned[] = due.map(({ student, batch, batchLabel, timing }) => {
     const ledger = buildLedger(chargesBy.get(student.id) ?? [], paidBy.get(student.id) ?? 0);
     const next = nextLevelAfter(student.level);
     // What blocks a move: owed on a level the learner has ALREADY been in —
@@ -340,7 +347,7 @@ async function scan(options: {
       pathway: student.pathway ?? null,
       timing,
       landing: nextPlacement({
-        batch,
+        batch: batchLabel,
         sessionSlot: student.sessionSlot,
         registeredAt: student.createdAt,
         now,

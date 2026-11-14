@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { MONTH_NAMES, batchFromAdmission, monthNameToIndex } from "@/lib/batch";
+import { MONTH_NAMES, batchFromAdmission, batchLabelFromAdmission, monthNameToIndex } from "@/lib/batch";
 import { nextPlacement } from "@/lib/graduation";
 import { intakeMonthKey, startDayFor, type IntakeStartDayOverrides } from "@/lib/intake";
 import { readIntakeStartDayOverrides, resolveSettingsTenantId } from "@/lib/intake-server";
@@ -115,6 +115,12 @@ const studentSelect = {
   heldBackAt: true,
   branch: { select: { name: true } },
   user: { select: { name: true, email: true } },
+  enrolments: {
+    where: { outcome: "ongoing", deletedAt: null },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: { batchMonth: true, batchYear: true },
+  },
 } as const;
 
 export type JourneyStudent = NonNullable<Awaited<ReturnType<typeof loadJourneyStudent>>>;
@@ -137,7 +143,7 @@ export function opensFor(
   }
 
   const place = nextPlacement({
-    batch: batchFromAdmission(admission),
+    batch: batchLabelFromAdmission(admission, student.enrolments?.[0]),
     sessionSlot: student.sessionSlot,
     registeredAt: student.createdAt,
     now,
