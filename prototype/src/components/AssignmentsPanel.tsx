@@ -464,9 +464,19 @@ export default function AssignmentsPanel() {
   // ---- List ----------------------------------------------------------------
   return (
     <div className="space-y-4 pb-28">
-      {error && <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">{error}</div>}
+      {error && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
+          <span>{error}</span>
+          <button
+            onClick={() => { setLoading(true); void load(); }}
+            className="shrink-0 rounded-full border border-amber-700/30 px-3 py-1.5 text-xs font-semibold"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
-      {assignments.length === 0 ? (
+      {assignments.length === 0 && !error ? (
         <div className="rounded-3xl cinematic-card p-10 text-center">
           <PencilIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
           <p className="mt-3 text-sm font-semibold">No assignments yet</p>
