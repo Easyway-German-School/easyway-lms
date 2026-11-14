@@ -3306,6 +3306,17 @@ model Message {
   gameMatch   GameMatch? @relation(fields: [gameMatchId], references: [id], onDelete: SetNull)
 
   /**
+   * Set only on an "assignment_invite" message — the card auto-posted into a
+   * room when a tutor's new assignment reaches it (see the lecturer
+   * assignments POST route) — and read by an inline `@[Title](assignment:id)`
+   * mention typed into an ordinary message (see src/lib/chat-mentions.ts).
+   * onDelete: SetNull rather than Cascade: deleting the assignment should not
+   * take the historical fact that it was posted with it.
+   */
+  assignmentId String?
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  /**
    * Staff pinning something to the top of the room. Null for the vast majority.
    * A pin is not moderation — it is the opposite. Removal takes a message away;
    * a pin is how "the exam is on the 14th" stops being buried under two hundred
@@ -3584,6 +3595,8 @@ model Assignment {
    * target narrows the assignment to exactly that list.
    */
   targets     AssignmentTarget[]
+  /// Chat cards/mentions that point at this assignment — see Message.assignmentId.
+  messages    Message[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?

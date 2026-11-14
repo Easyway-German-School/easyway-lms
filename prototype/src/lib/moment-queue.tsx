@@ -127,7 +127,8 @@ export type MomentId =
   | "live-feedback"
   | "fee-reminder"
   | "install-offline-notes"
-  | "new-look";
+  | "new-look"
+  | "community-mentions";
 
 type Kind = "toast" | "modal";
 
@@ -442,6 +443,23 @@ export const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Notes in your pocket",
     dockBlurb: "Install the app to read your class notes with no signal.",
+  },
+  /**
+   * "You can @ people, assignments, materials and videos in chat now." A
+   * TOAST, same reasoning as new-look: this is news about a feature, not a
+   * decision anyone has to make, so it never spends a modal slot or blocks
+   * the tour, a payment, or a level-up. Ranked at the very bottom — below
+   * even the offline-notes advert — because nothing here is time-sensitive;
+   * a student who never sees it loses nothing, they just discover "@" by
+   * typing it. Shown once ever, inside the Community page itself (see
+   * components/moment/CommunityMentionsMoment.tsx), for both students and
+   * tutors.
+   */
+  "community-mentions": {
+    priority: 15,
+    kind: "toast",
+    dockLabel: "Tag people and assignments",
+    dockBlurb: "Type @ in chat to tag a classmate, assignment, material or video.",
   },
 };
 
