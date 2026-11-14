@@ -78,6 +78,19 @@ describe("assignmentVisibleToWhere (what a student may see)", () => {
     );
   });
 
+  it("a student still sees their named tutor's homework after being moved to a different branch/sitting than that tutor's — reassignment must not depend on branch/session staying in lockstep", () => {
+    const where = assignmentVisibleToWhere(
+      { ...campusStudent, branchId: "branch-abuja", sessionSlot: "morning", tutorId: "lec-2", admission: {} },
+      ONLINE,
+    ) as any;
+    const tutorPath = where.AND[0].OR[2];
+    expect(tutorPath.AND).toEqual([
+      { level: "A1" },
+      { lecturerId: { in: ["lec-2"] } },
+      { batch: null },
+    ]);
+  });
+
   it("a student with a year-suffixed intake still matches the canonical batch on the assignment", () => {
     const where = assignmentVisibleToWhere(
       { ...campusStudent, tutorId: "lec-1", coTutorIds: ["lec-online"], admission: { batch: "September 2026" } },

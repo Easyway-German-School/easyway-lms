@@ -17,8 +17,14 @@
  * froze the current roster as named targets, and anyone the snapshot missed
  * (joined later, intake stored as "September 2026" instead of "September")
  * matched neither hole. Their own tutor's homework for this class is now a
- * third path, still sitting-scoped, still batch-scoped when the assignment
- * names a month.
+ * third path: level- and batch-scoped, but NOT sitting-scoped — a named
+ * `tutorId`/co-tutor pairing is checked the same way `belongsToLecturer`
+ * checks it everywhere else (the tutor's roster, materials, live class,
+ * community), so a student re-paired to a tutor at a different branch or
+ * session still sees that tutor's work. Reassignment moves the `tutorId`
+ * column; it is not guaranteed to move `branchId`/`sessionSlot` in the same
+ * request, and gating this path on sitting too silently hid a newly
+ * reassigned tutor's homework while everything else about the move "worked".
  *
  * The sitting works the same way as the branch: NULL means every sitting, so
  * nothing set before sessions became a boundary changes who it reaches. It
@@ -92,9 +98,19 @@ export function assignmentVisibleToWhere(student: VisibilityStudent, onlineBranc
   ];
 
   if (tutorIds.length) {
+    /**
+     * A named pairing (`tutorId`/co-tutor) is checked by level and batch only,
+     * never by branch/sitting — the same rule `belongsToLecturer` already uses
+     * everywhere else a named tutor link is read (the tutor's own roster,
+     * materials, live class, community). Office reassignment moves the
+     * `tutorId` column; it does not always move `branchId`/`sessionSlot` in
+     * the same request, and a student re-paired to a tutor at a different
+     * sitting must not go invisible to that tutor's homework because of it —
+     * that was the actual bug: reassignment "worked" everywhere except here.
+     */
     audience.push({
       AND: [
-        ...classMatch,
+        { level: student.level },
         { lecturerId: { in: tutorIds } },
         studentBatch ? { OR: [{ batch: null }, { batch: studentBatch }] } : { batch: null },
       ],
