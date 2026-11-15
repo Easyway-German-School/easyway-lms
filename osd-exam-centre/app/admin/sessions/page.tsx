@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import AdminShell from "@/components/AdminShell";
+import Modal from "@/components/Modal";
 
 // ÖSD is sold as a Written part and an Oral part (see the school's invoice). The four-skill split is
 // kept only so older sittings that were priced that way stay editable.
@@ -182,22 +183,16 @@ export default function AdminSessionsPage() {
     await load();
   }
 
-  if (!loaded) return <div className="p-8 text-sm text-[var(--ink-soft)]">Loading…</div>;
+  if (!loaded) return <AdminShell><div className="text-sm text-[var(--ink-soft)]">Loading…</div></AdminShell>;
 
   return (
-    <div className="min-h-screen bg-[var(--paper)] p-6">
+    <AdminShell>
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between">
           <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Sittings</h1>
-          <div className="flex gap-3">
-            <Link href="/admin" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">← Bookings</Link>
-            <button
-              onClick={() => { if (showForm) { setShowForm(false); setEditingId(null); } else { startCreate(); } }}
-              className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white"
-            >
-              {showForm ? "Cancel" : "New sitting"}
-            </button>
-          </div>
+          <button onClick={startCreate} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white">
+            New sitting
+          </button>
         </div>
 
         {levels.length > 0 && (
@@ -226,7 +221,7 @@ export default function AdminSessionsPage() {
         {error && !showForm && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
         {showForm && (
-          <div className="mt-6 seal-border rounded-sm bg-white p-6">
+          <Modal title={editingId ? "Edit sitting" : "New sitting"} onClose={() => { setShowForm(false); setEditingId(null); }} wide>
             {error && <p className="mb-4 rounded-sm bg-[var(--red-soft)] px-3 py-2 text-xs text-[var(--red)]">{error}</p>}
             <div className="grid gap-4 sm:grid-cols-2">
               <F label="Level" value={form.level} onChange={(v) => setForm({ ...form, level: v })} />
@@ -307,7 +302,7 @@ export default function AdminSessionsPage() {
             <button onClick={saveSession} disabled={busy} className="mt-5 rounded-sm bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40">
               {busy ? "Saving…" : editingId ? "Save changes" : "Create sitting (unpublished)"}
             </button>
-          </div>
+          </Modal>
         )}
 
         <div className="mt-6 space-y-3">
@@ -360,7 +355,7 @@ export default function AdminSessionsPage() {
           ))}
         </div>
       </div>
-    </div>
+    </AdminShell>
   );
 }
 

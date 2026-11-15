@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Modal from "@/components/Modal";
 
 type SessionOption = {
   id: string;
@@ -79,27 +80,18 @@ export default function PanthexaIntakeForm({ onCreated }: { onCreated: () => voi
     }
   }
 
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white">
-        + Register a Panthexa candidate
-      </button>
-    );
-  }
-
   const ready = form.sessionId && form.fullName && form.email && form.phone && form.dateOfBirth && form.placeOfBirth && form.nationality && fee !== null;
 
   return (
-    <div className="seal-border rounded-sm bg-white p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Register a Panthexa candidate</p>
-          <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
-            Copy the details from the Panthexa dashboard. On submit we create the reference, generate the invoice and email it as the booking confirmation.
-          </p>
-        </div>
-        <button onClick={() => { setOpen(false); setResult(null); setError(""); }} className="text-xs font-semibold text-[var(--ink-soft)]">Close</button>
-      </div>
+    <>
+      <button onClick={() => setOpen(true)} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white">
+        + Register a Panthexa candidate
+      </button>
+      {open && (
+      <Modal title="Register a Panthexa candidate" onClose={() => { setOpen(false); setResult(null); setError(""); }} wide>
+      <p className="-mt-2 mb-3 text-[11px] text-[var(--ink-soft)]">
+        Copy the details from the Panthexa dashboard. On submit we create the reference, generate the invoice and email it as the booking confirmation.
+      </p>
 
       {result && (
         <div className="mt-3 rounded-sm bg-[var(--green-soft)] p-3 text-xs text-[var(--green)]">
@@ -184,7 +176,9 @@ export default function PanthexaIntakeForm({ onCreated }: { onCreated: () => voi
           </p>
         )}
       </div>
-    </div>
+      </Modal>
+      )}
+    </>
   );
 }
 
