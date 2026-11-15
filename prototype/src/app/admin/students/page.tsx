@@ -20,7 +20,7 @@ import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/stu
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import { describePhone, studentPhoneRaw } from "@/lib/phone-display";
 import { enrolmentYearOptions } from "@/lib/student-enrolment-years";
-import { batchFromAdmission } from "@/lib/batch";
+import { batchFromAdmission, batchLabelFromAdmission, resolveBatchWindow } from "@/lib/batch";
 
 /**
  * The roster's "Batch" column used to print the bare month off
@@ -32,15 +32,23 @@ import { batchFromAdmission } from "@/lib/batch";
  * data". `admission.batchYear` has carried the real year since signup; this
  * just prints it back.
  */
-function batchCellLabel(admission: unknown): string {
-  const batch = batchFromAdmission(admission);
+function batchCellLabel(
+  admission: unknown,
+  enrolment?: { batchMonth: string | null; batchYear: number | null },
+  registeredAt?: Date,
+): string {
+  const batch = enrolment?.batchMonth ?? batchFromAdmission(admission);
   if (!batch) return "—";
-  if (/\d{4}/.test(batch)) return batch;
+  const explicitLabel = batchLabelFromAdmission(admission, enrolment);
+  if (explicitLabel && /\b\d{4}\b/.test(explicitLabel)) return explicitLabel;
   const year =
     admission && typeof admission === "object" && !Array.isArray(admission)
       ? (admission as Record<string, unknown>).batchYear
       : null;
-  return typeof year === "number" && Number.isInteger(year) ? `${batch} ${year}` : batch;
+  const resolvedYear =
+    (typeof year === "number" && Number.isInteger(year) ? year : null) ??
+    resolveBatchWindow(batch, { registeredAt })?.year;
+  return resolvedYear ? `${batch} ${resolvedYear}` : batch;
 }
 
 /**
@@ -246,6 +254,7 @@ function StudentsRoster() {
   // when `sharedStudentsEnabled`. Never includes `newTutorId`.
   const [newCoTutorIds, setNewCoTutorIds] = useState<string[]>([]);
   const [newStatus, setNewStatus] = useState("active");
+  const [newStudentType, setNewStudentType] = useState("new");
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
@@ -532,6 +541,7 @@ function StudentsRoster() {
       branchId: newBranchId || null,
       tutorId: newTutorId || null,
       status: newStatus,
+      studentType: newStudentType || null,
       classType: newClassType,
       sessionSlot: newSessionSlot,
       deliveryMode: effectiveDelivery,
@@ -624,6 +634,7 @@ function StudentsRoster() {
     setNewTutorId("");
     setNewCoTutorIds([]);
     setNewStatus("active");
+    setNewStudentType("new");
     setNewDeliveryMode("physical");
     setNewHybridOnlineSlot("");
     setNewBatch("");
@@ -721,6 +732,8 @@ function StudentsRoster() {
         return;
       }
       await loadStudents();
+    } catch (error) {
+      setStudentError(error instanceof Error ? error.message : "Unable to update tags.");
     } finally {
       setSavingTagsFor("");
     }
@@ -766,6 +779,12 @@ function StudentsRoster() {
     setNewTutorId(student.tutor?.id || "");
     setNewCoTutorIds((student.coTutors ?? []).map((link) => link.lecturerId));
     setNewStatus(student.status || "active");
+    const admission = ((student.admission as AdmissionData) || {}) as Record<string, unknown>;
+    setNewStudentType(
+      typeof admission.studentType === "string" && ["new", "returning"].includes(admission.studentType.trim().toLowerCase())
+        ? admission.studentType.trim().toLowerCase()
+        : "",
+    );
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
     setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
@@ -776,7 +795,6 @@ function StudentsRoster() {
         : "",
     );
     setNewPathway(student.pathway || packageOptions[0]);
-    const admission = ((student.admission as AdmissionData) || {}) as Record<string, unknown>;
     setNewCity(typeof admission.city === "string" ? admission.city : "");
     setNewStateRegion(typeof admission.state === "string" ? admission.state : "");
     setNewCountry(typeof admission.country === "string" && admission.country ? admission.country : "Nigeria");
@@ -802,6 +820,7 @@ function StudentsRoster() {
     setNewTutorId("");
     setNewCoTutorIds([]);
     setNewStatus("active");
+    setNewStudentType("new");
     setNewClassType("group");
     setNewSessionSlot("morning");
     setNewDeliveryMode("physical");
@@ -1736,6 +1755,21 @@ function StudentsRoster() {
                 </select>
               </label>
               <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Student type</span>
+                <select
+                  value={newStudentType}
+                  onChange={(event) => setNewStudentType(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">Unspecified</option>
+                  <option value="new">New</option>
+                  <option value="returning">Returning</option>
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Saved as the student&apos;s profile type, not as a free-form tag.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Session</span>
                 <select
                   value={newSessionSlot}
@@ -2162,7 +2196,7 @@ function StudentsRoster() {
                       {(student._segments?.length || student.tags?.length) ? (
                         <p className="mt-1 flex flex-wrap gap-1">
                           {(student._segments ?? [])
-                            .filter((id) => id !== "new" && id !== "group" && id !== "campus")
+                            .filter((id) => id !== "group" && id !== "campus")
                             .map((id) => (
                               <span
                                 key={id}
@@ -2227,7 +2261,14 @@ function StudentsRoster() {
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
                     <td className="px-6 py-4">{student.level || "—"}</td>
-                    <td className="px-6 py-4">{batchCellLabel(student.admission)}</td>
+                    <td className="px-6 py-4">
+                      {batchCellLabel(
+                        student.admission,
+                        student.enrolments?.find((enrolment) => enrolment.outcome === "ongoing") ??
+                          student.enrolments?.[0],
+                        student.createdAt,
+                      )}
+                    </td>
                     <td className="px-6 py-4">
                       {student.germanyGoal ? (
                         <span

@@ -62,13 +62,25 @@ export async function setStudentTutor(input: {
   const studentName = student.user.name || student.user.email;
   const tutorName = lecturer ? lecturer.user.name || lecturer.user.email : null;
 
-  // Nothing to do, and nothing to announce. Saving a form that happens to
-  // contain the tutor it already had must not buzz two people about it.
-  if ((student.tutorId ?? null) === (lecturerId ?? null)) {
+  const changed = (student.tutorId ?? null) !== (lecturerId ?? null);
+
+  if (!changed) {
+    // Repair an already-changed Student row whose earlier write missed the
+    // active enrolment history, without sending duplicate notifications.
+    await prisma.studentEnrolment.updateMany({
+      where: { studentId, outcome: "ongoing", deletedAt: null },
+      data: { tutorId: lecturerId },
+    });
     return { ok: true, tutorName, studentName, changed: false };
   }
 
-  await prisma.student.update({ where: { id: studentId }, data: { tutorId: lecturerId } });
+  await prisma.$transaction([
+    prisma.student.update({ where: { id: studentId }, data: { tutorId: lecturerId } }),
+    prisma.studentEnrolment.updateMany({
+      where: { studentId, outcome: "ongoing", deletedAt: null },
+      data: { tutorId: lecturerId },
+    }),
+  ]);
 
   // The primary tutor is never also a co-tutor (see setStudentCoTutors): a
   // co-tutor who is promoted must not stay behind as a second row, or every

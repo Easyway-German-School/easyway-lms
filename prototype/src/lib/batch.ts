@@ -216,3 +216,22 @@ export function batchFromAdmission(admission: unknown): string | null {
   const value = (admission as Record<string, unknown>).batch;
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
+
+/** Read the batch as a month plus its explicitly selected year, when present. */
+export function batchLabelFromAdmission(
+  admission: unknown,
+  currentEnrolment?: { batchMonth?: string | null; batchYear?: number | null } | null,
+): string | null {
+  const batch = currentEnrolment?.batchMonth?.trim() || batchFromAdmission(admission);
+  if (!batch || /\b\d{4}\b/.test(batch)) return batch;
+  const admissionYear =
+    admission && typeof admission === "object" && !Array.isArray(admission)
+      ? (admission as Record<string, unknown>).batchYear
+      : null;
+  const year =
+    currentEnrolment?.batchYear ??
+    (typeof admissionYear === "number" ? admissionYear : null);
+  return typeof year === "number" && Number.isInteger(year) && year >= 1900 && year <= 2200
+    ? `${batch} ${year}`
+    : batch;
+}
