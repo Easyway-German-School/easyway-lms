@@ -55,6 +55,8 @@ function serialise(
     kind?: string;
     gameMatchId?: string | null;
     gameMatch?: { id: string; title: string; status: string } | null;
+    assignmentId?: string | null;
+    assignment?: { id: string; title: string; type: string; dueAt: Date | null } | null;
   },
   viewer: Viewer,
 ) {
@@ -118,6 +120,14 @@ function serialise(
     // message — same reasoning as `reactions` being folded here rather than
     // fetched separately per bubble.
     gameMatch: hidden && !staff ? null : message.gameMatch ?? null,
+    // Same reasoning as gameMatch: carries enough for the "assignment_invite"
+    // card (and the due date it shows) without a second request per message.
+    assignment:
+      hidden && !staff
+        ? null
+        : message.assignment
+          ? { id: message.assignment.id, title: message.assignment.title, type: message.assignment.type, dueAt: message.assignment.dueAt?.toISOString() ?? null }
+          : null,
   };
 }
 
@@ -138,6 +148,7 @@ const INCLUDE = {
   replyTo: { select: { id: true, body: true, hiddenAt: true, author: { select: { name: true } } } },
   reactions: { select: { emoji: true, userId: true } },
   gameMatch: { select: { id: true, title: true, status: true } },
+  assignment: { select: { id: true, title: true, type: true, dueAt: true } },
 } as const;
 
 /**
