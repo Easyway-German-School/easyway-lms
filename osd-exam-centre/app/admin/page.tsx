@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+import AdminLoader from "@/components/AdminLoader";
 import ManualBookingForm from "@/components/ManualBookingForm";
 import PanthexaIntakeForm from "@/components/PanthexaIntakeForm";
 
@@ -133,7 +134,7 @@ export default function AdminDashboard() {
     all: bookings.length,
   }), [bookings]);
 
-  if (!loaded) return <AdminShell><div className="text-sm text-[var(--ink-soft)]">Loading…</div></AdminShell>;
+  if (!loaded) return <AdminShell><AdminLoader /></AdminShell>;
 
   const q = query.trim().toLowerCase();
   const shown = bookings

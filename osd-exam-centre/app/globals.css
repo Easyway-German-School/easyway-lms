@@ -138,6 +138,80 @@ body {
   animation: shimmer 1.6s linear infinite;
 }
 
+/* ------------------------------------------------------------------ */
+/* The admin loader: Easyway and ÖSD as two faces of one spinning seal, */
+/* not a generic spinner — a small animated statement that this centre */
+/* is both at once.                                                    */
+/* ------------------------------------------------------------------ */
+
+@keyframes seal-orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+/* A blurred halo rotating behind the card, not a tight ring around it — the
+   two logos are wildly different shapes (a wide horizontal lockup and a
+   near-square badge), so a precise ring would fit neither. Blurred and
+   oversized, the mismatch disappears into an ambient glow instead. */
+.seal-aura {
+  background: conic-gradient(
+    from 0deg,
+    var(--gold-bright) 0deg,
+    transparent 70deg,
+    transparent 110deg,
+    var(--sky) 180deg,
+    transparent 250deg,
+    transparent 290deg,
+    var(--gold-bright) 360deg
+  );
+  filter: blur(18px);
+  animation: seal-orbit 7s linear infinite;
+}
+
+@keyframes seal-flip {
+  0%, 12%   { transform: rotateY(0deg); }
+  50%, 62%  { transform: rotateY(180deg); }
+  100%      { transform: rotateY(360deg); }
+}
+.seal-coin {
+  animation: seal-flip 5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  transform-style: preserve-3d;
+}
+.seal-face {
+  backface-visibility: hidden;
+}
+.seal-face-back {
+  transform: rotateY(180deg);
+}
+
+@keyframes seal-glow-gold {
+  0%, 4%  { box-shadow: 0 0 0 0 rgba(255, 122, 26, 0); }
+  10%     { box-shadow: 0 0 28px 6px rgba(255, 122, 26, 0.5); }
+  22%, 100% { box-shadow: 0 0 0 0 rgba(255, 122, 26, 0); }
+}
+@keyframes seal-glow-sky {
+  0%, 46%  { box-shadow: 0 0 0 0 rgba(29, 78, 137, 0); }
+  54%      { box-shadow: 0 0 28px 6px rgba(29, 78, 137, 0.5); }
+  66%, 100% { box-shadow: 0 0 0 0 rgba(29, 78, 137, 0); }
+}
+.seal-glow {
+  animation: seal-glow-gold 5s ease-in-out infinite, seal-glow-sky 5s ease-in-out infinite;
+}
+
+@keyframes seal-caption-cross {
+  0%, 44%   { opacity: 1; }
+  50%, 94%  { opacity: 0; }
+  100%      { opacity: 1; }
+}
+.seal-caption-a { animation: seal-caption-cross 5s ease-in-out infinite; }
+.seal-caption-b { animation: seal-caption-cross 5s ease-in-out infinite reverse; }
+
+@media (prefers-reduced-motion: reduce) {
+  .seal-aura, .seal-coin, .seal-glow, .seal-caption-a, .seal-caption-b {
+    animation: none !important;
+  }
+  .seal-caption-b { display: none; }
+}
+
 /* Boarding-pass perforation: two stacked halves, each with its inner corners
    scooped out by a mask so the photo behind shows through the notches. */
 .ticket-top,
