@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteFooter } from "@/components/SiteChrome";
+import NeedHelp from "@/components/NeedHelp";
 import PageHero from "@/components/PageHero";
 import { ArrowRightIcon } from "@/components/icons";
 import vienna from "@/assets/images/vienna.jpg";
@@ -165,6 +166,11 @@ export default function BookPage() {
           <p className="text-xs font-semibold text-[var(--navy)] sm:hidden">
             Step {step + 1} of {STEP_TITLES.length} · {STEP_TITLES[step]}
           </p>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-[var(--ink-soft)]">Stuck on something?</p>
+          <NeedHelp defaultEmail={form.email || undefined} defaultName={form.fullName || undefined} />
         </div>
 
         {error &&<p className="mt-6 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
