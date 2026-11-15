@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createBooking, isPlausibleDateOfBirth, isPlausibleIdExpiry, MODULES } from "@/lib/booking";
+import { createBooking, isPlausibleDateOfBirth, isPlausibleIdExpiry, BOOKABLE_MODULES } from "@/lib/booking";
 import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,8 @@ const schema = z.object({
   idExpiry: z.string().refine(isPlausibleIdExpiry, "Your ID must not already be expired."),
   isRepeatAttempt: z.boolean().optional(),
   specialNeeds: z.string().optional(),
-  modules: z.array(z.enum([...MODULES, "full"])).min(1),
+  secondaryIdType: z.string().optional(),
+  modules: z.array(z.enum(BOOKABLE_MODULES)).min(1),
   consentAccepted: z.literal(true, { message: "You must accept the rules and data-consent notice." }),
   // Honeypot: a real candidate never sees or fills this field (hidden
   // off-screen in the form) — anything filling it is a bot. Deliberately NOT

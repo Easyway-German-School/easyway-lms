@@ -79,8 +79,17 @@ export default function TermsPage() {
 
         <Section title="Irregularities">
           <p>
-            Where an examination irregularity is suspected, Easyway will document the incident and follow the
-            applicable ÖSD procedure. Easyway does not independently promise a particular sanction or result.
+            Where an examination irregularity or malpractice (cheating, impersonation, unauthorised assistance,
+            prohibited devices, or submitting work that is not independently produced) is suspected, the candidate
+            is removed from the examination immediately, all fees already paid are forfeited, and the incident is
+            documented and reported to ÖSD under the applicable procedure.
+          </p>
+          <p className="mt-2">
+            ÖSD, not Easyway, decides the outcome: it can invalidate the result and bar the candidate from future
+            ÖSD examinations. Easyway does not independently promise a particular sanction and has no authority
+            over immigration, visa or travel decisions — but a certificate obtained through malpractice can be
+            revoked at any time, and German authorities treat a revoked or fraudulently obtained certificate as
+            grounds to refuse a visa, study or work application that relied on it.
           </p>
         </Section>
 

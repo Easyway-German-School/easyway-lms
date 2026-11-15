@@ -1,5 +1,19 @@
+import Image from "next/image";
 import Link from "next/link";
 import NeedHelp from "@/components/NeedHelp";
+import easywayLogo from "@/assets/brand/easyway-logo.png";
+import osdLogo from "@/assets/brand/osd-logo.png";
+
+/** The two accredited parties, side by side — partnership-style, not just a monogram. */
+function BrandLockup({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-2 py-1.5 shadow-sm">
+      <Image src={easywayLogo} alt="Easyway German Language School" className={compact ? "h-6 w-auto" : "h-8 w-auto"} priority />
+      <span className="h-6 w-px bg-[var(--line)]" aria-hidden="true" />
+      <Image src={osdLogo} alt="ÖSD — Licensed Examination Centre" className={compact ? "h-6 w-auto" : "h-8 w-auto"} priority />
+    </span>
+  );
+}
 
 /**
  * `overlay` floats transparently over a photo hero (landing page, page
@@ -18,12 +32,9 @@ export function SiteHeader({ variant = "solid" }: { variant?: "solid" | "overlay
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 sm:px-6">
         <Link href="/" className="flex min-w-0 items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--gold-bright)] bg-[var(--navy)]/40 text-sm font-bold text-[var(--gold-bright)] backdrop-blur">
-            EW
-          </span>
-          <span className="font-serif-display truncate text-lg font-semibold leading-none text-white">
-            Easyway <span className="text-[var(--gold-bright)]">ÖSD</span>
-            <span className="hidden sm:inline"> Examination Centre</span>
+          <BrandLockup compact />
+          <span className="font-serif-display hidden truncate text-lg font-semibold leading-none text-white md:inline">
+            ÖSD Examination Centre
           </span>
         </Link>
         <nav className="flex shrink-0 items-center gap-1 text-sm font-medium text-white/85 sm:gap-2">
@@ -56,9 +67,7 @@ export function SiteFooter() {
       <div className="mx-auto grid max-w-6xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr]">
         <div>
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-full border border-[var(--gold-bright)] text-sm font-bold text-[var(--gold-bright)]">
-              EW
-            </span>
+            <BrandLockup />
             <span className="font-serif-display text-lg font-semibold text-white">
               Easyway <span className="text-[var(--gold-bright)]">ÖSD</span> Examination Centre
             </span>
