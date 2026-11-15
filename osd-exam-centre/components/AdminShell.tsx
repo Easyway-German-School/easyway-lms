@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { BrandLockup } from "@/components/SiteChrome";
 
 const NAV = [
   { href: "/admin", label: "Candidates" },
@@ -27,9 +28,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen bg-[var(--paper)] md:flex">
       <aside className="shrink-0 border-b border-[var(--line)] bg-white md:w-56 md:border-b-0 md:border-r md:border-[var(--line)]">
-        <div className="flex items-center gap-2 px-5 py-4">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--navy)] text-xs font-bold text-white">EW</span>
-          <span className="font-serif-display text-sm font-semibold text-[var(--navy)]">ÖSD Admin</span>
+        <div className="px-4 py-4">
+          <BrandLockup compact />
         </div>
         <nav className="flex items-center gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:items-stretch md:overflow-visible md:pb-4">
           {NAV.map((item) => {

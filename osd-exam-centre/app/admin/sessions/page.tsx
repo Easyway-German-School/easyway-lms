@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+import AdminLoader from "@/components/AdminLoader";
 import Modal from "@/components/Modal";
 
 // ÖSD is sold as a Written part and an Oral part (see the school's invoice). The four-skill split is
@@ -183,7 +184,7 @@ export default function AdminSessionsPage() {
     await load();
   }
 
-  if (!loaded) return <AdminShell><div className="text-sm text-[var(--ink-soft)]">Loading…</div></AdminShell>;
+  if (!loaded) return <AdminShell><AdminLoader /></AdminShell>;
 
   return (
     <AdminShell>

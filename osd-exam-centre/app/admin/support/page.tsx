@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+import AdminLoader from "@/components/AdminLoader";
 
 type Message = {
   id: string;
@@ -49,7 +50,7 @@ export default function AdminSupportPage() {
     }
   }
 
-  if (!loaded) return <AdminShell><div className="text-sm text-[var(--ink-soft)]">Loading…</div></AdminShell>;
+  if (!loaded) return <AdminShell><AdminLoader /></AdminShell>;
 
   const shown = filter === "open" ? messages.filter((m) => m.status === "open") : messages;
 
