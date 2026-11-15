@@ -1,0 +1,17 @@
+# Self-hosted replacement for Vercel's crons on /api/cron/tick and
+# /api/cron/tick-fast. Install with `crontab -e`. Adjust REPO_PATH.
+#
+# MAILTO is the backstop under the in-app admin alert this script already
+# sends (notifyFailedCronJobs) — set it to an address someone actually reads.
+MAILTO=admin@yourschool.example
+REPO_PATH=/home/deploy/easyway-lms/prototype
+
+# Daily tick — 0 6 * * * UTC, exactly matching vercel.json's existing
+# schedule for /api/cron/tick. The box's own clock must be UTC (or this
+# line adjusted) — `timedatectl` to check, cron itself always reads the
+# system's local time, not UTC, unless the box is set to it.
+0 6 * * * cd $REPO_PATH && npx tsx --tsconfig tsconfig.json --env-file=.env.production scripts/standalone-cron.ts tick >> /var/log/easyway-cron-tick.log 2>&1
+
+# Fast tick — every 15 minutes, same cadence as the Vercel version (see the
+# comment in tick-fast/route.ts on why 15 and not 5).
+*/15 * * * * cd $REPO_PATH && npx tsx --tsconfig tsconfig.json --env-file=.env.production scripts/standalone-cron.ts tick-fast >> /var/log/easyway-cron-tick-fast.log 2>&1
