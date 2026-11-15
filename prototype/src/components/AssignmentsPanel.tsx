@@ -1,7 +1,8 @@
 "use client";
-import { PencilIcon } from "@/components/icons";
+import { PencilIcon, CommunityIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PublicQuestion } from "@/lib/assignments";
@@ -100,6 +101,63 @@ export default function AssignmentsPanel() {
   const [uploading, setUploading] = useState(false);
   const submittingRef = useRef(false);
   const celebratedResultRef = useRef<string | null>(null);
+
+  // ---- Repost to community -------------------------------------------------
+  // Workaround for the Assignments tab's own visibility rule still missing
+  // some classmates (reassigned tutor, a target list a late joiner fell
+  // through) — anyone who CAN see an assignment can post it into the class
+  // chat instead of waiting for the root cause to be tracked down. See
+  // POST /api/community/share-assignment.
+  const [shareOpenId, setShareOpenId] = useState<string | null>(null);
+  const [shareCandidates, setShareCandidates] = useState<{ userId: string; name: string }[] | null>(null);
+  const [shareCandidatesLoading, setShareCandidatesLoading] = useState(false);
+  const [shareSelected, setShareSelected] = useState<string>("");
+  const [sharing, setSharing] = useState(false);
+  const [shareDone, setShareDone] = useState<Record<string, string>>({}); // assignmentId -> channelId
+  const [shareError, setShareError] = useState("");
+
+  async function openShare(assignmentId: string) {
+    if (shareOpenId === assignmentId) {
+      setShareOpenId(null);
+      return;
+    }
+    setShareOpenId(assignmentId);
+    setShareSelected("");
+    setShareError("");
+    setShareCandidates(null);
+    setShareCandidatesLoading(true);
+    try {
+      const res = await fetch(`/api/community/share-assignment?assignmentId=${encodeURIComponent(assignmentId)}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      setShareCandidates(res.ok ? data.candidates ?? [] : []);
+    } catch {
+      setShareCandidates([]);
+    } finally {
+      setShareCandidatesLoading(false);
+    }
+  }
+
+  async function doShare(assignmentId: string) {
+    setSharing(true);
+    setShareError("");
+    try {
+      const res = await fetch("/api/community/share-assignment", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assignmentId, mentionedUserId: shareSelected || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not post this");
+      setShareDone((prev) => ({ ...prev, [assignmentId]: data.channelId }));
+      setShareOpenId(null);
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : "Could not post this");
+    } finally {
+      setSharing(false);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -592,6 +650,80 @@ export default function AssignmentsPanel() {
                     : a.type === "quiz" ? "Auto-marked quiz" : "Tutor mark"}
                 </p>
               )}
+
+              {/*
+                Repost this assignment into the class chat. Shown on every
+                assignment, not just done ones — the point is "a classmate
+                can't see this at all", which has nothing to do with whether
+                YOU have handed it in.
+              */}
+              <div className="mt-3 border-t border-[var(--border)] pt-3" onClick={(event) => event.stopPropagation()}>
+                {shareDone[a.id] ? (
+                  <p className="text-xs font-semibold text-[var(--success)]">
+                    Posted to class chat —{" "}
+                    <Link href={`/community?channel=${shareDone[a.id]}`} className="underline">
+                      view it
+                    </Link>
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void openShare(a.id);
+                    }}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)]"
+                  >
+                    <CommunityIcon className="h-3.5 w-3.5" />
+                    {shareOpenId === a.id ? "Cancel" : "A classmate can't see this? Repost it"}
+                  </button>
+                )}
+
+                {shareOpenId === a.id && (
+                  <div
+                    className="mt-3 space-y-2 rounded-2xl bg-[var(--surface-alt)] p-3"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <p className="text-xs text-[var(--muted)]">
+                      Posts this into your class&apos;s Homework &amp; help chat so everyone can see it.
+                    </p>
+                    {shareCandidatesLoading ? (
+                      <p className="text-xs text-[var(--muted)]">Checking who else can&apos;t see it…</p>
+                    ) : shareCandidates && shareCandidates.length > 0 ? (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--muted)]">
+                          Tag the classmate it&apos;s for (optional — they&apos;ll get a notification)
+                        </label>
+                        <select
+                          value={shareSelected}
+                          onChange={(event) => setShareSelected(event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                        >
+                          <option value="">Just post it — no one in particular</option>
+                          {shareCandidates.map((candidate) => (
+                            <option key={candidate.userId} value={candidate.userId}>
+                              {candidate.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[var(--muted)]">
+                        As far as we can tell, everyone in your class can already see this one — posting it is still fine.
+                      </p>
+                    )}
+                    {shareError && <p className="text-xs text-red-600">{shareError}</p>}
+                    <button
+                      type="button"
+                      onClick={() => void doShare(a.id)}
+                      disabled={sharing}
+                      className="rounded-full btn-glow px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {sharing ? "Posting…" : "Post to class chat"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           );
         })

@@ -124,6 +124,25 @@ export function assignmentVisibleToWhere(student: VisibilityStudent, onlineBranc
 }
 
 /**
+ * The same rule, widened by one explicit exception: an assignment somebody
+ * reposted into this student's own class chat (see
+ * src/lib/assignment-share-visibility.ts) counts as visible too, whatever the
+ * sitting/tutor/target rule above says. A repost is a deliberate "you can't
+ * see this, here it is" from a classmate — it has to actually unlock viewing
+ * and submitting, not just render a card that 404s the moment it's tapped.
+ */
+export function assignmentVisibleOrSharedWhere(
+  student: VisibilityStudent,
+  onlineBranchId: string | null | undefined,
+  sharedAssignmentIds: string[],
+) {
+  if (!sharedAssignmentIds.length) return assignmentVisibleToWhere(student, onlineBranchId);
+  return {
+    OR: [assignmentVisibleToWhere(student, onlineBranchId), { id: { in: sharedAssignmentIds }, published: true }],
+  };
+}
+
+/**
  * The reverse question: given an assignment (as just created — its level,
  * branch and sitting), which students can see it? Used to notify the actual
  * audience directly by id instead of the same loose `branchId`/`sessionSlot`

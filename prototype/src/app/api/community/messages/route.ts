@@ -55,6 +55,8 @@ function serialise(
     kind?: string;
     gameMatchId?: string | null;
     gameMatch?: { id: string; title: string; status: string } | null;
+    sharedAssignment?: { id: string; title: string; description: string | null; type: string; dueAt: Date | null } | null;
+    mentionedUser?: { id: string; name: string | null } | null;
   },
   viewer: Viewer,
 ) {
@@ -118,6 +120,10 @@ function serialise(
     // message — same reasoning as `reactions` being folded here rather than
     // fetched separately per bubble.
     gameMatch: hidden && !staff ? null : message.gameMatch ?? null,
+    // Same reasoning as gameMatch above: enough to render the repost card
+    // without a second request per message.
+    sharedAssignment: hidden && !staff ? null : message.sharedAssignment ?? null,
+    mentionedUser: hidden && !staff ? null : message.mentionedUser ?? null,
   };
 }
 
@@ -138,6 +144,8 @@ const INCLUDE = {
   replyTo: { select: { id: true, body: true, hiddenAt: true, author: { select: { name: true } } } },
   reactions: { select: { emoji: true, userId: true } },
   gameMatch: { select: { id: true, title: true, status: true } },
+  sharedAssignment: { select: { id: true, title: true, description: true, type: true, dueAt: true } },
+  mentionedUser: { select: { id: true, name: true } },
 } as const;
 
 /**

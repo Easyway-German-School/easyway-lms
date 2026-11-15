@@ -136,6 +136,8 @@ model User {
   messages              Message[]
   moderatedMessages     Message[]                @relation("MessageModerator")
   pinnedMessages        Message[]                @relation("MessagePinner")
+  /// Assignment reposts a classmate addressed to this person specifically — see Message.mentionedUserId.
+  mentionedInMessages   Message[]                @relation("MessageMention")
   messageReactions      MessageReaction[]
   communityMute         CommunityMute?           @relation("MutedMember")
   mutesIssued           CommunityMute[]          @relation("MuteAuthor")
@@ -3306,6 +3308,27 @@ model Message {
   gameMatch   GameMatch? @relation(fields: [gameMatchId], references: [id], onDelete: SetNull)
 
   /**
+   * Set only on an "assignment_share" message — a student reposting a
+   * tutor's assignment into the class chat because the Assignments tab's own
+   * visibility rule still misses some classmates (see
+   * src/lib/student-assignments.ts). onDelete: SetNull — the repost is a
+   * historical chat message even once the assignment itself is edited away.
+   */
+  sharedAssignmentId String?
+  sharedAssignment   Assignment? @relation(fields: [sharedAssignmentId], references: [id], onDelete: SetNull)
+
+  /**
+   * The one classmate this repost is FOR, chosen by the sharer from the list
+   * of people confirmed NOT to see the assignment themselves (the inverse of
+   * studentsVisibleToAssignment in student-assignments.ts). Drives a real
+   * bell notification via notify() — see POST /api/community/share-assignment
+   * — the same way a game invite does, rather than the ambient chat push
+   * every ordinary message gets.
+   */
+  mentionedUserId String?
+  mentionedUser   User?   @relation("MessageMention", fields: [mentionedUserId], references: [id], onDelete: SetNull)
+
+  /**
    * Staff pinning something to the top of the room. Null for the vast majority.
    * A pin is not moderation — it is the opposite. Removal takes a message away;
    * a pin is how "the exam is on the 14th" stops being buried under two hundred
@@ -3577,6 +3600,8 @@ model Assignment {
   /// Live games played off this quiz. The game snapshots the questions, so
   /// editing this row never rewrites history for a game already played.
   quizGames   QuizGame[]
+  /// Reposts of this assignment into a class chat — see Message.sharedAssignmentId.
+  sharedInMessages Message[]
   /**
    * Named recipients. EMPTY MEANS EVERYONE at this level and branch, which is
    * how every assignment written before this behaved and still behaves — the

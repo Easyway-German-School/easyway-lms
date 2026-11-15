@@ -11,8 +11,9 @@ import {
   deadlineFor,
   isExpired,
 } from "@/lib/assignments";
-import { assignmentVisibleToWhere } from "@/lib/student-assignments";
+import { assignmentVisibleOrSharedWhere } from "@/lib/student-assignments";
 import { resolveOnlineBranchId } from "@/lib/online-branch-server";
+import { sharedAssignmentIdsFor } from "@/lib/assignment-share-visibility";
 import { attributeTutorAction } from "@/lib/tutor-attribution";
 import { gradeRewardXp } from "@/lib/gamification";
 
@@ -57,9 +58,13 @@ export async function GET() {
   }
 
   const onlineBranchId = await resolveOnlineBranchId(student.user?.tenantId ?? null);
+  const sharedIds = await sharedAssignmentIdsFor({
+    userId: session.user!.id as string,
+    role: (session.user as any).role,
+  });
 
   const assignments = await prisma.assignment.findMany({
-    where: assignmentVisibleToWhere(student, onlineBranchId),
+    where: assignmentVisibleOrSharedWhere(student, onlineBranchId, sharedIds),
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
     include: {
       submissions: { where: { studentId: student.id } },
@@ -169,11 +174,18 @@ export async function POST(req: NextRequest) {
      * Re-checked here against exactly the same rule the listing uses, rather
      * than trusted because the id arrived. Otherwise a student could submit to
      * any assignment in the school by posting an id they were never shown —
-     * including one targeted at somebody else.
+     * including one targeted at somebody else. Widened by the same one
+     * exception as the listing: an assignment reposted into this student's
+     * own class chat may be started and submitted too, or tapping the repost
+     * card would open it and then 404 the moment they tried to hand it in.
      */
     const onlineBranchId = await resolveOnlineBranchId(student.user?.tenantId ?? null);
+    const sharedIds = await sharedAssignmentIdsFor({
+      userId: session.user!.id as string,
+      role: (session.user as any).role,
+    });
     const assignment = await prisma.assignment.findFirst({
-      where: { id: String(assignmentId), ...assignmentVisibleToWhere(student, onlineBranchId) },
+      where: { id: String(assignmentId), ...assignmentVisibleOrSharedWhere(student, onlineBranchId, sharedIds) },
       include: { lecturer: { select: { userId: true } } },
     });
     if (!assignment) {
