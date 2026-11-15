@@ -10,6 +10,21 @@ const PARTS = ["written", "oral"] as const;
 const LEGACY_MODULES = ["reading", "listening", "writing", "speaking"] as const;
 const ALL_MODULES = [...PARTS, ...LEGACY_MODULES] as const;
 
+// Kept in sync by hand with lib/booking.ts's levelHasIndividualModules — this
+// is a client component and lib/booking.ts pulls in server-only deps
+// (prisma, payments) that can't go in the client bundle, so the one-line
+// rule is duplicated here rather than imported. A1/A2 are single-paper ÖSD
+// exams with no separable parts; only B1 and up can be re-sat module by
+// module. An A1/A2 sitting had Written/Oral prices entered on it anyway,
+// which put "Individual modules" in front of candidates who should only
+// ever see "whole exam" — this stops the office from doing that again.
+const NO_INDIVIDUAL_MODULE_LEVELS = ["A1", "A2"];
+function levelHasIndividualModules(level: string): boolean {
+  return !NO_INDIVIDUAL_MODULE_LEVELS.includes(level.trim().toUpperCase());
+}
+
+type LevelSetting = { level: string; enabled: boolean };
+
 type Session = {
   id: string;
   level: string;
@@ -41,6 +56,8 @@ const emptyForm = {
 export default function AdminSessionsPage() {
   const router = useRouter();
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [levels, setLevels] = useState<LevelSetting[]>([]);
+  const [levelBusy, setLevelBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -63,7 +80,28 @@ export default function AdminSessionsPage() {
     }
   }, [router]);
 
-  useEffect(() => { load(); }, [load]);
+  const loadLevels = useCallback(async () => {
+    const res = await fetch("/api/admin/levels", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    setLevels(data.levels ?? []);
+  }, []);
+
+  useEffect(() => { load(); loadLevels(); }, [load, loadLevels]);
+
+  async function toggleLevel(level: string, enabled: boolean) {
+    setLevelBusy(level);
+    try {
+      await fetch("/api/admin/levels", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ level, enabled }),
+      });
+      await loadLevels();
+    } finally {
+      setLevelBusy(null);
+    }
+  }
 
   function startCreate() {
     setForm(emptyForm);
@@ -162,6 +200,29 @@ export default function AdminSessionsPage() {
           </div>
         </div>
 
+        {levels.length > 0 && (
+          <div className="mt-4 seal-border rounded-sm bg-white p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Levels offered publicly</p>
+            <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+              Off hides every sitting of that level from the public booking page — sittings, prices and bookings stay intact underneath, this is a visibility switch, not a delete.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {levels.map((l) => (
+                <button
+                  key={l.level}
+                  onClick={() => toggleLevel(l.level, !l.enabled)}
+                  disabled={levelBusy === l.level}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold uppercase disabled:opacity-50 ${
+                    l.enabled ? "bg-[var(--green-soft)] text-[var(--green)]" : "border border-[var(--line)] text-[var(--ink-soft)]"
+                  }`}
+                >
+                  {l.level} · {l.enabled ? "On" : "Off"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {error && !showForm && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
         {showForm && (
@@ -205,36 +266,44 @@ export default function AdminSessionsPage() {
                 opened sitting where &quot;{form.capacity || 50} of {form.capacity || 50} left&quot; reads as empty rather than urgent.
               </p>
             </div>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Written / Oral prices</p>
-            <div className="mt-2 grid grid-cols-2 gap-4">
-              {PARTS.map((m) => (
-                <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
-              ))}
-            </div>
-            {Number(form.feeWholeExam) > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  const total = Number(form.feeWholeExam);
-                  const written = Math.round(total * 0.75);
-                  setForm({ ...form, modulePrices: { ...form.modulePrices, written: String(written), oral: String(total - written) } });
-                }}
-                className="mt-2 text-xs font-semibold text-[var(--navy)] underline underline-offset-4"
-              >
-                Split 75% / 25% (as on the B2 invoice: 157,500 / 52,500)
-              </button>
+            {levelHasIndividualModules(form.level) ? (
+              <>
+                <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Written / Oral prices</p>
+                <div className="mt-2 grid grid-cols-2 gap-4">
+                  {PARTS.map((m) => (
+                    <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
+                  ))}
+                </div>
+                {Number(form.feeWholeExam) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const total = Number(form.feeWholeExam);
+                      const written = Math.round(total * 0.75);
+                      setForm({ ...form, modulePrices: { ...form.modulePrices, written: String(written), oral: String(total - written) } });
+                    }}
+                    className="mt-2 text-xs font-semibold text-[var(--navy)] underline underline-offset-4"
+                  >
+                    Split 75% / 25% (as on the B2 invoice: 157,500 / 52,500)
+                  </button>
+                )}
+                <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                  The invoice itemises Written and Oral. If they don&apos;t add up to the whole-exam fee, the invoice shows one line instead.
+                </p>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)]">Older four-skill prices</summary>
+                  <div className="mt-2 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    {LEGACY_MODULES.map((m) => (
+                      <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
+                    ))}
+                  </div>
+                </details>
+              </>
+            ) : (
+              <p className="mt-4 rounded-sm bg-[var(--paper)] p-3 text-xs text-[var(--ink-soft)]">
+                {form.level.trim().toUpperCase() || "This level"} is a single-paper exam — candidates can only book the whole exam, not individual modules.
+              </p>
             )}
-            <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
-              The invoice itemises Written and Oral. If they don&apos;t add up to the whole-exam fee, the invoice shows one line instead.
-            </p>
-            <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)]">Older four-skill prices</summary>
-              <div className="mt-2 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                {LEGACY_MODULES.map((m) => (
-                  <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
-                ))}
-              </div>
-            </details>
             <button onClick={saveSession} disabled={busy} className="mt-5 rounded-sm bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40">
               {busy ? "Saving…" : editingId ? "Save changes" : "Create sitting (unpublished)"}
             </button>

@@ -19,6 +19,17 @@ datasource db {
   directUrl = env("DIRECT_DATABASE_URL")
 }
 
+/// A whole exam LEVEL's on/off switch (A1, A2, B1, B2, C1, C2) — separate
+/// from a sitting's own `published` flag. Publishing is per-sitting; this is
+/// per-level, for when the school isn't offering a level at all yet (C1/C2
+/// to start) and wants it off the public site without touching, deleting or
+/// unpublishing every individual sitting of that level one by one. A level
+/// with no row here is treated as enabled — see app/api/sessions/route.ts.
+model ExamLevelSetting {
+  level   String  @id
+  enabled Boolean @default(true)
+}
+
 /// One sitting: a date, a level, a venue, a capacity, a fee. An admin
 /// publishes it before it appears on the public booking page.
 model ExamSession {

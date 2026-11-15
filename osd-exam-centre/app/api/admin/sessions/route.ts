@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdminRequest } from "@/lib/admin-auth";
-import { MODULES } from "@/lib/booking";
+import { MODULES, levelHasIndividualModules } from "@/lib/booking";
 
 // Written/Oral are how ÖSD is sold here (the school's invoice); the four skills stay for older sittings.
 const PRICEABLE_MODULES = ["written", "oral", ...MODULES] as const;
+
+/**
+ * Never trust the admin form's hidden-fields-only gating for this — an A1/A2
+ * sitting had Written/Oral prices on it anyway (whatever route they got
+ * there by), which is what let candidates see "Individual modules" on a
+ * single-paper exam. Enforced here too so saving one can only ever clear
+ * that data, never write it back.
+ */
+function modulePricesFor(level: string, raw: unknown): { module: string; price: number }[] {
+  if (!levelHasIndividualModules(level) || !raw || typeof raw !== "object") return [];
+  const b = raw as Record<string, unknown>;
+  return PRICEABLE_MODULES.filter((m) => b[m]).map((m) => ({ module: m, price: Number(b[m]) }));
+}
 
 function cleanTime(value: unknown): string | null {
   return typeof value === "string" && /^\d{1,2}:\d{2}$/.test(value) ? value : null;
@@ -30,9 +43,7 @@ export const POST = jsonRoute(async (req: NextRequest) => {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  const modulePrices = PRICEABLE_MODULES
-    .filter((m) => b.modulePrices?.[m])
-    .map((m) => ({ module: m, price: Number(b.modulePrices[m]) }));
+  const modulePrices = modulePricesFor(String(b.level), b.modulePrices);
 
   const session = await prisma.examSession.create({
     data: {
@@ -126,7 +137,7 @@ export const PATCH = jsonRoute(async (req: NextRequest) => {
       // Replace wholesale rather than diff — simpler, and this only ever
       // runs from the admin edit form submitting its whole current state.
       await tx.examModulePrice.deleteMany({ where: { sessionId } });
-      const modulePrices = PRICEABLE_MODULES.filter((m) => b.modulePrices[m]).map((m) => ({ sessionId, module: m, price: Number(b.modulePrices[m]) }));
+      const modulePrices = modulePricesFor(updated.level, b.modulePrices).map((m) => ({ sessionId, ...m }));
       if (modulePrices.length) await tx.examModulePrice.createMany({ data: modulePrices });
     }
 

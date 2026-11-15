@@ -35,6 +35,15 @@ const ID_TYPES = ["International Passport", "National ID Card (NIN)", "Driver's 
 
 const STEP_TITLES = ["Choose sitting", "Your details", "Modules & fee", "Review"];
 
+// Kept in sync by hand with lib/booking.ts's levelHasIndividualModules (this
+// client page can't import it — see the admin sessions page for why). A1/A2
+// are single-paper ÖSD exams: no "Individual modules" option regardless of
+// what a sitting's modulePrices happen to contain.
+const NO_INDIVIDUAL_MODULE_LEVELS = ["A1", "A2"];
+function levelHasIndividualModules(level: string): boolean {
+  return !NO_INDIVIDUAL_MODULE_LEVELS.includes(level.trim().toUpperCase());
+}
+
 export default function BookPage() {
   const router = useRouter();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -67,6 +76,13 @@ export default function BookPage() {
   }, []);
 
   const session = useMemo(() => sessions.find((s) => s.id === sessionId) ?? null, [sessions, sessionId]);
+
+  useEffect(() => {
+    if (session && !levelHasIndividualModules(session.level) && selection === "custom") {
+      setSelection("full");
+      setModules(new Set());
+    }
+  }, [session, selection]);
 
   const feeTotal = useMemo(() => {
     if (!session) return 0;
@@ -286,17 +302,19 @@ export default function BookPage() {
                 >
                   Whole exam — ₦{session.feeWholeExam.toLocaleString()}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection("custom")}
-                  disabled={session.modulePrices.length === 0}
-                  className={`flex-1 rounded-lg border px-4 py-3 text-sm font-semibold disabled:opacity-40 ${selection === "custom" ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
-                >
-                  Individual modules
-                </button>
+                {levelHasIndividualModules(session.level) && (
+                  <button
+                    type="button"
+                    onClick={() => setSelection("custom")}
+                    disabled={session.modulePrices.length === 0}
+                    className={`flex-1 rounded-lg border px-4 py-3 text-sm font-semibold disabled:opacity-40 ${selection === "custom" ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
+                  >
+                    Individual modules
+                  </button>
+                )}
               </div>
 
-              {selection === "custom" && (
+              {selection === "custom" && levelHasIndividualModules(session.level) && (
                 <div className="space-y-2">
                   {session.modulePrices.map((m) => (
                     <label key={m.module} className="flex items-center justify-between rounded-lg border border-[var(--line)] px-4 py-2.5">

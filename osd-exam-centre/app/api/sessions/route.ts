@@ -7,8 +7,17 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const now = new Date();
+    const disabledLevels = await prisma.examLevelSetting.findMany({
+      where: { enabled: false },
+      select: { level: true },
+    });
+
     const sessions = await prisma.examSession.findMany({
-      where: { published: true, registrationDeadline: { gt: now } },
+      where: {
+        published: true,
+        registrationDeadline: { gt: now },
+        level: { notIn: disabledLevels.map((l) => l.level) },
+      },
       orderBy: { startDate: "asc" },
       include: {
         modulePrices: true,
