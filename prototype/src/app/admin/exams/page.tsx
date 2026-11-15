@@ -202,7 +202,7 @@ export default function AdminExamsPage() {
               ÖSD/telc sittings stay off student booking until the school switches that on.
             </p>
           </div>
-          <button onClick={() => setOpen((v) => !v)} className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white">
+          <button onClick={() => setOpen((v) => !v)} className="btn-glow rounded-full px-5 py-2.5 text-sm font-semibold text-white">
             {open ? "Cancel" : "New sitting"}
           </button>
         </div>

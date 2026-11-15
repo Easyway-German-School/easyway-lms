@@ -410,7 +410,7 @@ export default function AdminEmailComposePage() {
                     onClick={() => setEngine(option.id)}
                     title={option.detail}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                      engine === option.id ? "bg-slate-900 text-white" : "border text-[var(--muted)] hover:text-[var(--foreground)]"
+                      engine === option.id ? "bg-[var(--accent)] text-white" : "border text-[var(--muted)] hover:text-[var(--foreground)]"
                     }`}
                   >
                     {option.label}
@@ -429,7 +429,7 @@ export default function AdminEmailComposePage() {
               <button
                 onClick={draft}
                 disabled={drafting || brief.trim().length < 10}
-                className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                className="btn-glow rounded-full px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
               >
                 {drafting ? "Writing…" : "Draft this for me"}
               </button>
@@ -468,7 +468,7 @@ export default function AdminEmailComposePage() {
             <button
               onClick={send}
               disabled={busy || !preview || !subject.trim() || blocks.length === 0}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+              className="btn-glow rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
             >
               {preview ? `Send to ${preview.count}` : "Preview first"}
             </button>

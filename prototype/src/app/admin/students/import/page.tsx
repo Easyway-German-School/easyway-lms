@@ -474,7 +474,7 @@ export default function ImportStudentsPage() {
                   <button
                     onClick={() => void resendLoginsFromFile()}
                     disabled={resendState === "sending"}
-                    className="rounded-full bg-sky-600 px-5 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                    className="btn-glow rounded-full px-5 py-2 text-xs font-semibold text-white transition disabled:opacity-50"
                   >
                     {resendState === "sending"
                       ? "Sending…"
