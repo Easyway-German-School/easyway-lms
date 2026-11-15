@@ -6,6 +6,8 @@ import { resolveNotificationHop } from "@/lib/notification-destinations";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
 import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
+import { connectPushUpdates } from "@/lib/client/push-client";
+import type { PortalUpdatesResult } from "@/lib/portal-updates";
 
 /**
  * MESSAGES THAT REACH YOU WHEREVER YOU ARE IN THE PORTAL.
@@ -47,6 +49,16 @@ type Update = {
 const POLL_ACTIVE_MS = 8_000;
 /** Backed right off when nobody is looking. */
 const POLL_HIDDEN_MS = 45_000;
+/**
+ * How often the HTTP poll runs once the push server (push-client.ts) has
+ * confirmed it is live — a backstop, not the primary delivery path anymore.
+ * Not disabled outright: a push connection that silently stalls without the
+ * socket itself closing (a dead TCP connection behind some mobile carrier's
+ * NAT, say) must not mean "nothing ever arrives again" just because this
+ * component stopped checking. Long enough that it costs almost nothing while
+ * push is healthy, short enough that the worst case is still bounded.
+ */
+const POLL_BACKSTOP_MS = 120_000;
 /** How long a card sits there before it leaves on its own. */
 const DISMISS_AFTER_MS = 7_000;
 /**
@@ -123,10 +135,71 @@ export default function PortalUpdates() {
   const sinceRef = useRef<string | null>(null);
   /** Ids already shown, so a re-poll overlapping a boundary cannot repeat one. */
   const seenRef = useRef<Set<string>>(new Set());
+  /**
+   * Mirrors `tutorialLocked` state for the push connection's ingest callback
+   * below, which — unlike the HTTP poll effect — must NOT tear down and
+   * reconnect (a fresh auth handshake) every time a tutorial opens or closes.
+   */
+  const tutorialLockedRef = useRef(false);
+  useEffect(() => {
+    tutorialLockedRef.current = tutorialLocked;
+  }, [tutorialLocked]);
+  /** Sees "open" once push-client.ts's connection is live and auth-confirmed; "closed" on any drop. Read by the poll effect to back itself off. */
+  const pushHealthyRef = useRef(false);
 
   const dismiss = useCallback((id: string) => {
     setVisible((current) => current.filter((update) => update.id !== id));
   }, []);
+
+  /**
+   * Shared by the HTTP poll and the push connection — whichever source a
+   * batch of updates arrived from, it is shown, deduped and chimed the same
+   * way. `locked` is read fresh per call rather than closed over, since the
+   * push connection's listener is set up once at mount and must see later
+   * tutorial-lock changes.
+   */
+  const ingest = useCallback((data: PortalUpdatesResult, locked: boolean) => {
+    if (data.now) sinceRef.current = data.now;
+
+    const fresh = (data.updates ?? []).filter((update) => !seenRef.current.has(update.id)) as Update[];
+    if (fresh.length) {
+      for (const update of fresh) seenRef.current.add(update.id);
+      // Oldest first, so the newest ends up nearest the reader's thumb.
+      const ordered = fresh.reverse();
+      if (locked) heldRef.current = [...heldRef.current, ...ordered];
+      else setVisible((current) => [...current, ...ordered].slice(-MAX_VISIBLE));
+      // A notification earns the bell ping the old NotificationCenter toast
+      // used to make; a stream of chat messages does not, or a busy class
+      // would chime forty times a minute.
+      if (!locked && fresh.some((update) => update.source === "notification")) chime();
+    }
+
+    /**
+     * Keep the seen-set from growing for the life of the session. It only
+     * has to cover the overlap between two deliveries, so a few hundred is
+     * generous; a term of messages would not be.
+     */
+    if (seenRef.current.size > 400) {
+      seenRef.current = new Set([...seenRef.current].slice(-100));
+    }
+  }, []);
+
+  // The push connection: see push-client.ts for why this is a true no-op
+  // until NEXT_PUBLIC_PUSH_SERVER_URL is deliberately set. Mount-once — it
+  // manages its own reconnection and must not be torn down by unrelated
+  // re-renders (a tutorial opening, for instance).
+  useEffect(() => {
+    const connection = connectPushUpdates(
+      (data) => ingest(data, tutorialLockedRef.current),
+      (status) => {
+        pushHealthyRef.current = status === "open";
+      },
+    );
+    return () => {
+      pushHealthyRef.current = false;
+      connection.close();
+    };
+  }, [ingest]);
 
   useEffect(() => {
     const onPreempt = (event: Event) => {
@@ -158,40 +231,17 @@ export default function PortalUpdates() {
         const query = sinceRef.current ? `?since=${encodeURIComponent(sinceRef.current)}` : "";
         const res = await fetch(`/api/portal/updates${query}`, { cache: "no-store" });
         const data = await res.json();
-
-        if (!cancelled && res.ok) {
-          if (data.now) sinceRef.current = data.now;
-
-          const fresh: Update[] = (data.updates ?? []).filter((update: Update) => !seenRef.current.has(update.id));
-          if (fresh.length) {
-            for (const update of fresh) seenRef.current.add(update.id);
-            // Oldest first, so the newest ends up nearest the reader's thumb.
-            const ordered = fresh.reverse();
-            if (tutorialLocked) heldRef.current = [...heldRef.current, ...ordered];
-            else setVisible((current) => [...current, ...ordered].slice(-MAX_VISIBLE));
-            // A notification earns the bell ping the old NotificationCenter
-            // toast used to make; a stream of chat messages does not, or a
-            // busy class would chime forty times a minute.
-            if (!tutorialLocked && fresh.some((update) => update.source === "notification")) chime();
-          }
-
-          /**
-           * Keep the seen-set from growing for the life of the session. It only
-           * has to cover the overlap between two polls, so a few hundred is
-           * generous; a term of messages would not be.
-           */
-          if (seenRef.current.size > 400) {
-            seenRef.current = new Set([...seenRef.current].slice(-100));
-          }
-        }
+        if (!cancelled && res.ok) ingest(data, tutorialLocked);
       } catch {
         // Offline, or a cold start. The next tick is seconds away.
       } finally {
         if (!cancelled) {
-          timer = window.setTimeout(
-            tick,
-            document.visibilityState === "visible" ? POLL_ACTIVE_MS : POLL_HIDDEN_MS,
-          );
+          const delay = pushHealthyRef.current
+            ? POLL_BACKSTOP_MS
+            : document.visibilityState === "visible"
+              ? POLL_ACTIVE_MS
+              : POLL_HIDDEN_MS;
+          timer = window.setTimeout(tick, delay);
         }
       }
     }
@@ -204,7 +254,7 @@ export default function PortalUpdates() {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [tutorialLocked]);
+  }, [tutorialLocked, ingest]);
 
   // Each card retires itself. Kept off the poll so a card's life does not
   // depend on when the next request happens to land.

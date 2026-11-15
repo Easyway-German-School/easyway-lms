@@ -79,6 +79,22 @@ describe("connectPushUpdates", () => {
     expect(onUpdate).toHaveBeenCalledWith(payload);
   });
 
+  it("reports status \"open\" only once the server confirms auth (ready), and \"closed\" on any drop", async () => {
+    process.env.NEXT_PUBLIC_PUSH_SERVER_URL = "ws://push.example:8081";
+    const { connectPushUpdates } = await import("./push-client");
+    const onStatus = vi.fn();
+    connectPushUpdates(vi.fn(), onStatus);
+    await Promise.resolve();
+    await Promise.resolve();
+    const socket = FakeSocket.instances[0]!;
+    socket.emit("open", {});
+    expect(onStatus).not.toHaveBeenCalled(); // raw socket open is not enough — auth hasn't been confirmed yet
+    socket.emit("message", { data: JSON.stringify({ type: "ready" }) });
+    expect(onStatus).toHaveBeenCalledWith("open");
+    socket.emit("close", {});
+    expect(onStatus).toHaveBeenCalledWith("closed");
+  });
+
   it("stops reconnecting once closed by the caller", async () => {
     vi.useFakeTimers();
     process.env.NEXT_PUBLIC_PUSH_SERVER_URL = "ws://push.example:8081";

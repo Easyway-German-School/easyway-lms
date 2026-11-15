@@ -21,6 +21,15 @@
 import type { PortalUpdatesResult } from "@/lib/portal-updates";
 
 export type PushUpdateHandler = (result: PortalUpdatesResult) => void;
+/**
+ * "open" fires once the server has actually accepted the auth token (its
+ * `{type:"ready"}` reply), not just on the raw socket opening — that is the
+ * earliest point a caller can safely treat this link as live and back its
+ * own polling off. "closed" fires on any drop, including the very first
+ * connection attempt failing, so a caller defaults to its normal poll
+ * cadence until this says otherwise.
+ */
+export type PushStatusHandler = (status: "open" | "closed") => void;
 
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -32,7 +41,7 @@ export function pushServerUrl(): string | null {
   return url && url.trim() ? url.trim() : null;
 }
 
-export function connectPushUpdates(onUpdate: PushUpdateHandler): PushConnection {
+export function connectPushUpdates(onUpdate: PushUpdateHandler, onStatus?: PushStatusHandler): PushConnection {
   const maybeUrl = pushServerUrl();
   if (!maybeUrl) return { close: () => {} };
   const url: string = maybeUrl; // narrowed once, so the nested `open()` closure below sees `string`, not `string | null`
@@ -66,12 +75,19 @@ export function connectPushUpdates(onUpdate: PushUpdateHandler): PushConnection 
       } catch {
         return;
       }
-      if (payload && typeof payload === "object" && (payload as { type?: unknown }).type === "update") {
-        reconnectDelay = RECONNECT_BASE_MS; // a real message means the link is good again
+      if (!payload || typeof payload !== "object") return;
+      const type = (payload as { type?: unknown }).type;
+      if (type === "ready") {
+        reconnectDelay = RECONNECT_BASE_MS; // a successful auth means the link is good again
+        onStatus?.("open");
+      } else if (type === "update") {
         onUpdate(payload as PortalUpdatesResult);
       }
     });
-    socket.addEventListener("close", scheduleReconnect);
+    socket.addEventListener("close", () => {
+      onStatus?.("closed");
+      scheduleReconnect();
+    });
     socket.addEventListener("error", () => socket?.close());
   }
 
