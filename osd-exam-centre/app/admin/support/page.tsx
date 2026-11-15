@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import AdminShell from "@/components/AdminShell";
 
 type Message = {
   id: string;
@@ -49,17 +49,14 @@ export default function AdminSupportPage() {
     }
   }
 
-  if (!loaded) return <div className="p-8 text-sm text-[var(--ink-soft)]">Loading…</div>;
+  if (!loaded) return <AdminShell><div className="text-sm text-[var(--ink-soft)]">Loading…</div></AdminShell>;
 
   const shown = filter === "open" ? messages.filter((m) => m.status === "open") : messages;
 
   return (
-    <div className="min-h-screen bg-[var(--paper)] p-6">
+    <AdminShell>
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between">
-          <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Help requests</h1>
-          <Link href="/admin" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">← Bookings</Link>
-        </div>
+        <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Help requests</h1>
 
         {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
@@ -108,6 +105,6 @@ export default function AdminSupportPage() {
           ))}
         </div>
       </div>
-    </div>
+    </AdminShell>
   );
 }

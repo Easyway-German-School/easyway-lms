@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import AdminShell from "@/components/AdminShell";
 import ManualBookingForm from "@/components/ManualBookingForm";
 import PanthexaIntakeForm from "@/components/PanthexaIntakeForm";
 
@@ -126,11 +126,6 @@ export default function AdminDashboard() {
     }
   }
 
-  async function logout() {
-    await fetch("/api/admin/logout", { method: "POST" });
-    router.push("/admin/login");
-  }
-
   const counts = useMemo(() => ({
     action: bookings.filter((b) => b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending").length,
     waiting: bookings.filter((b) => b.derived.tone === "waiting").length,
@@ -138,7 +133,7 @@ export default function AdminDashboard() {
     all: bookings.length,
   }), [bookings]);
 
-  if (!loaded) return <div className="p-8 text-sm text-[var(--ink-soft)]">Loading…</div>;
+  if (!loaded) return <AdminShell><div className="text-sm text-[var(--ink-soft)]">Loading…</div></AdminShell>;
 
   const q = query.trim().toLowerCase();
   const shown = bookings
@@ -158,23 +153,16 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-[var(--paper)] p-6">
+    <AdminShell>
       <div className="mx-auto max-w-5xl">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Candidates</h1>
-          <div className="flex gap-3">
-            <Link href="/admin/support" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">Help requests</Link>
-            <Link href="/admin/sessions" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">Sittings</Link>
-            <button onClick={logout} className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)]">Sign out</button>
-          </div>
-        </div>
+        <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Candidates</h1>
 
         {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
         {notice && <p className="mt-4 rounded-sm bg-[var(--green-soft)] px-4 py-3 text-sm text-[var(--green)]">{notice}</p>}
 
-        <div className="mt-4 space-y-3">
-          <div><PanthexaIntakeForm onCreated={load} /></div>
-          <div><ManualBookingForm onCreated={load} /></div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <PanthexaIntakeForm onCreated={load} />
+          <ManualBookingForm onCreated={load} />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -202,7 +190,7 @@ export default function AdminDashboard() {
           ))}
         </div>
       </div>
-    </div>
+    </AdminShell>
   );
 }
 

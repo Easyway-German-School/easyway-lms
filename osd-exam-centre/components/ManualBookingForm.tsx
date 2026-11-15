@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Modal from "@/components/Modal";
 
 const MODULES = ["reading", "listening", "writing", "speaking"] as const;
 
@@ -59,21 +60,13 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
     }
   }
 
-  if (!open) {
-    return (
+  return (
+    <>
       <button onClick={() => setOpen(true)} className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">
         Walk-in booking (already paid)
       </button>
-    );
-  }
-
-  return (
-    <div className="mt-4 seal-border rounded-sm bg-white p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Add a phone / walk-in booking</p>
-        <button onClick={() => { setOpen(false); setResult(null); }} className="text-xs font-semibold text-[var(--ink-soft)]">Close</button>
-      </div>
-
+      {open && (
+      <Modal title="Add a phone / walk-in booking" onClose={() => { setOpen(false); setResult(null); }}>
       {result && (
         <p className="mt-2 rounded-sm bg-[var(--green-soft)] p-2 text-xs font-semibold text-[var(--green)]">
           Booked and seated — {result.referenceCode} (₦{result.feeTotal.toLocaleString()}).
@@ -146,7 +139,9 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
       >
         {busy ? "Booking…" : "Book & mark paid"}
       </button>
-    </div>
+      </Modal>
+      )}
+    </>
   );
 }
 
