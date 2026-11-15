@@ -32,6 +32,7 @@ import {
   ImageIcon,
   MicIcon,
   PaletteIcon,
+  PencilIcon,
   PauseIcon,
   PlayIcon,
   SendIcon,
@@ -117,6 +118,10 @@ type ChatMessage = {
   stickerId?: string | null;
   /** This message IS an invite card — somebody started a game in this room. */
   gameMatch?: { id: string; title: string; status: string } | null;
+  /** This message IS a repost card — a classmate shared an assignment here. */
+  sharedAssignment?: { id: string; title: string; description: string | null; type: string; dueAt: string | null } | null;
+  /** Set only alongside sharedAssignment — who the repost was addressed to. */
+  mentionedUser?: { id: string; name: string | null } | null;
   /** Staff have held this at the top of the room. */
   pinned?: boolean;
   /** Set on a bubble we have drawn but the server has not confirmed. */
@@ -483,6 +488,8 @@ function CommunityHubInner({
   /** The one-time "how a story works" coach: null until checked, then the flag. */
   const [storyTourSeen, setStoryTourSeen] = useState<boolean | null>(null);
   const [showStoryTour, setShowStoryTour] = useState(false);
+  /** The one-time "you can repost an assignment" notice — see below. */
+  const [showShareNotice, setShowShareNotice] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -562,7 +569,17 @@ function CommunityHubInner({
 
       const list: Space[] = data.spaces ?? [];
       setSpaces(list);
-      setIsStaff(Boolean(data.isStaff));
+      const staff = Boolean(data.isStaff);
+      setIsStaff(staff);
+      if (!staff) {
+        try {
+          if (!window.localStorage.getItem("easyway-assignment-share-notice-seen")) {
+            setShowShareNotice(true);
+          }
+        } catch {
+          /* fine — the notice just doesn't show on a device that blocks storage */
+        }
+      }
 
       setActiveId((current) => {
         if (current) return current;
@@ -1369,6 +1386,38 @@ function CommunityHubInner({
   }
 
   return (
+    <>
+    {showShareNotice ? (
+      /*
+        Announces the repost workaround the first time a student opens
+        Community, once ever per device — same localStorage-dismiss shape as
+        every other one-time card in this app, just without the server-side
+        "seen" stamp StoryTour uses, since missing it once and showing again
+        costs nothing here.
+      */
+      <div className="mb-2 flex items-start justify-between gap-3 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-3 text-xs text-[var(--foreground)] sm:mb-3">
+        <div>
+          <p className="font-semibold">New: repost an assignment</p>
+          <p className="mt-1 text-[var(--muted)]">
+            Assignments tab empty? Ask a classmate who CAN see your tutor&apos;s homework to repost it in
+            Homework &amp; help — they can tag you by name and you&apos;ll get a notification.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            try {
+              window.localStorage.setItem("easyway-assignment-share-notice-seen", "1");
+            } catch {
+              /* shows again next time, which is fine */
+            }
+            setShowShareNotice(false);
+          }}
+          className="shrink-0 rounded-full bg-[var(--accent)] px-3 py-1 text-[11px] font-semibold text-white"
+        >
+          Got it
+        </button>
+      </div>
+    ) : null}
     <div
       // Phones: edge to edge, as tall as the visible screen (`dvh`, not `vh` — on an
       // iPhone `vh` includes the address bar, which pushed the message box below the fold),
@@ -1799,10 +1848,13 @@ function CommunityHubInner({
                         // its own border and background regardless of theme or
                         // "mine", the same reasoning that keeps a sticker bare.
                         const isGameInvite = Boolean(message.gameMatch);
+                        // A repost is a card too, for the same reason: tapping it
+                        // should open the assignment, not just read as a line.
+                        const isSharedAssignment = Boolean(message.sharedAssignment);
                         return (
                       <div
                         className={`text-sm leading-6 ${
-                          isGameInvite && !message.hidden
+                          (isGameInvite || isSharedAssignment) && !message.hidden
                             ? "p-0"
                             : isSticker && !message.hidden
                             ? "bg-transparent p-0"
@@ -1832,7 +1884,7 @@ function CommunityHubInner({
                         // sticker or a game invite (both float/card bare on
                         // purpose, see below).
                         style={
-                          message.mine && !message.hidden && !isSticker && !isGameInvite
+                          message.mine && !message.hidden && !isSticker && !isGameInvite && !isSharedAssignment
                             ? { background: chatTheme.bubble, ...(chatTheme.ink ? { color: chatTheme.ink } : {}) }
                             : undefined
                         }
@@ -1903,6 +1955,31 @@ function CommunityHubInner({
                               <span className="block truncate text-sm font-semibold">{message.gameMatch.title}</span>
                               <span className="block text-xs text-[var(--muted)]">
                                 {message.gameMatch.status === "completed" ? "Finished — read the story" : "Tap to add a sentence"}
+                              </span>
+                            </span>
+                          </a>
+                        ) : message.sharedAssignment ? (
+                          /*
+                            THE REPOST CARD. Same reasoning as the game invite
+                            above — a thing to tap through to the real
+                            Assignments tab, not a line of chat text.
+                          */
+                          <a
+                            href={`/assignment?id=${message.sharedAssignment.id}`}
+                            className="flex w-full items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-[var(--foreground)] transition hover:border-[var(--accent)]"
+                          >
+                            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                              <PencilIcon className="h-5 w-5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
+                                {message.mentionedUser ? `Reposted for ${message.mentionedUser.name ?? "a classmate"}` : "Reposted assignment"}
+                              </span>
+                              <span className="block truncate text-sm font-semibold">{message.sharedAssignment.title}</span>
+                              <span className="block text-xs text-[var(--muted)]">
+                                {message.sharedAssignment.dueAt
+                                  ? `Due ${new Date(message.sharedAssignment.dueAt).toLocaleDateString()} · tap to open`
+                                  : "Tap to open in your Assignments tab"}
                               </span>
                             </span>
                           </a>
@@ -2390,5 +2467,6 @@ function CommunityHubInner({
           student opens the games tray, never again. */}
       {showStoryTour ? <StoryTour onDone={() => setShowStoryTour(false)} /> : null}
     </div>
+    </>
   );
 }

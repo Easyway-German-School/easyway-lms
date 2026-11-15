@@ -97,6 +97,8 @@ export const KIND = {
   examCampaign: "announcement.exam",
   /** Somebody started a game in the room's chat — see /api/community/messages. */
   gameInvite: "game.invite",
+  /** A classmate reposted an assignment into class chat and tagged you by name because you couldn't see it yourself — see /api/community/share-assignment. */
+  assignmentShared: "assignment.shared",
   /** A class recording uploaded but the bucket won't serve it back — admins need to know before a student does. */
   recordingFailed: "recording.failed",
   /** One or more of a tutor's students look like they're drifting away — see src/lib/student-risk.ts. */
