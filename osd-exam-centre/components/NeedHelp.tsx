@@ -1,12 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { MailIcon } from "@/components/icons";
+import { OFFICE } from "@/lib/config";
 
 /**
  * "Need help? — send message to the office" — a plain contact form, not the
  * nurture drip's prep-class upsell link. Embeddable anywhere: prefilled with
  * a bookingId/name/email on the booking page, bare in the site footer for a
  * question from someone who hasn't registered yet.
+ *
+ * The trigger used to be a bare underlined "Need help?" text link — easy to
+ * miss, and candidates who did notice it had no way to tell it actually
+ * reached anyone before clicking. Now it's a proper button with a mail icon,
+ * and the real office address sits next to it in plain text the whole time
+ * — a guaranteed-works fallback for anyone who doesn't trust the in-app form.
  */
 export default function NeedHelp({
   bookingReference,
@@ -50,16 +58,25 @@ export default function NeedHelp({
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className={
-          tone === "dark"
-            ? "rounded-full border border-white/25 bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
-            : "text-sm font-semibold text-[var(--navy)] underline underline-offset-4"
-        }
-      >
-        Need help?
-      </button>
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${tone === "dark" ? "" : "text-xs"}`}>
+        <button
+          onClick={() => setOpen(true)}
+          className={
+            tone === "dark"
+              ? "inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
+              : "inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--paper-raised)] px-3 py-1.5 font-semibold text-[var(--navy)] transition hover:border-[var(--gold)] hover:bg-[var(--gold-soft)]/30"
+          }
+        >
+          <MailIcon className="h-4 w-4" />
+          Email support
+        </button>
+        <a
+          href={`mailto:${OFFICE.email}`}
+          className={tone === "dark" ? "text-sm text-white/70 underline underline-offset-4 hover:text-white" : "text-[var(--ink-soft)] underline underline-offset-4 hover:text-[var(--navy)]"}
+        >
+          or write to {OFFICE.email} directly
+        </a>
+      </div>
     );
   }
 

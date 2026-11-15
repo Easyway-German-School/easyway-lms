@@ -36,6 +36,12 @@ export const ClockIcon = make(
   </>,
 );
 export const PenIcon = make(<path d="M4 20l4-1 11-11a2.1 2.1 0 00-3-3L5 16l-1 4zM14 7l3 3" />);
+export const MailIcon = make(
+  <>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M3.5 6.5l8.5 6 8.5-6" />
+  </>,
+);
 export const PassportIcon = make(
   <>
     <rect x="5" y="3" width="14" height="18" rx="2" />
