@@ -8,7 +8,7 @@ vi.mock("@/lib/recording-forecast-server", () => ({ loadRecordingForecast: mocks
 vi.mock("@/lib/price-book-server", () => ({ defaultTenantId: mocks.tenant }));
 vi.mock("@/lib/tenant/context", () => ({ runWithTenant: (_id: string, fn: () => unknown) => fn() }));
 
-import { GET } from "./route";
+import { GET, resetRecorderForecastCacheForTests } from "./route";
 import { signRecorderBody } from "@/lib/recorder";
 
 const SECRET = "s".repeat(40);
@@ -23,6 +23,7 @@ beforeEach(() => {
   process.env.RECORDER_SHARED_SECRET = SECRET;
   mocks.load.mockClear();
   mocks.tenant.mockResolvedValue("tenant-1");
+  resetRecorderForecastCacheForTests();
 });
 
 describe("GET /api/recorder/forecast", () => {
@@ -72,5 +73,24 @@ describe("GET /api/recorder/forecast", () => {
     mocks.load.mockRejectedValueOnce(new Error("db down"));
     const response = await ask("?hours=24", signed("?hours=24"));
     expect(response.status).toBe(500);
+  });
+
+  it("serves a repeat request for the same tenant+window from cache instead of recomputing", async () => {
+    await ask("?hours=24", signed("?hours=24"));
+    await ask("?hours=24", signed("?hours=24"));
+    expect(mocks.load).toHaveBeenCalledTimes(1);
+  });
+
+  it("recomputes for a different window even for the same tenant", async () => {
+    await ask("?hours=24", signed("?hours=24"));
+    await ask("?hours=48", signed("?hours=48"));
+    expect(mocks.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("recomputes for a different tenant even for the same window", async () => {
+    await ask("?hours=24", signed("?hours=24"));
+    mocks.tenant.mockResolvedValueOnce("tenant-2");
+    await ask("?hours=24", signed("?hours=24"));
+    expect(mocks.load).toHaveBeenCalledTimes(2);
   });
 });
