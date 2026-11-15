@@ -11,6 +11,16 @@ import { escapeHtml } from "@/lib/html";
 export const MODULES = ["reading", "listening", "writing", "speaking"] as const;
 export type ExamModule = (typeof MODULES)[number];
 
+/**
+ * Every module value a booking can legally carry: "full", the two ÖSD parts
+ * (written/oral — how sittings are actually priced now), and the legacy
+ * four-skill split (older sittings still priced that way). The public
+ * booking schema used to validate against MODULES alone, which rejected
+ * "written"/"oral" outright and made every written/oral-priced sitting
+ * un-bookable by individual module — see app/api/bookings/route.ts.
+ */
+export const BOOKABLE_MODULES = ["full", "written", "oral", ...MODULES] as const;
+
 /** The one ownership check every candidate-facing booking route needs. */
 export async function resolveOwnedBooking(referenceCode: string, email: string) {
   const booking = await prisma.examBooking.findUnique({ where: { referenceCode } });
@@ -151,6 +161,8 @@ export type CreateBookingInput = {
   idType: string;
   idNumber: string;
   idExpiry: string; // ISO date
+  /** The second ID document candidates must also bring on exam day (Easyway accepts two). */
+  secondaryIdType?: string;
   isRepeatAttempt?: boolean;
   specialNeeds?: string;
   modules: string[]; // ["full"] or a subset of MODULES
@@ -257,6 +269,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       idType: input.idType.trim(),
       idNumber: input.idNumber.trim(),
       idExpiry: new Date(input.idExpiry),
+      secondaryIdType: input.secondaryIdType?.trim() || null,
       isRepeatAttempt: input.isRepeatAttempt ?? false,
       specialNeeds: input.specialNeeds?.trim() || null,
       modules,
@@ -325,6 +338,7 @@ export async function createManualBooking(
       idType: input.idType.trim(),
       idNumber: input.idNumber.trim(),
       idExpiry: new Date(input.idExpiry),
+      secondaryIdType: input.secondaryIdType?.trim() || null,
       isRepeatAttempt: input.isRepeatAttempt ?? false,
       specialNeeds: input.specialNeeds?.trim() || null,
       modules,

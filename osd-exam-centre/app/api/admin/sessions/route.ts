@@ -51,6 +51,9 @@ export const POST = jsonRoute(async (req: NextRequest) => {
       startTime: cleanTime(b.startTime),
       arrivalMinutesBefore: Number(b.arrivalMinutesBefore) > 0 ? Number(b.arrivalMinutesBefore) : 60,
       published: Boolean(b.published),
+      displaySeatsRemaining: b.displaySeatsRemaining !== undefined && b.displaySeatsRemaining !== ""
+        ? Number(b.displaySeatsRemaining)
+        : null,
       modulePrices: { create: modulePrices },
     },
   });
@@ -86,6 +89,12 @@ export const PATCH = jsonRoute(async (req: NextRequest) => {
   if (b.startTime !== undefined) data.startTime = cleanTime(b.startTime);
   if (b.arrivalMinutesBefore) data.arrivalMinutesBefore = Number(b.arrivalMinutesBefore);
   if (b.examFormat === "paper" || b.examFormat === "computer") data.examFormat = b.examFormat;
+  // "" clears the override back to showing the real count; a number sets it.
+  if (b.displaySeatsRemaining !== undefined) {
+    data.displaySeatsRemaining = b.displaySeatsRemaining === "" || b.displaySeatsRemaining === null
+      ? null
+      : Number(b.displaySeatsRemaining);
+  }
 
   // Capacity needs its own check, not just a blind assignment: dropping it
   // below the number of seats already confirmed would silently make

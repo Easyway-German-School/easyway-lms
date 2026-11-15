@@ -31,6 +31,7 @@ type Booking = {
   idType: string | null;
   idNumber: string | null;
   idExpiry: string | null;
+  secondaryIdType: string | null;
   isRepeatAttempt: boolean;
   specialNeeds: string | null;
   prepInterestAt: string | null;
@@ -240,6 +241,7 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
           {b.idNumber && (
             <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
               {b.nationality} · {b.idType} {b.idNumber}{b.idExpiry ? ` (expires ${new Date(b.idExpiry).toLocaleDateString("en-GB")})` : ""}
+              {b.secondaryIdType && <> · also bringing {b.secondaryIdType}</>}
               {b.isRepeatAttempt && <span className="ml-2 rounded-sm bg-[var(--gold-soft)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--navy)]">Repeat</span>}
             </p>
           )}
@@ -247,8 +249,13 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {b.prepInterestAt && <span className="rounded-sm bg-[var(--gold-bright)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--navy-deep)]">Asked about prep</span>}
-          <span className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ink-soft)]">{b.source === "panthexa" ? "Panthexa" : "Direct"}</span>
-          {b.seatNumber !== null && <span className="rounded-sm bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--navy)]">SEAT {b.seatNumber}</span>}
+          <span
+            title={b.source === "panthexa" ? "Registered on ÖSD's official Panthexa site; the office keyed this one in." : "Booked directly on this website."}
+            className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ink-soft)]"
+          >
+            {b.source === "panthexa" ? "Panthexa" : "Direct (this site)"}
+          </span>
+          {b.seatNumber !== null && <span title="Assigned once payment is verified." className="rounded-sm bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--navy)]">SEAT {b.seatNumber}</span>}
           <span className={`rounded-sm px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${TONE[b.derived.tone]}`}>{b.derived.label}</span>
         </div>
       </div>
@@ -332,6 +339,7 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
         {live && (
           <button
             disabled={busy}
+            title="Cancelling also frees up this email to book again, if you need to let a test or duplicate entry re-register."
             onClick={() => { const reason = window.prompt("Why is this booking being cancelled?"); if (reason !== null) act({ cancelReason: reason }); }}
             className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
           >

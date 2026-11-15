@@ -29,7 +29,9 @@ export async function GET() {
         registrationDeadline: s.registrationDeadline,
         feeWholeExam: s.feeWholeExam,
         modulePrices: s.modulePrices.map((m) => ({ module: m.module, price: m.price })),
-        remaining: Math.max(0, s.capacity - s._count.bookings),
+        // Real remaining always backs capacity/seat-numbering checks elsewhere;
+        // this is purely what's shown to the public, overridable per sitting.
+        remaining: s.displaySeatsRemaining ?? Math.max(0, s.capacity - s._count.bookings),
         capacity: s.capacity,
       })),
     });

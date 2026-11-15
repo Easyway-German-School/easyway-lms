@@ -26,6 +26,7 @@ type Session = {
   startTime: string | null;
   arrivalMinutesBefore: number;
   published: boolean;
+  displaySeatsRemaining: number | null;
   modulePrices: { module: string; price: number }[];
   _count: { bookings: number };
 };
@@ -33,7 +34,7 @@ type Session = {
 const emptyForm = {
   level: "B2", title: "", venueName: "Easyway German Language School, Ikeja", venueAddress: "",
   startDate: "", endDate: "", registrationDeadline: "", capacity: "50", examFormat: "paper", feeWholeExam: "",
-  startTime: "09:00", arrivalMinutesBefore: "60", expressFee: "",
+  startTime: "09:00", arrivalMinutesBefore: "60", expressFee: "", displaySeatsRemaining: "",
   modulePrices: { written: "", oral: "", reading: "", listening: "", writing: "", speaking: "" } as Record<string, string>,
 };
 
@@ -85,6 +86,7 @@ export default function AdminSessionsPage() {
       startTime: s.startTime ?? "",
       arrivalMinutesBefore: String(s.arrivalMinutesBefore),
       expressFee: s.expressFee ? String(s.expressFee) : "",
+      displaySeatsRemaining: s.displaySeatsRemaining !== null ? String(s.displaySeatsRemaining) : "",
       modulePrices: {
         written: "", oral: "", reading: "", listening: "", writing: "", speaking: "",
         ...Object.fromEntries(s.modulePrices.map((m) => [m.module, String(m.price)])),
@@ -190,6 +192,19 @@ export default function AdminSessionsPage() {
                 </select>
               </label>
             </div>
+            <div className="mt-4 rounded-sm border border-[var(--line)] bg-[var(--paper)] p-3">
+              <F
+                label="Seats-left number shown to the public (blank = show the real count)"
+                type="number"
+                value={form.displaySeatsRemaining}
+                onChange={(v) => setForm({ ...form, displaySeatsRemaining: v })}
+                placeholder={`Real count: ${Number(form.capacity) || 50}`}
+              />
+              <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                Cosmetic only — never affects how many seats can actually be booked. Useful for a freshly
+                opened sitting where &quot;{form.capacity || 50} of {form.capacity || 50} left&quot; reads as empty rather than urgent.
+              </p>
+            </div>
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Written / Oral prices</p>
             <div className="mt-2 grid grid-cols-2 gap-4">
               {PARTS.map((m) => (
@@ -233,6 +248,11 @@ export default function AdminSessionsPage() {
                 <p className="font-semibold text-[var(--navy)]">{s.title}</p>
                 <p className="text-xs text-[var(--ink-soft)]">
                   {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s.examFormat} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
+                  {s.displaySeatsRemaining !== null && (
+                    <span className="ml-1 font-semibold text-[var(--navy)]">
+                      · showing &quot;{s.displaySeatsRemaining} left&quot; publicly
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

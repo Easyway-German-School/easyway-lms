@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteFooter } from "@/components/SiteChrome";
 import PageHero from "@/components/PageHero";
+import { ArrowRightIcon } from "@/components/icons";
 import vienna from "@/assets/images/vienna.jpg";
 
 type ModulePrice = { module: string; price: number };
@@ -22,11 +23,15 @@ type Session = {
 };
 
 const MODULE_LABEL: Record<string, string> = {
+  written: "Written",
+  oral: "Oral",
   reading: "Reading",
   listening: "Listening",
   writing: "Writing",
   speaking: "Speaking",
 };
+
+const ID_TYPES = ["International Passport", "National ID Card (NIN)", "Driver's License", "Voter's Card", "Other"];
 
 const STEP_TITLES = ["Choose sitting", "Your details", "Modules & fee", "Review"];
 
@@ -45,9 +50,8 @@ export default function BookPage() {
   const [form, setForm] = useState({
     fullName: "", email: "", phone: "", addressLine: "", city: "", country: "Nigeria",
     dateOfBirth: "", placeOfBirth: "", countryOfBirth: "", nationality: "", gender: "",
-    idType: "", idNumber: "", idExpiry: "", specialNeeds: "",
+    idType: "", idNumber: "", idExpiry: "", secondaryIdType: "", specialNeeds: "",
   });
-  const [isRepeatAttempt, setIsRepeatAttempt] = useState(false);
   const [ack, setAck] = useState(false);
   const [consent, setConsent] = useState(false);
   // Honeypot — invisible to a real candidate (off-screen, unreachable by
@@ -89,7 +93,7 @@ export default function BookPage() {
         form.fullName.trim() && form.email.trim() && form.phone.trim() &&
         form.addressLine.trim() && form.city.trim() && form.dateOfBirth && form.placeOfBirth.trim() &&
         form.countryOfBirth.trim() && form.nationality.trim() &&
-        form.idType.trim() && form.idNumber.trim() && form.idExpiry,
+        form.idType.trim() && form.idNumber.trim() && form.idExpiry && form.secondaryIdType.trim(),
       );
     }
     if (step === 2) return selection === "full" || modules.size > 0;
@@ -106,7 +110,6 @@ export default function BookPage() {
         body: JSON.stringify({
           sessionId,
           ...form,
-          isRepeatAttempt,
           modules: selection === "full" ? ["full"] : Array.from(modules),
           consentAccepted: consent,
           website,
@@ -170,22 +173,34 @@ export default function BookPage() {
               ) : sessions.length === 0 ? (
                 <p className="text-sm text-[var(--ink-soft)]">No sittings are open for registration right now — check back soon.</p>
               ) : (
-                sessions.map((s) => (
-                  <label
-                    key={s.id}
-                    className={`block cursor-pointer rounded-lg border p-4 ${sessionId === s.id ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
-                  >
-                    <input type="radio" name="session" className="sr-only" checked={sessionId === s.id} onChange={() => setSessionId(s.id)} />
-                    <p className="font-semibold text-[var(--navy)]">{s.title}</p>
-                    <p className="mt-1 text-sm text-[var(--ink-soft)]">
-                      {s.venueName} · {new Date(s.startDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
-                      {new Date(s.endDate).toDateString() !== new Date(s.startDate).toDateString() && ` –${new Date(s.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}`}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                      {s.remaining > 0 ? `${s.remaining} of ${s.capacity} seats left` : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
-                    </p>
-                  </label>
-                ))
+                <>
+                  <p className="text-xs font-semibold text-[var(--ink-soft)]">Tap a sitting below to select it.</p>
+                  {sessions.map((s) => (
+                    <label
+                      key={s.id}
+                      className={`card-lift group flex cursor-pointer items-center gap-3 rounded-lg border p-4 transition hover:border-[var(--gold)] hover:bg-[var(--gold-soft)]/20 ${sessionId === s.id ? "border-[var(--gold)] bg-[var(--gold-soft)]/30 ring-1 ring-[var(--gold)]" : "border-[var(--line)]"}`}
+                    >
+                      <input type="radio" name="session" className="sr-only" checked={sessionId === s.id} onChange={() => setSessionId(s.id)} />
+                      <span
+                        aria-hidden="true"
+                        className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 ${sessionId === s.id ? "border-[var(--gold)] bg-[var(--gold)]" : "border-[var(--line)] bg-white"}`}
+                      >
+                        {sessionId === s.id && <span className="h-2 w-2 rounded-full bg-white" />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <p className="font-semibold text-[var(--navy)]">{s.title}</p>
+                        <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                          {s.venueName} · {new Date(s.startDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+                          {new Date(s.endDate).toDateString() !== new Date(s.startDate).toDateString() && ` –${new Date(s.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}`}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                          {s.remaining > 0 ? `${s.remaining} of ${s.capacity} seats left` : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
+                        </p>
+                      </span>
+                      <ArrowRightIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)] transition group-hover:translate-x-0.5 group-hover:text-[var(--gold)]" />
+                    </label>
+                  ))}
+                </>
               )}
             </div>
           )}
@@ -215,30 +230,39 @@ export default function BookPage() {
               </div>
               <Field label="Gender (optional)" value={form.gender} onChange={(v) => setForm({ ...form, gender: v })} />
 
-              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Identification — bring this document on exam day</p>
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">ID type</span>
-                <select
-                  value={form.idType}
-                  onChange={(e) => setForm({ ...form, idType: e.target.value })}
-                  className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
-                >
-                  <option value="">Select…</option>
-                  <option value="International Passport">International Passport</option>
-                  <option value="National ID Card (NIN)">National ID Card (NIN)</option>
-                  <option value="Driver's License">Driver's License</option>
-                  <option value="Other">Other</option>
-                </select>
-              </label>
+              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Identification — bring BOTH of these on exam day</p>
+              <p className="text-xs text-[var(--ink-soft)]">
+                Easyway checks two forms of ID at the door. Pick your main one and a second one below, and bring both originals with you.
+              </p>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="ID number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />
-                <Field label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} />
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">1st ID — type</span>
+                  <select
+                    value={form.idType}
+                    onChange={(e) => setForm({ ...form, idType: e.target.value })}
+                    className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+                  >
+                    <option value="">Select…</option>
+                    {ID_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">2nd ID — type (bring this too)</span>
+                  <select
+                    value={form.secondaryIdType}
+                    onChange={(e) => setForm({ ...form, secondaryIdType: e.target.value })}
+                    className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+                  >
+                    <option value="">Select…</option>
+                    {ID_TYPES.filter((t) => t !== form.idType).map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="1st ID — number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />
+                <Field label="1st ID — expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} />
               </div>
 
-              <label className="flex items-center gap-2 text-sm text-[var(--ink)]">
-                <input type="checkbox" checked={isRepeatAttempt} onChange={(e) => setIsRepeatAttempt(e.target.checked)} />
-                This is a repeat attempt (I have sat this exam before)
-              </label>
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Special examination needs (optional)</span>
                 <textarea
@@ -300,7 +324,7 @@ export default function BookPage() {
               <Row label="Email" value={form.email} />
               <Row label="Nationality" value={form.nationality} />
               <Row label="ID" value={`${form.idType} · ${form.idNumber}`} />
-              {isRepeatAttempt && <Row label="Attempt" value="Repeat attempt" />}
+              <Row label="2nd ID to bring" value={form.secondaryIdType} />
               <Row label="Modules" value={selection === "full" ? "Whole exam" : Array.from(modules).map((m) => MODULE_LABEL[m]).join(", ")} />
               <Row label="Amount due" value={`₦${feeTotal.toLocaleString()}`} strong />
 
@@ -309,8 +333,9 @@ export default function BookPage() {
                 <ul className="mt-2 space-y-1 text-xs text-[var(--ink-soft)]">
                   <li>• Do not arrive late — latecomers may not be admitted.</li>
                   <li>• Bring a normal ballpoint pen. No pencils, no correction fluid.</li>
-                  <li>• Bring your passport's data page and your printed admission slip.</li>
+                  <li>• Bring BOTH ID documents above, plus your printed admission slip.</li>
                   <li>• Phones and smart watches off and out of reach for the whole exam.</li>
+                  <li>• Malpractice (cheating, impersonation or unauthorised help) means instant disqualification, forfeited fees, and a report to ÖSD — who can invalidate the result and bar you from future ÖSD exams.</li>
                 </ul>
               </div>
 

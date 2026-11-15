@@ -36,6 +36,15 @@ model ExamSession {
   /// (50→1, then 100→51, …) — see lib/seat-numbering.ts.
   capacity             Int
 
+  /// The "seats left" number shown on the public site, when the office wants
+  /// it to read differently from the real count (e.g. a freshly-opened
+  /// sitting that genuinely has every seat free can look unconvincing at
+  /// "50 of 50 left" — some schools show a lower, still-true-to-urgency
+  /// number instead). Null (the default) means "show the real count".
+  /// Purely cosmetic: capacity checks, seat numbering and overselling
+  /// protection always use the real booking count, never this.
+  displaySeatsRemaining Int?
+
   /// paper | computer — a whole sitting is one format, not chosen per
   /// candidate (see the Easyway ÖSD Examination Operations Manual, §35).
   examFormat String @default("paper")
@@ -117,6 +126,9 @@ model ExamBooking {
   idType   String?
   idNumber String?
   idExpiry DateTime?
+  /// Easyway requires two ID documents on exam day — idType above is the
+  /// primary one (usually the international passport); this is the second.
+  secondaryIdType String?
 
   /// Manual §7 "first attempt/repeat attempt" and §16 "special needs".
   isRepeatAttempt Boolean @default(false)
