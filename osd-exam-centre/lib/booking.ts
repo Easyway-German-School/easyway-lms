@@ -21,6 +21,20 @@ export type ExamModule = (typeof MODULES)[number];
  */
 export const BOOKABLE_MODULES = ["full", "written", "oral", ...MODULES] as const;
 
+/**
+ * A1/A2 are single-paper ÖSD exams with no separable parts — only B1 and up
+ * can be re-sat module by module. Shared by the admin sitting form (which
+ * module-price fields it shows) and the public booking page (whether
+ * "Individual modules" appears at all), so the two can't drift apart the way
+ * they had: an A1 sitting had Written/Oral prices entered on it anyway,
+ * which put the option in front of candidates who should only see "whole
+ * exam".
+ */
+const NO_INDIVIDUAL_MODULE_LEVELS = ["A1", "A2"];
+export function levelHasIndividualModules(level: string): boolean {
+  return !NO_INDIVIDUAL_MODULE_LEVELS.includes(level);
+}
+
 /** The one ownership check every candidate-facing booking route needs. */
 export async function resolveOwnedBooking(referenceCode: string, email: string) {
   const booking = await prisma.examBooking.findUnique({ where: { referenceCode } });
