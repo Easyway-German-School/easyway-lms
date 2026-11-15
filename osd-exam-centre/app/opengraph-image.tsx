@@ -32,19 +32,19 @@ export default async function OpenGraphImage() {
             <div
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", width: 64, height: 64,
-                borderRadius: 32, border: "2px solid #e3b94f", color: "#e3b94f", fontSize: 26, fontWeight: 700,
+                borderRadius: 32, border: "2px solid #FF7A1A", color: "#FF7A1A", fontSize: 26, fontWeight: 700,
               }}
             >
               EW
             </div>
-            <div style={{ display: "flex", marginLeft: 20, fontSize: 24, letterSpacing: 6, color: "#e3b94f" }}>
+            <div style={{ display: "flex", marginLeft: 20, fontSize: 24, letterSpacing: 6, color: "#FF7A1A" }}>
               ÖSD PRÜFUNGSZENTRUM · LAGOS
             </div>
           </div>
           <div style={{ display: "flex", fontSize: 72, fontWeight: 700, lineHeight: 1.05, maxWidth: 860 }}>
             Your German exam in Lagos.
           </div>
-          <div style={{ display: "flex", fontSize: 40, color: "#e3b94f", marginTop: 16, maxWidth: 860 }}>
+          <div style={{ display: "flex", fontSize: 40, color: "#FF7A1A", marginTop: 16, maxWidth: 860 }}>
             Book your ÖSD seat online.
           </div>
         </div>
