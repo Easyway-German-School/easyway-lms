@@ -70,7 +70,7 @@ function UnsubscribeContent() {
           <button
             onClick={confirm}
             disabled={busy || !email || !token}
-            className="mt-6 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            className="btn-glow mt-6 rounded-full px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {busy ? "Updating…" : "Unsubscribe"}
           </button>

@@ -298,7 +298,7 @@ function ActivityTab() {
             key={option}
             onClick={() => setDays(option)}
             className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-              days === option ? "bg-slate-900 text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-alt)]"
+              days === option ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-alt)]"
             }`}
           >
             Last {option} days
@@ -349,7 +349,7 @@ function ActivityTab() {
           type="button"
           onClick={reconcileRecordings}
           disabled={reconcileLoading}
-          className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          className="btn-glow inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           <RefreshIcon className="h-4 w-4" />
           {reconcileLoading ? "Reconciling…" : "Repair recording library"}
@@ -756,7 +756,7 @@ function VideoCatalogTab() {
       {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       <div className="flex flex-wrap items-center gap-2">
         {groups.map((group) => (
-          <button key={group.key} type="button" onClick={() => setFilter(group.key)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === group.key ? "bg-slate-900 text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)]"}`}>
+          <button key={group.key} type="button" onClick={() => setFilter(group.key)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === group.key ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)]"}`}>
             {group.label} <span className="ml-1 opacity-70">{group.key === "all" ? videos.length : videos.filter((video) => video.category === group.key).length}</span>
           </button>
         ))}
