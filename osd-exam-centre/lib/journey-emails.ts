@@ -73,7 +73,7 @@ export type RenderedEmail = {
 };
 
 const NAVY = "#0b1f3a";
-const GOLD = "#b8912f";
+const GOLD = "#FF7A1A";
 const INK = "#10203f";
 const SOFT = "#3c4a68";
 const LINE = "#dcdcd2";
@@ -111,7 +111,7 @@ function rows(items: { label: string; value: string }[]): string {
 }
 
 function statusBanner(text: string, tone: "wait" | "good" = "wait"): string {
-  const bg = tone === "good" ? "#e9f5ee" : "#f4ecd8";
+  const bg = tone === "good" ? "#e9f5ee" : "#FFE4CC";
   const fg = tone === "good" ? "#1f6f4a" : NAVY;
   return `<p style="margin:0 0 16px;padding:11px 14px;background:${bg};color:${fg};font-size:13px;font-weight:700;letter-spacing:.06em;border-radius:6px">${e(text)}</p>`;
 }
@@ -139,7 +139,7 @@ function layout(preheader: string, body: string): string {
 <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;font-family:Helvetica,Arial,sans-serif">
 <tr><td style="background:${NAVY};padding:18px 26px">
   <div style="color:#ffffff;font-size:15px;font-weight:700;letter-spacing:.04em">${e(OFFICE.schoolName)}</div>
-  <div style="color:#e3b94f;font-size:11px;font-weight:700;letter-spacing:.18em;margin-top:3px">${e(OFFICE.centreName)}</div>
+  <div style="color:#FF7A1A;font-size:11px;font-weight:700;letter-spacing:.18em;margin-top:3px">${e(OFFICE.centreName)}</div>
 </td></tr>
 <tr><td style="padding:26px 26px 8px">${body}</td></tr>
 <tr><td style="padding:14px 26px 24px;border-top:1px solid ${LINE};font-size:12px;line-height:1.6;color:${SOFT}">

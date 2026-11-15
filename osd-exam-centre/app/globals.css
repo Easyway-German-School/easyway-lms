@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
 /**
- * Deliberately NOT the LMS's playful, gamified look (Becca, journey maps,
- * teal/orange). An exam-registration authority reads as serious: navy, gold,
- * a serif for anything official-sounding — but warmed up with real travel
- * photography (the D-A-CH region the certificate opens doors to), dusk
- * gradients and boarding-pass details, in the spirit of the Goethe-Institut's
- * own image-led pages. Think "airline meets embassy", not "app".
+ * UPDATE 2026-11-15: re-branded to the EasyWay orange. Was deliberately NOT
+ * the LMS's look (navy + gold, "airline meets embassy") to read as a serious
+ * exam-registration authority rather than the gamified app — that structure
+ * (navy ink, paper, serif display, travel photography, boarding-pass
+ * details) stays, but the accent is now EasyWay's actual brand orange
+ * instead of gold, so this reads as an EasyWay product. `--gold`/
+ * `--gold-soft`/`--gold-bright` keep their names (17 files reference them)
+ * but their VALUES are now the orange family, matching
+ * `prototype/src/app/globals.css`'s `--accent` (#FF6600).
  */
 :root {
   --ink: #10203f;
@@ -16,15 +19,15 @@
   --line: #dcdcd2;
   --navy: #0b1f3a;
   --navy-deep: #071328;
-  --gold: #b8912f;
-  --gold-soft: #f4ecd8;
+  --gold: #FF6600;
+  --gold-soft: #FFE4CC;
   --red: #9b2226;
   --red-soft: #fbeceb;
   --green: #1f6f4a;
   --green-soft: #e9f5ee;
   --sky: #1d4e89;
   --amber: #f5b83d;
-  --gold-bright: #e3b94f;
+  --gold-bright: #FF7A1A;
 }
 
 @theme inline {
@@ -69,7 +72,7 @@ body {
 /* ------------------------------------------------------------------ */
 
 .gold-text {
-  background: linear-gradient(100deg, #f3d98a 0%, #e3b94f 45%, #c99a2e 100%);
+  background: linear-gradient(100deg, #FFB273 0%, #FF7A1A 45%, #B34700 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

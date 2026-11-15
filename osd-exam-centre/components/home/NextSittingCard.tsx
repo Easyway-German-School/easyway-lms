@@ -109,7 +109,7 @@ export default function NextSittingCard() {
             </dl>
 
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/15" aria-hidden="true">
-              <div className="h-full rounded-full bg-gradient-to-r from-[var(--gold-bright)] to-[#f3d98a]" style={{ width: `${pct}%` }} />
+              <div className="h-full rounded-full bg-gradient-to-r from-[var(--gold-bright)] to-[#FFB273]" style={{ width: `${pct}%` }} />
             </div>
             <p className="mt-2 flex items-center gap-1.5 text-xs text-white/65">
               {next.venueName}
