@@ -100,6 +100,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         select: { id: true, amount: true, note: true, deletedAt: true },
       });
 
+      /**
+       * A same-as-before submission writes a misleading "✓ saved" over a row
+       * that never moved — the admin has no way to tell from the success
+       * message that nothing actually changed. This is exactly what happened
+       * on Gabriel Success's B1 charge: the form opened with an EMPTY amount
+       * field, the admin retyped what they (correctly) remembered seeing on
+       * screen, and the "correction" silently matched the existing ₦180,000.
+       * The amount field now opens pre-filled with the current charge so
+       * there is something to actually edit, and this check is the backstop
+       * for whenever it still arrives unchanged.
+       */
+      if (existing && !existing.deletedAt && existing.amount === amount) {
+        throw new TuitionChargeError(
+          `${level} is already charged ₦${amount.toLocaleString("en-NG")} — nothing to change. Enter the amount it should actually be.`,
+          409,
+        );
+      }
+
       const actor = gate.session.user.email || gate.session.user.name || "authorized staff";
       const stamp = `Tuition corrected by ${actor} on ${new Date().toISOString()}: ${reason} (was ₦${(existing?.amount ?? 0).toLocaleString("en-NG")}, now ₦${amount.toLocaleString("en-NG")}).`;
 

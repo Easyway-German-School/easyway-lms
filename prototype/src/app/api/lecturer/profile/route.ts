@@ -94,6 +94,7 @@ export async function GET() {
             branchId: true,
             admission: true,
             tutorId: true,
+            classType: true,
             branch: { select: { name: true } },
             user: { select: { name: true, email: true } },
           },

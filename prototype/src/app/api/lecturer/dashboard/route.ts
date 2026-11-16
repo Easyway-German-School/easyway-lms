@@ -72,6 +72,7 @@ export async function GET() {
             branchId: true,
             level: true,
             sessionSlot: true,
+            classType: true,
           },
         })
       : [];

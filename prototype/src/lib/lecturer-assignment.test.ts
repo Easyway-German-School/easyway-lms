@@ -193,6 +193,40 @@ describe("belongsToLecturer with co-tutors", () => {
       }),
     ).toBe(false);
   });
+
+  it("a privately-paired student stays with their tutor through a promotion the tutor's own cohort never covers", () => {
+    // Frau Amaka's actual case: her cohort group is A1/September only, but her
+    // named private student was promoted to B2/January — well outside it.
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", {
+        tutorId: "lec-1",
+        classType: "private",
+        level: "B2",
+        admission: { batch: "January" },
+      }),
+    ).toBe(true);
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", {
+        coTutorIds: ["lec-1"],
+        classType: "private",
+        level: "C1",
+        admission: { batch: "March" },
+      }),
+    ).toBe(true);
+  });
+
+  it("a group student named onto this tutor still loses the link after moving past the assigned level/intake", () => {
+    // Same facts as the private case above, but classType is "group" — the
+    // level/batch guard still applies, same as before this fix.
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", {
+        tutorId: "lec-1",
+        classType: "group",
+        level: "C1",
+        admission: { batch: "March" },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("per-group batch", () => {

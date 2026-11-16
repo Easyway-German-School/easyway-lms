@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
 import {
   belongsToLecturer,
+  coversClassType,
   readAssignment,
   studentWhereForLecturerScope,
 } from "@/lib/lecturer-assignment";
@@ -29,6 +30,7 @@ const assignmentAudienceStudentSelect = {
   branchId: true,
   level: true,
   sessionSlot: true,
+  classType: true,
   coTutors: { select: { lecturerId: true } },
   user: { select: { name: true } },
 } as const;
@@ -133,7 +135,34 @@ async function assignmentScopeOptions(
     groups = onlineOnly ? onlineGroups : [...groups, ...onlineGroups];
   }
 
-  const branchIds = [...new Set(groups.map((group) => group.branchId))];
+  // A privately-paired student (Student.tutorId set by the office's
+  // private-class screen) is not part of any of the groups above — their
+  // level can be anything, including one this tutor's own cohort group never
+  // touches, and a promotion can move them further away from it. Without an
+  // entry here a private tutor whose named student advances past their
+  // cohort's level has no scope at all to set that student's homework under,
+  // and the create endpoint refuses every attempt with "choose one of your
+  // assigned classes" — there would be none to choose.
+  const namedPrivateStudents = coversClassType(assignment, "private")
+    ? await prisma.student.findMany({
+        where: {
+          classType: "private",
+          status: "active",
+          OR: [{ tutorId: lecturerId }, { coTutors: { some: { lecturerId } } }],
+        },
+        select: { branchId: true, level: true },
+      })
+    : [];
+  const coveredByGroup = new Set(groups.map((group) => `${group.branchId}:${group.level}`));
+  const privateScopeKeys = new Map<string, { branchId: string; level: string }>();
+  for (const student of namedPrivateStudents) {
+    if (!student.branchId || !student.level) continue;
+    const key = `${student.branchId}:${student.level}`;
+    if (coveredByGroup.has(key) || privateScopeKeys.has(key)) continue;
+    privateScopeKeys.set(key, { branchId: student.branchId, level: student.level });
+  }
+
+  const branchIds = [...new Set([...groups.map((group) => group.branchId), ...[...privateScopeKeys.values()].map((g) => g.branchId)])];
   if (!branchIds.length) return [];
   const branches = await prisma.branch.findMany({
     where: { id: { in: branchIds } },
@@ -141,7 +170,7 @@ async function assignmentScopeOptions(
   });
   const byId = new Map(branches.map((branch) => [branch.id, branch]));
 
-  return groups.flatMap((group) => {
+  const cohortScopes = groups.flatMap((group) => {
     const branch = byId.get(group.branchId);
     if (!branch || !group.level) return [];
     if (onlineOnly && branch.mode !== "online") return [];
@@ -164,6 +193,22 @@ async function assignmentScopeOptions(
       label: labelParts.join(" · "),
     }];
   });
+
+  const privateScopes = [...privateScopeKeys.values()].flatMap((scope) => {
+    const branch = byId.get(scope.branchId);
+    if (!branch) return [];
+    return [{
+      key: JSON.stringify([scope.branchId, scope.level, null, null]),
+      branchId: scope.branchId,
+      branchName: branch.name,
+      level: scope.level,
+      sessionSlot: null,
+      batch: null,
+      label: `${scope.level} · Private students`,
+    }];
+  });
+
+  return [...cohortScopes, ...privateScopes];
 }
 
 export async function GET(req: NextRequest) {
@@ -370,6 +415,7 @@ async function resolveTargets(
       branchId: true,
       level: true,
       sessionSlot: true,
+      classType: true,
     },
   });
 
