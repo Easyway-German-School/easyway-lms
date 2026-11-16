@@ -132,6 +132,13 @@ type Dossier = {
       description: string | null;
       createdAt: string;
     }>;
+    charges?: Array<{
+      id: string;
+      level: string;
+      amount: number;
+      waivedAmount: number;
+      historyStatus: string;
+    }>;
   };
   attendance: {
     total: number;
@@ -691,6 +698,10 @@ export default function StudentDossierPage() {
   });
   const [payBusy, setPayBusy] = useState(false);
   const [payMsg, setPayMsg] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null);
+  const [fixOpen, setFixOpen] = useState(false);
+  const [fixForm, setFixForm] = useState({ level: "", amount: "", reason: "" });
+  const [fixBusy, setFixBusy] = useState(false);
+  const [fixMsg, setFixMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const paymentAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   /**
@@ -1062,6 +1073,45 @@ export default function StudentDossierPage() {
       setPayBusy(false);
     }
   }, [id, payForm, load, data?.money.returningStudent]);
+
+  const correctTuitionCharge = useCallback(async () => {
+    if (!id) return;
+    const amount = Math.round(Number(fixForm.amount));
+    if (!fixForm.level) {
+      setFixMsg({ tone: "bad", text: "Choose which level this correction is for." });
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      setFixMsg({ tone: "bad", text: "Enter the correct amount, in whole naira." });
+      return;
+    }
+    if (fixForm.reason.trim().length < 8) {
+      setFixMsg({ tone: "bad", text: "Say why — at least a short sentence. This is a financial record." });
+      return;
+    }
+    setFixBusy(true);
+    setFixMsg(null);
+    try {
+      const response = await fetch(`/api/admin/students/${id}/tuition-charge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: fixForm.level, amount, reason: fixForm.reason.trim() }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not save the corrected amount");
+      setFixMsg({ tone: "ok", text: `${fixForm.level} tuition set to ${naira(amount)}.` });
+      setFixForm({ level: "", amount: "", reason: "" });
+      setFixOpen(false);
+      void load(false);
+    } catch (fixErr) {
+      setFixMsg({
+        tone: "bad",
+        text: fixErr instanceof Error ? fixErr.message : "Could not save the corrected amount",
+      });
+    } finally {
+      setFixBusy(false);
+    }
+  }, [id, fixForm, load]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -1688,6 +1738,7 @@ export default function StudentDossierPage() {
             )}
 
             {data.viewer.canRecordPayment && (
+              <>
               <div className="mt-4 border-t border-[var(--border)] pt-4">
                 {!payOpen ? (
                   <button
@@ -1805,6 +1856,109 @@ export default function StudentDossierPage() {
                   </p>
                 )}
               </div>
+
+              <div className="mt-4 border-t border-[var(--border)] pt-4">
+                {!fixOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFixOpen(true);
+                      setFixMsg(null);
+                      setFixForm({ level: identity.level, amount: "", reason: "" });
+                    }}
+                    className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
+                  >
+                    Correct a level&rsquo;s tuition amount
+                  </button>
+                ) : (
+                  <div className="space-y-3 rounded-2xl border border-amber-300/60 bg-amber-50/60 p-4">
+                    <p className="text-xs text-[var(--muted)]">
+                      This changes what <strong>{identity.name.split(" ")[0]}</strong> is actually charged for a
+                      level — it is not the same as recording a payment. Use it when a charge was raised wrong
+                      (wrong branch, wrong class type, an import error), not to make the outstanding balance match
+                      an expectation: a balance that looks low is usually a real credit from an earlier
+                      overpayment rolling forward, not a mistake. Every change here is logged with who made it
+                      and why.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Level
+                        <select
+                          value={fixForm.level}
+                          onChange={(event) => setFixForm((form) => ({ ...form, level: event.target.value }))}
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        >
+                          <option value="">Choose a level…</option>
+                          {Array.from(
+                            new Set([identity.level, ...(data.money.charges ?? []).map((charge) => charge.level)]),
+                          ).map((level) => (
+                            <option key={level} value={level}>
+                              {level}
+                              {(data.money.charges ?? []).find((charge) => charge.level === level)
+                                ? ` — currently ${naira(
+                                    (data.money.charges ?? []).find((charge) => charge.level === level)!.amount,
+                                  )}`
+                                : " — no charge on file yet"}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Correct amount (₦)
+                        <input
+                          inputMode="numeric"
+                          value={fixForm.amount}
+                          onChange={(event) =>
+                            setFixForm((form) => ({ ...form, amount: event.target.value.replace(/[^0-9]/g, "") }))
+                          }
+                          placeholder="e.g. 180000"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        />
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)] sm:col-span-2">
+                        Reason (required — goes on the audit record)
+                        <input
+                          value={fixForm.reason}
+                          onChange={(event) => setFixForm((form) => ({ ...form, reason: event.target.value }))}
+                          placeholder="e.g. Raised at the wrong branch rate during import; price book says ₦180,000 for Online B1."
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={fixBusy}
+                        onClick={() => void correctTuitionCharge()}
+                        className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {fixBusy ? "Saving…" : "Save correction"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFixOpen(false);
+                          setFixMsg(null);
+                        }}
+                        className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {fixMsg && (
+                  <p
+                    className={`mt-3 rounded-xl px-3 py-2 text-sm ${
+                      fixMsg.tone === "ok" ? "bg-emerald-500/10 text-emerald-800" : "bg-red-500/10 text-red-700"
+                    }`}
+                  >
+                    {fixMsg.text}
+                  </p>
+                )}
+              </div>
+              </>
             )}
           </Card>
 
