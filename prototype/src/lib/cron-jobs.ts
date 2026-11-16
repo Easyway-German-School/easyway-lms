@@ -1,4 +1,5 @@
 import type { JobOutcome } from "@/lib/cron-lanes";
+import { sendHybridSessionPolicyNotice } from "@/lib/hybrid-session-policy-notice";
 
 /**
  * The job registry for the daily tick — extracted from /api/cron/tick so the
@@ -54,7 +55,6 @@ export function buildDailyCronJobs(): Map<string, () => Promise<unknown>> {
   });
 
   register("hybrid-session-policy-notice", async () => {
-    const { sendHybridSessionPolicyNotice } = await import("@/lib/hybrid-session-policy-notice");
     return sendHybridSessionPolicyNotice();
   });
 
