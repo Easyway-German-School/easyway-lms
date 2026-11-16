@@ -106,6 +106,24 @@ export async function POST(req: NextRequest) {
 
   const generatedPassword = existing ? null : generateTempPassword();
 
+  /**
+   * `currentTenantId()` reads the AsyncLocalStorage scope the auth gate set up
+   * for THIS request — it should always agree with `gate.session.user.tenantId`,
+   * but the two have been seen to diverge in production: 807 PromoCode rows
+   * (and smaller numbers of Student/TuitionCharge/Lecturer/Invoice/Payment/
+   * Notification rows) were found with tenantId null on 2026-11-15 despite
+   * their owning admin/student having a correct tenantId, meaning the scope was
+   * empty at the moment of the write even though the session carried a tenant.
+   * Falling back to the session's own value — and refusing outright rather
+   * than silently writing null — turns a future recurrence of that into a
+   * loud 500 instead of a partner who quietly vanishes from this page.
+   */
+  const tenantId = currentTenantId() ?? gate.session.user.tenantId ?? null;
+  if (!tenantId) {
+    console.error("promo-codes POST: no tenant in scope for", { adminId: gate.admin.userId, normalizedEmail });
+    return NextResponse.json({ error: "Could not determine your school. Please sign out and back in, then try again." }, { status: 500 });
+  }
+
   try {
     // One transaction: if the code fails to create (e.g. a duplicate code),
     // a brand-new account is never left dangling with a password nobody
@@ -127,7 +145,7 @@ export async function POST(req: NextRequest) {
                 // lecturers/signup in 2026-08-11 (see tenant/extension.ts),
                 // just never closed for this route. Without this, every
                 // influencer account created here landed owned by nobody.
-                tenantId: currentTenantId(),
+                tenantId,
               },
               select: { id: true },
             })
@@ -148,7 +166,7 @@ export async function POST(req: NextRequest) {
           commissionFlat: toNullableInt(commissionFlat),
           notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
           createdById: gate.admin.userId,
-          tenantId: currentTenantId(),
+          tenantId,
         },
         select: { id: true },
       });

@@ -572,6 +572,16 @@ export async function GET(
               ...payment,
               createdAt: payment.createdAt.toISOString(),
             })),
+            // Every raised level charge, for the "correct this level's price"
+            // control — an admin fixing a wrong charge needs to see every
+            // level on file, not just the current one.
+            charges: student.tuitionCharges.map((charge) => ({
+              id: charge.id,
+              level: charge.level,
+              amount: charge.amount,
+              waivedAmount: charge.waivedAmount,
+              historyStatus: charge.historyStatus,
+            })),
           }
         : {}),
     },
