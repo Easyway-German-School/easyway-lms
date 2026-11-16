@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
   const submissionId = req.nextUrl.searchParams.get("submissionId");
 
   /**
-   * Scoped to the tutor's own students.
+   * Scoped to the tutor's own students AND the tutor's own assignments.
    *
    * This used to return every paper awaiting marking across the WHOLE school —
    * a tutor with six students had to scroll past everyone else's to find
@@ -76,6 +76,15 @@ export async function GET(req: NextRequest) {
    * "my students" means the same thing here as everywhere else.
    * Admins (no lecturerId) keep the unrestricted view — they mark for the
    * whole school, not one class.
+   *
+   * The student filter alone is not enough: a student who gets promoted and
+   * handed to a new tutor carries their OLD tutor's unmarked backlog with
+   * them — the new tutor now matches the roster check, but the assignment is
+   * somebody else's class content, set before the handover and not theirs to
+   * grade. The queue is a tutor's own marking work, not whatever is still
+   * outstanding for whoever currently teaches the student, so it is also
+   * scoped to assignments THIS tutor wrote, plus any admin-set assignment
+   * (`lecturerId` null) that has no single owner to begin with.
    */
   let lecturerAssignment: ReturnType<typeof readAssignment> | null = null;
   let studentWhere: Record<string, unknown> | null = null;
@@ -112,6 +121,7 @@ export async function GET(req: NextRequest) {
       ...(submissionId ? { id: submissionId } : {}),
       ...(assignmentId ? { assignmentId } : {}),
       ...(studentWhere ? { student: { ...studentWhere, status: "active" } } : {}),
+      ...(!auth.isAdmin ? { assignment: { OR: [{ lecturerId: auth.lecturerId }, { lecturerId: null }] } } : {}),
     },
     orderBy: { submittedAt: "asc" },
     include: {

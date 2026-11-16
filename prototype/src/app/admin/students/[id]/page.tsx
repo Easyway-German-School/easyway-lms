@@ -1864,7 +1864,8 @@ export default function StudentDossierPage() {
                     onClick={() => {
                       setFixOpen(true);
                       setFixMsg(null);
-                      setFixForm({ level: identity.level, amount: "", reason: "" });
+                      const current = (data.money.charges ?? []).find((charge) => charge.level === identity.level);
+                      setFixForm({ level: identity.level, amount: current ? String(current.amount) : "", reason: "" });
                     }}
                     className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
                   >
@@ -1885,7 +1886,11 @@ export default function StudentDossierPage() {
                         Level
                         <select
                           value={fixForm.level}
-                          onChange={(event) => setFixForm((form) => ({ ...form, level: event.target.value }))}
+                          onChange={(event) => {
+                            const level = event.target.value;
+                            const current = (data.money.charges ?? []).find((charge) => charge.level === level);
+                            setFixForm((form) => ({ ...form, level, amount: current ? String(current.amount) : "" }));
+                          }}
                           className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
                         >
                           <option value="">Choose a level…</option>
@@ -1904,14 +1909,14 @@ export default function StudentDossierPage() {
                         </select>
                       </label>
                       <label className="block text-xs font-semibold text-[var(--muted)]">
-                        Correct amount (₦)
+                        Correct amount (₦) — starts at what is charged now; change it to what it should be
                         <input
                           inputMode="numeric"
                           value={fixForm.amount}
                           onChange={(event) =>
                             setFixForm((form) => ({ ...form, amount: event.target.value.replace(/[^0-9]/g, "") }))
                           }
-                          placeholder="e.g. 180000"
+                          placeholder="No charge on file yet — enter the amount"
                           className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
                         />
                       </label>
