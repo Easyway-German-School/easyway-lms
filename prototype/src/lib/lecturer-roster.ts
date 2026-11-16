@@ -84,6 +84,7 @@ export async function resolveRoster(userId: string): Promise<Roster> {
       branchId: true,
       admission: true,
       tutorId: true,
+      classType: true,
       coTutors: { select: { lecturerId: true } },
       user: { select: { name: true, email: true } },
     },

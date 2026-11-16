@@ -175,6 +175,7 @@ export async function studentIdsForMaterial(material: MaterialAudienceRow): Prom
         branchId: true,
         level: true,
         sessionSlot: true,
+        classType: true,
       },
     });
     return rows

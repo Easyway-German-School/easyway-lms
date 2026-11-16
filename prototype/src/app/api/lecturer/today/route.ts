@@ -94,6 +94,7 @@ export async function GET() {
               sessionSlot: true,
               tutorId: true,
               admission: true,
+              classType: true,
               coTutors: { select: { lecturerId: true } },
             },
           })

@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     const assignedStudents = where
       ? await prisma.student.findMany({
           where: { ...(where as Record<string, unknown>), status: 'active' } as any,
-          select: { id: true, tutorId: true, coTutors: { select: { lecturerId: true } }, admission: true },
+          select: { id: true, tutorId: true, coTutors: { select: { lecturerId: true } }, admission: true, classType: true },
         })
       : [];
     const roster = assignedStudents.filter((student) =>
@@ -168,6 +168,7 @@ export async function POST(req: NextRequest) {
         sessionSlot: true,
         classesStartedAt: true,
         createdAt: true,
+        classType: true,
       },
     });
     const studentInfoById = new Map(assignedStudents.map((student) => [student.id, student]));

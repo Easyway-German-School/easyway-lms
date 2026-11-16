@@ -321,7 +321,7 @@ export async function POST(req: NextRequest) {
     if (audience) {
       const recipients = await prisma.student.findMany({
         where: audience as any,
-        select: { id: true, level: true, admission: true, tutorId: true, coTutors: { select: { lecturerId: true } } },
+        select: { id: true, level: true, admission: true, tutorId: true, classType: true, coTutors: { select: { lecturerId: true } } },
       });
       // Only the students the upload is FOR: at the chosen level, and — when the
       // tutor aimed it at one class — in that batch (strict: a student with no

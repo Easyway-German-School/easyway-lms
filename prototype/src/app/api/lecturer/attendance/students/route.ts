@@ -82,6 +82,7 @@ export async function GET(req: NextRequest) {
         studentCode: true,
         admission: true,
         tutorId: true,
+        classType: true,
         coTutors: { select: { lecturerId: true } },
         classesStartedAt: true,
         createdAt: true,
