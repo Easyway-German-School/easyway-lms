@@ -170,7 +170,9 @@ describe("time budgets", () => {
 });
 
 describe("the real CRON_PLAN", () => {
-  const routeSource = readFileSync(join(process.cwd(), "src/app/api/cron/tick/route.ts"), "utf8");
+  // The job registrations moved out of the route and into cron-jobs.ts so the
+  // self-hosted standalone runner can share them — see src/lib/cron-jobs.ts.
+  const routeSource = readFileSync(join(process.cwd(), "src/lib/cron-jobs.ts"), "utf8");
   const registered = [...routeSource.matchAll(/^\s*register\("([a-z-]+)"/gm)].map((m) => m[1]);
   const planned = [...CRON_PLAN.prelude, ...CRON_PLAN.lanes.flatMap((l) => l.jobs)];
 

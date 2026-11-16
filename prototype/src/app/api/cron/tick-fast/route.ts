@@ -40,6 +40,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withUnscoped } from "@/lib/tenant/context";
+import { runFastCronJobs } from "@/lib/cron-jobs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -52,25 +53,7 @@ async function handleGET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [emailResult, autoHealResult] = await Promise.allSettled([
-    (async () => {
-      const { drainQueue } = await import("@/lib/email-queue");
-      return drainQueue(50);
-    })(),
-    (async () => {
-      const { runPortalResync } = await import("@/lib/auto-heal");
-      return runPortalResync();
-    })(),
-  ]);
-
-  if (emailResult.status === "rejected") console.error("tick-fast: email drain failed:", emailResult.reason);
-  if (autoHealResult.status === "rejected") console.error("tick-fast: auto-heal failed:", autoHealResult.reason);
-
-  return NextResponse.json({
-    ok: emailResult.status === "fulfilled" && autoHealResult.status === "fulfilled",
-    result: emailResult.status === "fulfilled" ? emailResult.value : { error: String(emailResult.reason) },
-    autoHeal: autoHealResult.status === "fulfilled" ? autoHealResult.value : { error: String(autoHealResult.reason) },
-  });
+  return NextResponse.json(await runFastCronJobs());
 }
 
 export const GET = withUnscoped(

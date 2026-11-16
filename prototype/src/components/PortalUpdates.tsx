@@ -43,8 +43,14 @@ type Update = {
   author: { name: string } | null;
 };
 
-/** How often we ask. Matched to the chat poll so the two feel like one thing. */
-const POLL_ACTIVE_MS = 8_000;
+/**
+ * How often we ask while the tab is active. This is the single highest-volume
+ * route in the app (mounted on every signed-in page, for the whole session) —
+ * it showed up as a top Active CPU consumer in Vercel's Observability at 8s.
+ * 12s is still well inside "feels instant" for a popup, not a live chat
+ * window, and cuts that call volume by a quarter without a user noticing.
+ */
+const POLL_ACTIVE_MS = 12_000;
 /** Backed right off when nobody is looking. */
 const POLL_HIDDEN_MS = 45_000;
 /** How long a card sits there before it leaves on its own. */

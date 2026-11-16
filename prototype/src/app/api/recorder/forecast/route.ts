@@ -18,7 +18,22 @@ export const dynamic = "force-dynamic";
  * Public by necessity, authenticated by signature, like the recording callback: the manager signs
  * `timestamp.query` with the shared secret, so the query itself cannot be altered and an old request cannot be
  * replayed. It reveals only counts and times, never names or students.
+ *
+ * `loadRecordingForecast` recomputes the whole schedule (a getMergedSchedule call per cohort) from scratch —
+ * this showed up as the #2 Active CPU consumer in Vercel's Observability despite being a low-traffic route,
+ * averaging ~840ms/call. The fleet only needs this to track real schedule changes, not sub-minute freshness,
+ * so a short in-process cache absorbs any clustering in the fleet's poll pattern for free; `cache-control:
+ * no-store` on the response is unrelated and stays — that one stops the BROWSER/CDN from caching a
+ * signature-authenticated, per-tenant response, not this.
  */
+const FORECAST_CACHE_TTL_MS = 60_000;
+const forecastCache = new Map<string, { body: unknown; expiresAt: number }>();
+
+/** Test-only: the cache is module-level state and must not leak between test cases. */
+export function resetRecorderForecastCacheForTests() {
+  forecastCache.clear();
+}
+
 export async function GET(request: Request) {
   const secret = recorderSecret();
   if (!secret) return NextResponse.json({ error: "Recorder not configured" }, { status: 503 });
@@ -41,8 +56,18 @@ export async function GET(request: Request) {
   try {
     const tenantId = await defaultTenantId();
     if (!tenantId) return NextResponse.json({ error: "No school found" }, { status: 404 });
-    const { runWithTenant } = await import("@/lib/tenant/context");
-    const forecast = await runWithTenant(tenantId, () => loadRecordingForecast({ tenantId, hours }));
+
+    const cacheKey = `${tenantId}:${hours}`;
+    const cached = forecastCache.get(cacheKey);
+    const now = Date.now();
+    let forecast: unknown;
+    if (cached && cached.expiresAt > now) {
+      forecast = cached.body;
+    } else {
+      const { runWithTenant } = await import("@/lib/tenant/context");
+      forecast = await runWithTenant(tenantId, () => loadRecordingForecast({ tenantId, hours }));
+      forecastCache.set(cacheKey, { body: forecast, expiresAt: now + FORECAST_CACHE_TTL_MS });
+    }
     return NextResponse.json(forecast, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     console.error("Recording forecast failed:", error);
