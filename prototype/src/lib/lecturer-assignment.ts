@@ -487,6 +487,9 @@ export function belongsToLecturer(
     branchId?: string | null;
     level?: string | null;
     sessionSlot?: string | null;
+    /** "group" | "private" — see CLASS_TYPES. Callers must select this for the
+     *  private-pairing override just below to apply. */
+    classType?: string | null;
   },
 ): boolean {
   const namedByOffice = Boolean(
@@ -497,6 +500,17 @@ export function belongsToLecturer(
   );
 
   if (namedByOffice) {
+    // A one-to-one private pairing (Student.tutorId set by the office's
+    // private-class screen) is not an exception to a cohort pattern — it IS
+    // the whole relationship, and it is not level- or batch-bound. A private
+    // student who gets promoted mid-term stays with the same tutor; the
+    // level/batch gate below exists for the OTHER kind of named link (a group
+    // student the office put on this tutor by name, as a stand-in or a sitting
+    // exception) and must not also retire a private pairing the moment the
+    // student advances past whatever level this tutor's own group happens to
+    // teach.
+    if (student.classType === "private") return true;
+
     // A named link is still a useful override for a tutor without a class
     // assignment, or when the branch/sitting is an intentional exception.
     // It must not pin a student to a tutor's old level or intake after

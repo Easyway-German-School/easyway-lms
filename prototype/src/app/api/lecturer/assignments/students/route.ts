@@ -83,6 +83,7 @@ export async function GET(req: NextRequest) {
       level: true,
       admission: true,
       tutorId: true,
+      classType: true,
       deliveryMode: true,
       hybridOnlineSlot: true,
       coTutors: { select: { lecturerId: true } },

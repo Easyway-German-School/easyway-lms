@@ -135,6 +135,7 @@ async function countStudents(assignment: ReturnType<typeof readAssignment>, lect
       branchId: true,
       level: true,
       sessionSlot: true,
+      classType: true,
     },
   });
   return rows.filter((row) => belongsToLecturer(assignment, lecturerId, row)).length;

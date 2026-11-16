@@ -70,6 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       branchId: true,
       level: true,
       sessionSlot: true,
+      classType: true,
     },
   });
 

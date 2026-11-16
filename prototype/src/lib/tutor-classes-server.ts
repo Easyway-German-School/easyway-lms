@@ -34,6 +34,7 @@ export async function tutorRosterForGroups(
       sessionSlot: true,
       admission: true,
       tutorId: true,
+      classType: true,
       coTutors: { select: { lecturerId: true } },
     },
   });
