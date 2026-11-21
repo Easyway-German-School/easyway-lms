@@ -17,6 +17,7 @@ import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
+import { PROGRAMME_TYPES, programmeLabel } from "@/lib/programme-type";
 import SchedulePreview from "@/components/admin/SchedulePreview";
 import { describePhone, studentPhoneRaw } from "@/lib/phone-display";
 import { enrolmentYearOptions } from "@/lib/student-enrolment-years";
@@ -210,6 +211,7 @@ function StudentsRoster() {
   const [filterClassType, setFilterClassType] = useState<string>(params.get("classType") ?? "");
   const [filterSessionSlot, setFilterSessionSlot] = useState<string>(params.get("sessionSlot") ?? "");
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
+  const [filterProgramme, setFilterProgramme] = useState<string>(params.get("programme") ?? "");
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>(params.get("paymentStatus") ?? "");
   // A stored tag (admin-authored) or a derived segment id — see
   // lib/student-segments.ts. The roster and the export treat both the same.
@@ -343,6 +345,7 @@ function StudentsRoster() {
     if (filterClassType) url.searchParams.set("classType", filterClassType);
     if (filterSessionSlot) url.searchParams.set("sessionSlot", filterSessionSlot);
     if (filterStatus) url.searchParams.set("status", filterStatus);
+    if (filterProgramme) url.searchParams.set("programme", filterProgramme);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
     if (filterTag) url.searchParams.set("tag", filterTag);
     if (filterYear) url.searchParams.set("year", filterYear);
@@ -366,7 +369,7 @@ function StudentsRoster() {
       setAdminRole(typeof data.adminRole === "string" ? data.adminRole : "");
     }
     setLoading(false);
-  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTag, filterYear, filterTutorId, focus, focusIds, page, pageSize, search]);
+  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterProgramme, filterSessionSlot, filterStatus, filterTag, filterYear, filterTutorId, focus, focusIds, page, pageSize, search]);
 
   /**
    * Same query the roster just fetched, minus paging — the export route
@@ -389,6 +392,7 @@ function StudentsRoster() {
     if (filterClassType) params.set("classType", filterClassType);
     if (filterSessionSlot) params.set("sessionSlot", filterSessionSlot);
     if (filterStatus) params.set("status", filterStatus);
+    if (filterProgramme) params.set("programme", filterProgramme);
     if (filterPaymentStatus) params.set("paymentStatus", filterPaymentStatus);
     if (filterTag) params.set("tag", filterTag);
     if (filterYear) params.set("year", filterYear);
@@ -426,6 +430,7 @@ function StudentsRoster() {
     if (filterClassType) params.set("classType", filterClassType);
     if (filterSessionSlot) params.set("sessionSlot", filterSessionSlot);
     if (filterStatus) params.set("status", filterStatus);
+    if (filterProgramme) params.set("programme", filterProgramme);
     if (filterPaymentStatus) params.set("paymentStatus", filterPaymentStatus);
     if (filterTag) params.set("tag", filterTag);
     if (filterYear) params.set("year", filterYear);
@@ -1327,6 +1332,23 @@ function StudentsRoster() {
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                <label htmlFor="programmeFilter" className="block text-sm font-semibold text-[var(--muted)]">Programme</label>
+                <select
+                  id="programmeFilter"
+                  value={filterProgramme}
+                  onChange={(event) => {
+                    setFilterProgramme(event.target.value);
+                    setPage(1);
+                  }}
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">All programmes</option>
+                  {PROGRAMME_TYPES.map((programme) => (
+                    <option key={programme.value} value={programme.value}>{programme.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
                 <label htmlFor="statusFilter" className="block text-sm font-semibold text-[var(--muted)]">Status</label>
                 <select
                   id="statusFilter"
@@ -2140,6 +2162,9 @@ function StudentsRoster() {
                       >
                         {student.user.name}
                       </Link>
+                      <span className="ml-2 inline-flex rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                        {programmeLabel(student.pathway)}
+                      </span>
                       {isPrivateMember ? (
                         <span
                           title="Private membership"
@@ -2344,7 +2369,15 @@ function StudentsRoster() {
                         </p>
                       )}
                     </td>
-                    <td className="px-6 py-4">{student.status || "active"}</td>
+                    <td className="px-6 py-4">
+                      {student.status === "paused" ? (
+                        <span className="inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                          Paused
+                        </span>
+                      ) : (
+                        student.status || "active"
+                      )}
+                    </td>
                     {/* The cohort, not the status of whichever transaction
                         happened to be most recent — a student whose last
                         payment failed reads as "failed" here while being paid

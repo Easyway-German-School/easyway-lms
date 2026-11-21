@@ -27,6 +27,14 @@ describe("portalVerdict", () => {
     expect(verdict.locks[0].fix).toMatch(/completed level/i);
   });
 
+  it("treats an office pause as its own notice, not a payment problem", () => {
+    const verdict = portalVerdict({ hasAccess: true, lockReason: null, portalPaused: true }, false);
+    expect(verdict.open).toBe(false);
+    expect(verdict.key).toBe("portal_paused");
+    expect(verdict.locks[0].label).toMatch(/paused/i);
+    expect(verdict.locks.map((lock) => lock.code)).toEqual(["portal_paused"]);
+  });
+
   it("falls back to unpaid_deposit when the gate is shut but gave no reason", () => {
     expect(portalVerdict({ hasAccess: false, lockReason: null }, true).key).toBe("unpaid_deposit");
   });

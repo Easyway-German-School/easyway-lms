@@ -46,8 +46,17 @@ describe("pathways — the exam preparatory tutor dimension", () => {
     expect(where).toMatchObject({
       branchId: { in: ["branch-a"] },
       level: { in: ["A1"] },
-      AND: [{ pathway: { in: ["Exam Preparatory"] } }],
     });
+    const and = (where as { AND: unknown[] }).AND;
+    expect(and).toEqual([
+      {
+        OR: [
+          { pathway: { equals: "Exam Preparatory", mode: "insensitive" } },
+          { pathway: { equals: "Exam prep", mode: "insensitive" } },
+          { pathway: { equals: "Exam preparation", mode: "insensitive" } },
+        ],
+      },
+    ]);
   });
 
   it("combines with a classType restriction without either clause overwriting the other", () => {
@@ -64,7 +73,13 @@ describe("pathways — the exam preparatory tutor dimension", () => {
     const where = studentWhereForAssignment(assignment) as { AND: unknown[] };
     expect(where.AND).toHaveLength(2);
     expect(where.AND).toContainEqual({ OR: [{ classType: "private" }] });
-    expect(where.AND).toContainEqual({ pathway: { in: ["Exam Preparatory"] } });
+    expect(where.AND).toContainEqual({
+      OR: [
+        { pathway: { equals: "Exam Preparatory", mode: "insensitive" } },
+        { pathway: { equals: "Exam prep", mode: "insensitive" } },
+        { pathway: { equals: "Exam preparation", mode: "insensitive" } },
+      ],
+    });
   });
 });
 

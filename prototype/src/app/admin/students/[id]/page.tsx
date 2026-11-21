@@ -26,6 +26,8 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
+import { programmeLabel } from "@/lib/programme-type";
+import { packageOptions } from "@/app/auth/signup/options";
 import { isTravelPackagePathway } from "@/lib/payment";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
@@ -1401,7 +1403,9 @@ export default function StudentDossierPage() {
                   identity.classType === "private" ? "Private" : "Group",
                   identity.deliveryMode,
                   identity.branch?.name ?? "No branch",
-                ].map((chip) => (
+                  programmeLabel(identity.pathway),
+                  identity.status === "paused" ? "Paused" : null,
+                ].filter((chip): chip is string => Boolean(chip)).map((chip) => (
                   <span
                     key={chip}
                     className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1 text-xs font-semibold capitalize"
@@ -1611,6 +1615,7 @@ export default function StudentDossierPage() {
                     : "None selected"
                 }
               />
+              <Field label="Programme" value={programmeLabel(identity.pathway)} />
               <Field label="Pathway" value={identity.pathway} />
               <TutorField
                 studentId={identity.id}
@@ -2885,6 +2890,9 @@ export default function StudentDossierPage() {
                     <option key={status.value} value={status.value}>{status.label}</option>
                   ))}
                 </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Paused keeps their place and their work, and shows a short notice on their portal until you set them back to Active.
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Student type</span>
@@ -2900,12 +2908,18 @@ export default function StudentDossierPage() {
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Pathway</span>
-                <input
+                <select
                   value={editForm.pathway}
                   onChange={(event) => setEditForm((form) => ({ ...form, pathway: event.target.value }))}
-                  placeholder="e.g. Language training"
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                />
+                >
+                  {Array.from(new Set([...packageOptions, "Travel Package", editForm.pathway].filter(Boolean))).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Programme: {programmeLabel(editForm.pathway)}. Exam Preparatory is exam prep. Travel Package is the travel package. Everything else is language training.
+                </span>
               </label>
             </div>
 

@@ -28,7 +28,8 @@ export type PortalLockCode =
   | "unsettled_balance"
   | "previous_level_balance"
   | "upcoming_batch"
-  | "photo_missing";
+  | "photo_missing"
+  | "portal_paused";
 
 export type PortalLock = {
   code: PortalLockCode;
@@ -67,6 +68,10 @@ const LOCKS: Record<PortalLockCode, Omit<PortalLock, "code">> = {
     label: "No profile photo",
     fix: "The student taps the camera on their /profile page and saves a photo.",
   },
+  portal_paused: {
+    label: "Portal paused by the office",
+    fix: "Set the student's status back to Active. Their work is still there.",
+  },
 };
 
 /**
@@ -75,9 +80,18 @@ const LOCKS: Record<PortalLockCode, Omit<PortalLock, "code">> = {
  * remove.
  */
 export function portalVerdict(
-  access: { hasAccess: boolean; lockReason: PaymentLockReason },
+  access: { hasAccess: boolean; lockReason: PaymentLockReason; portalPaused?: boolean },
   hasPhoto: boolean,
 ): PortalVerdict {
+  // A pause is the whole story. Stacking a payment or photo reason on top of
+  // it is how a short break starts to read as "you owe us" or "you did this wrong".
+  if (access.portalPaused) {
+    return {
+      open: false,
+      locks: [{ code: "portal_paused", ...LOCKS.portal_paused }],
+      key: "portal_paused",
+    };
+  }
   const codes: PortalLockCode[] = [];
   if (!access.hasAccess) codes.push(access.lockReason ?? "unpaid_deposit");
   if (!hasPhoto) codes.push("photo_missing");
@@ -94,9 +108,9 @@ export function portalVerdict(
 // ---------------------------------------------------------------------------
 
 /** The lock screen a browser rendered, or "none" for real content. */
-export type RenderedLock = "none" | "payment" | "batch" | "photo";
+export type RenderedLock = "none" | "payment" | "batch" | "photo" | "paused";
 
-export const RENDERED_LOCKS: readonly RenderedLock[] = ["none", "payment", "batch", "photo"];
+export const RENDERED_LOCKS: readonly RenderedLock[] = ["none", "payment", "batch", "photo", "paused"];
 
 /**
  * Which lock screen the shell puts up, from the flags it already computes.
@@ -107,7 +121,9 @@ export function renderedLockOf(input: {
   routeLocked: boolean;
   photoLocked: boolean;
   lockReason: PaymentLockReason;
+  portalPaused?: boolean;
 }): RenderedLock {
+  if (input.portalPaused) return "paused";
   if (input.routeLocked) return input.lockReason === "upcoming_batch" ? "batch" : "payment";
   if (input.photoLocked) return "photo";
   return "none";
@@ -122,6 +138,8 @@ function justifies(rendered: RenderedLock): PortalLockCode[] {
       return ["upcoming_batch"];
     case "photo":
       return ["photo_missing"];
+    case "paused":
+      return ["portal_paused"];
     default:
       return [];
   }

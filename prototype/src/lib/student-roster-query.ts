@@ -9,6 +9,7 @@ import {
 import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS, type ChurnRisk } from "@/lib/student-risk";
 import { deriveSegments, normalizeStudentType } from "@/lib/student-segments";
 import { assessProfileBackfill } from "@/lib/profile-backfill";
+import { isProgrammeType, programmeWhere } from "@/lib/programme-type";
 import { travelPackageChargesForAccess } from "@/lib/travel-package";
 
 /**
@@ -48,6 +49,12 @@ export type RosterFilters = {
    * than the post-query pass; see buildRosterWhereClause.
    */
   year?: string | null;
+  /**
+   * Exam prep, language training, or travel package. Matched from
+   * `Student.pathway` — see lib/programme-type.ts — so "Exam prep" and
+   * "Exam Preparatory" are the same students.
+   */
+  programme?: string | null;
 };
 
 export function parseRosterFilters(url: URL): RosterFilters {
@@ -66,6 +73,7 @@ export function parseRosterFilters(url: URL): RosterFilters {
     ids: url.searchParams.get("ids"),
     tag: url.searchParams.get("tag"),
     year: url.searchParams.get("year"),
+    programme: url.searchParams.get("programme"),
   };
 }
 
@@ -136,6 +144,10 @@ export function buildRosterWhereClause(
     if (Number.isInteger(year)) {
       whereClause.enrolments = { some: { batchYear: year, deletedAt: null } };
     }
+  }
+  if (isProgrammeType(filters.programme)) {
+    whereClause.AND = whereClause.AND || [];
+    whereClause.AND.push(programmeWhere(filters.programme));
   }
 
   return whereClause;

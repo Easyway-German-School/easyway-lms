@@ -6,6 +6,22 @@ import {
   type RosterRow,
 } from "./student-roster-query";
 
+describe("student roster programme filter", () => {
+  it("keeps exam prep, including the shorter spellings, in the same where clause as the rest of the roster", () => {
+    const filters = parseRosterFilters(new URL("https://example.test/admin/students?programme=exam_prep"));
+    const where = buildRosterWhereClause(filters, { tenantId: null, allowedBranchIds: null });
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { pathway: { equals: "Exam Preparatory", mode: "insensitive" } },
+          { pathway: { equals: "Exam prep", mode: "insensitive" } },
+          { pathway: { equals: "Exam preparation", mode: "insensitive" } },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("student roster enrolment-year filter", () => {
   it("matches the selected batch month and enrollment year together", () => {
     const filters = parseRosterFilters(new URL("https://example.test/admin/students?batch=January&year=2027"));

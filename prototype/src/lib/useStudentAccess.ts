@@ -15,7 +15,7 @@ export const studentAccessQueryKey = ["student", "access"] as const;
  * change and flash the lock screen at students who have in fact paid.
  */
 export function useStudentAccess() {
-  const query = useQuery<StudentAccess & { hasPhoto: boolean; privateClassPrice?: number; verdict?: PortalVerdict; computedAt?: number }>({
+  const query = useQuery<StudentAccess & { hasPhoto: boolean; portalPaused?: boolean; privateClassPrice?: number; verdict?: PortalVerdict; computedAt?: number }>({
     queryKey: studentAccessQueryKey,
     queryFn: async () => {
       const response = await fetch("/api/student/access", { cache: "no-store" });
@@ -32,6 +32,9 @@ export function useStudentAccess() {
      */
     refetchInterval: (q) => {
       const data = q.state.data;
+      // A paused portal opens again the moment the office sets status back to
+      // Active — the student should not have to reload to see that.
+      if (data?.portalPaused) return 30_000;
       // Not for an upcoming-intake wait: nothing changes for them until the start date.
       const payLocked = data?.hasAccess === false && data.lockReason !== "upcoming_batch";
       return data && (payLocked || data.hasPhoto === false) ? 30_000 : false;
@@ -45,6 +48,7 @@ export function useStudentAccess() {
      * who has paid must not see a padlock while their status is in flight.
      */
     hasAccess: query.data?.hasAccess ?? true,
+    portalPaused: query.data?.portalPaused === true,
     loading: query.isPending,
     failed: query.isError,
   };

@@ -439,7 +439,7 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
     },
     batchYear: { input: batchFacts },
     hasPhoto,
-    verdict: portalVerdict(access, hasPhoto),
+    verdict: portalVerdict({ ...access, portalPaused: student.status === "paused" }, hasPhoto),
     priorLevelArrears,
     registrationFeePayments: registrationFeePayments
       .filter((payment) => isRegistrationFeePayment(payment.description))
