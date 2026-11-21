@@ -19,7 +19,7 @@ export default function DeparturesBoard() {
   const state = useSittings();
 
   return (
-    <section id="sittings" className="relative z-10 -mt-20 px-5 pb-20 sm:px-6 sm:pb-28">
+    <section id="sittings" className="relative px-5 pb-20 pt-4 sm:px-6 sm:pb-28 sm:pt-6">
       <div className="mx-auto max-w-6xl">
         <div className="reveal overflow-hidden rounded-3xl bg-[#08121f] shadow-2xl shadow-[#071328]/40 ring-1 ring-white/10">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-r from-[#0d2140] to-[#08121f] px-5 py-4 sm:px-8 sm:py-5">

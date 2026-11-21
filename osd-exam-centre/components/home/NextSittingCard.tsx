@@ -23,34 +23,14 @@ export default function NextSittingCard() {
 
   return (
     <div className="fade-up delay-3 w-full max-w-md text-white lg:justify-self-end">
-      <div className="ticket-top rounded-t-2xl border border-b-0 border-white/20 bg-[#0a1a33]/72 px-6 pb-7 pt-5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+      <div className="rounded-2xl border border-white/20 bg-[#0a1a33]/72 px-6 py-6 shadow-2xl shadow-black/40 backdrop-blur-xl">
         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.28em] text-white/70">
-          <span>ÖSD Examination Pass</span>
+          <span>Next sitting</span>
           <PlaneIcon className="h-4 w-4 text-[var(--gold-bright)]" />
         </div>
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <div>
-            <p className="font-mono text-4xl font-bold tracking-wider">LOS</p>
-            <p className="text-xs text-white/70">Lagos, Nigeria</p>
-          </div>
-          <div className="flex flex-1 items-center gap-2 text-[var(--gold-bright)]" aria-hidden="true">
-            <span className="h-px flex-1 border-t border-dashed border-white/40" />
-            <PlaneIcon className="h-5 w-5" />
-            <span className="h-px flex-1 border-t border-dashed border-white/40" />
-          </div>
-          <div className="text-right">
-            <p className="font-mono text-4xl font-bold tracking-wider">DACH</p>
-            <p className="text-xs text-white/70">DE · AT · CH</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="ticket-bottom rounded-b-2xl border border-t-0 border-white/20 bg-[#0a1a33]/72 px-6 pb-6 pt-0 shadow-2xl shadow-black/40 backdrop-blur-xl">
-        <div className="border-t border-dashed border-white/30" />
 
         {state.status === "loading" && (
           <div className="space-y-3 pt-5" aria-label="Loading the next sitting" role="status">
-            <div className="skeleton h-4 w-24 rounded" />
             <div className="skeleton h-6 w-4/5 rounded" />
             <div className="skeleton h-14 w-full rounded-lg" />
             <div className="skeleton h-11 w-full rounded-lg" />
@@ -59,8 +39,7 @@ export default function NextSittingCard() {
 
         {state.status === "ready" && !next && (
           <div className="pt-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[var(--gold-bright)]">Next sitting</p>
-            <p className="font-serif-display mt-2 text-xl font-semibold">New dates are announced here first.</p>
+            <p className="font-serif-display text-xl font-semibold">New dates are announced here first.</p>
             <p className="mt-2 text-sm text-white/70">No sittings are open for registration right now — check back soon.</p>
             <Link
               href="/status"
@@ -86,12 +65,11 @@ export default function NextSittingCard() {
         {next && status && (
           <div className="pt-5">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[var(--gold-bright)]">Next sitting</p>
-              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TONE[status.tone]}`}>
+              <p className="font-serif-display line-clamp-2 text-xl font-semibold leading-snug">{next.title}</p>
+              <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TONE[status.tone]}`}>
                 {status.label}
               </span>
             </div>
-            <p className="font-serif-display mt-2 line-clamp-2 text-xl font-semibold leading-snug">{next.title}</p>
 
             <dl className="mt-4 grid grid-cols-[1.4fr_0.6fr_1fr] gap-3 border-y border-white/15 py-3">
               <div>
@@ -123,11 +101,6 @@ export default function NextSittingCard() {
             </Link>
           </div>
         )}
-
-        <div className="mt-5 flex items-center justify-between text-white/45">
-          <div className="barcode w-40" aria-hidden="true" />
-          <span className="font-mono text-[10px] tracking-[0.25em]">EW-OSD</span>
-        </div>
       </div>
     </div>
   );
