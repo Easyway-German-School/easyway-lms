@@ -3,16 +3,6 @@
   "framework": "nextjs",
   "installCommand": "npm install --include=dev --no-audit --no-fund",
   "buildCommand": "npx prisma migrate deploy && npm run build",
-  "crons": [
-    {
-      "path": "/api/cron/tick",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/tick-fast",
-      "schedule": "*/15 * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/sw.js",
