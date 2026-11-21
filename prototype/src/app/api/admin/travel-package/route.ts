@@ -3,6 +3,7 @@ import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT, type FinanceStudentInput } from "@/lib/finance/receivables";
 import { isTravelPackagePathway, travelPackageMinFirstPayment, travelPackagePrice } from "@/lib/payment";
+import { programmeWhere } from "@/lib/programme-type";
 import { reconcileTravelPackageStudent, travelPackageChargesForAccess } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 
@@ -18,48 +19,59 @@ export async function GET() {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const students = await prisma.student.findMany({
-    where: { pathway: { contains: "travel", mode: "insensitive" } },
-    select: { ...FINANCE_STUDENT_SELECT, studentCode: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
-  });
-
-  // After the query above, so the price book has been refreshed.
-  const packagePrice = travelPackagePrice();
-  const minFirstPayment = travelPackageMinFirstPayment();
-
-  const rows = students.filter((student) => isTravelPackagePathway(student.pathway)).map((student) => {
-    const finance = computeStudentFinance({
-      ...(student as unknown as FinanceStudentInput),
-      tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges),
+  try {
+    const students = await prisma.student.findMany({
+      where: programmeWhere("travel_package"),
+      select: { ...FINANCE_STUDENT_SELECT, studentCode: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
     });
-    // What the balance SHOULD be for a flat ₦980,000 programme. When the live
-    // `owed` disagrees, the student's tuition ledger still carries a per-level
-    // charge (onboarded before flat pricing, a failed charge-create, or the
-    // pathway switched after the charge was raised) and needs reconciling.
-    const expectedOwed = Math.max(0, packagePrice - finance.paid);
-    return {
-      id: student.id,
-      studentCode: student.studentCode,
-      name: finance.name,
-      email: finance.email,
-      level: finance.level,
-      branch: finance.branch,
-      firstPaymentMet: finance.paid >= minFirstPayment,
-      paid: finance.paid,
-      owed: finance.owed,
-      progressPercent: finance.progressPercent,
-      fullPaid: finance.fullPaid,
-      lockedOut: finance.lockedOut,
-      ledgerOutOfStep: finance.owed !== expectedOwed,
-    };
-  });
 
-  return NextResponse.json({
-    packagePrice: packagePrice,
-    minFirstPayment: minFirstPayment,
-    students: rows,
-  });
+    // After the query above, so the price book has been refreshed.
+    const packagePrice = travelPackagePrice();
+    const minFirstPayment = travelPackageMinFirstPayment();
+
+    const rows = students.filter((student) => isTravelPackagePathway(student.pathway)).map((student) => {
+      const finance = computeStudentFinance({
+        ...(student as unknown as FinanceStudentInput),
+        tuitionCharges: travelPackageChargesForAccess(student.pathway, student.level, student.tuitionCharges),
+      });
+      // What the balance SHOULD be for a flat ₦980,000 programme. When the live
+      // `owed` disagrees, the student's tuition ledger still carries a per-level
+      // charge (onboarded before flat pricing, a failed charge-create, or the
+      // pathway switched after the charge was raised) and needs reconciling.
+      const expectedOwed = Math.max(0, packagePrice - finance.paid);
+      return {
+        id: student.id,
+        studentCode: student.studentCode,
+        name: finance.name,
+        email: finance.email,
+        level: finance.level,
+        branch: finance.branch,
+        firstPaymentMet: finance.paid >= minFirstPayment,
+        paid: finance.paid,
+        owed: finance.owed,
+        progressPercent: finance.progressPercent,
+        fullPaid: finance.fullPaid,
+        lockedOut: finance.lockedOut,
+        ledgerOutOfStep: finance.owed !== expectedOwed,
+      };
+    });
+
+    return NextResponse.json({
+      packagePrice: packagePrice,
+      minFirstPayment: minFirstPayment,
+      students: rows,
+    });
+  } catch (error) {
+    console.error("Travel Package roster failed", error);
+    return NextResponse.json(
+      {
+        error: "Could not load the Travel Package roster",
+        detail: error instanceof Error ? error.message : "Unknown",
+      },
+      { status: 500 },
+    );
+  }
 }
 
 /**
@@ -90,7 +102,7 @@ export async function PATCH(request: Request) {
   // ---- Bulk: reconcile every out-of-step student on the pathway ------------
   if (body.all === true) {
     const onPathway = await prisma.student.findMany({
-      where: { pathway: { contains: "travel", mode: "insensitive" } },
+      where: programmeWhere("travel_package"),
       select: { id: true, pathway: true },
     });
     const travelStudents = onPathway.filter((student) => isTravelPackagePathway(student.pathway));
