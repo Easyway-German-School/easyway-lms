@@ -167,13 +167,13 @@ export async function GET(req: NextRequest) {
             studentId,
             ...(auth.role === "lecturer" && auth.lecturerId
               ? {
+                  // Any class for a student of theirs, not only rows where the
+                  // lecturer column was left blank. A booking the office saved
+                  // under this tutor was disappearing behind "Nothing booked".
                   OR: [
                     { lecturerId: auth.lecturerId },
-                    { lecturerId: null, student: { tutorId: auth.lecturerId } },
-                    {
-                      lecturerId: null,
-                      student: { coTutors: { some: { lecturerId: auth.lecturerId } } },
-                    },
+                    { student: { tutorId: auth.lecturerId } },
+                    { student: { coTutors: { some: { lecturerId: auth.lecturerId } } } },
                   ],
                 }
               : {}),

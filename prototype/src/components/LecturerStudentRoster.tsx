@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { deliveryModeLabel, goLiveKeyFor, groupByClass } from "@/lib/lecturer-class-groups";
+import { programmeLabel } from "@/lib/programme-type";
 import { BroadcastIcon } from "@/components/icons";
 
 export type LecturerStudent = {
@@ -98,12 +99,14 @@ function DetailPanel({ student }: { student: LecturerStudent }) {
     ["Phone", student.phone || "—"],
     ["Location", [student.city, student.country].filter(Boolean).join(", ") || "—"],
     ["Branch", student.branchName || "—"],
+    ["Programme", programmeLabel(student.pathway)],
     ["Level", student.level, true],
     ["Delivery", deliveryModeLabel(student.deliveryMode)],
     ["Batch", student.batch || "—"],
     ["Session", student.sessionSlot, true],
     ["Class type", student.classType, true],
     ["Pathway", student.pathway],
+    ["Status", student.status === "paused" ? "Paused" : student.status],
     ["Joined", new Date(student.joinedAt).toLocaleDateString()],
     ["Attendance", student.attendanceRate === null ? "No sessions recorded yet" : `${student.attendanceRate}% of ${student.sessionsRecorded}`],
     ["Assignments handed in", String(student.submissions)],

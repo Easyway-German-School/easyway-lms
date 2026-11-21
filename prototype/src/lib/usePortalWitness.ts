@@ -53,7 +53,12 @@ export function usePortalWitness(input: {
 
   useEffect(() => {
     if (!access || !verdictKey || !computedAt) return;
-    const rendered = renderedLockOf({ routeLocked, photoLocked, lockReason });
+    const rendered = renderedLockOf({
+      routeLocked,
+      photoLocked,
+      lockReason,
+      portalPaused: access.portalPaused === true,
+    });
     const key = `${verdictKey}|${rendered}`;
     const last = readLast();
     const now = Date.now();

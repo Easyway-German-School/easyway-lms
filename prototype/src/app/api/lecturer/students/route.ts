@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { accessFromStudent } from "@/lib/student-access";
 import { batchOfAdmission } from "@/lib/class-batch";
+import { releaseStaleNamedStudents } from "@/lib/tutor-rehome";
 import {
   belongsToLecturer,
   describeAssignment,
@@ -47,6 +48,10 @@ export async function GET() {
       return NextResponse.json({ error: "Lecturer profile not found" }, { status: 404 });
     }
 
+    await releaseStaleNamedStudents({ lecturerId: lecturer.id }).catch((error) =>
+      console.error("Could not refresh this tutor's student links", error),
+    );
+
     const assignment = readAssignment(lecturer);
     const where = studentWhereForLecturer(assignment, lecturer.id);
 
@@ -65,7 +70,7 @@ export async function GET() {
 
     const [students, branches] = await Promise.all([
       prisma.student.findMany({
-        where: where as any,
+        where: { ...(where as Record<string, unknown>), status: "active" } as any,
         include: {
           user: { select: { name: true, email: true, createdAt: true } },
           branch: { select: { name: true } },

@@ -14,6 +14,7 @@ import {
   teachingGroups,
 } from "@/lib/lecturer-assignment";
 import { batchOfAdmission } from "@/lib/class-batch";
+import { releaseStaleNamedStudents } from "@/lib/tutor-rehome";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,10 @@ export async function GET() {
   const auth = await requireLecturer();
   if ("error" in auth) return auth.error;
   const { lecturer } = auth;
+
+  await releaseStaleNamedStudents({ lecturerId: lecturer.id }).catch((error) =>
+    console.error("Could not refresh this tutor's student links", error),
+  );
 
   const branches = await prisma.branch.findMany({
     where: { status: "active" },

@@ -19,6 +19,7 @@
  * same reason.
  */
 
+import { pathwayMatchWhere } from "@/lib/programme-type";
 import { cohortRoomName } from "@/lib/live-classroom";
 import { batchRangeLabel } from "@/lib/levels";
 import { batchOfAdmission, batchTitle, canonicalBatch, compareBatches } from "@/lib/class-batch";
@@ -225,7 +226,8 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
   // students on it — combined with `AND`, same reasoning as classTypes above:
   // assigning straight to `where.OR` would throw away the group clauses.
   if (assignment.pathways.length) {
-    andClauses.push({ pathway: { in: assignment.pathways } });
+    const pathwayWhere = pathwayMatchWhere(assignment.pathways);
+    if (pathwayWhere) andClauses.push(pathwayWhere);
   }
 
   if (andClauses.length) where.AND = andClauses;

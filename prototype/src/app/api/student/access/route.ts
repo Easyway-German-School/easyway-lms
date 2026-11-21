@@ -41,6 +41,8 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  const portalPaused = student.status === "paused";
+
   // An on-track tuition payment plan holds the balance lock back, like grace.
   const [planStatus, startDayOverrides] = await Promise.all([
     planStatusForStudent(student.id),
@@ -63,7 +65,7 @@ export async function GET() {
    * weekly nudge (`profile-photo-nudge.ts`) still covers everyone who still
    * hasn't fixed it days later, paid or not.
    */
-  if (!hasPhoto && access.hasAccess) {
+  if (!portalPaused && !hasPhoto && access.hasAccess) {
     // Awaited, not fire-and-forget: a serverless function is not guaranteed
     // to keep running an un-awaited promise once the handler returns, and a
     // one-time notice that silently never sends defeats the entire point.
@@ -88,6 +90,7 @@ export async function GET() {
 
   return NextResponse.json({
     ...access,
+    portalPaused,
     // What one-to-one tuition costs at THIS student's level, from the live price
     // book, for the lock screen's second option. Read here (after the student
     // query, which refreshes the book) so the figure it shows is the figure the
@@ -100,7 +103,7 @@ export async function GET() {
     // AND photo) — see lib/portal-verdict.ts. `computedAt` is the SERVER clock,
     // so a client acting on an old cached copy of this response can be told
     // apart from one acting on a fresh one (the portal witness does exactly that).
-    verdict: portalVerdict(access, hasPhoto),
+    verdict: portalVerdict({ ...access, portalPaused }, hasPhoto),
     computedAt: Date.now(),
   });
 }

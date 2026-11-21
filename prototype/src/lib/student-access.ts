@@ -33,6 +33,7 @@ export const STUDENT_ACCESS_SELECT = {
   paymentGraceUntil: true,
   // Which tenant's intake-start-day overrides apply — see readIntakeStartDayOverrides.
   tenantId: true,
+  status: true,
   // The batch month lives on the admission blob — the upcoming-batch lock
   // ("your October seat opens on 1 October") reads it.
   admission: true,
@@ -237,6 +238,13 @@ export async function getStudentAccess(studentId: string): Promise<StudentAccess
  * student that their class has started.
  */
 export async function studentHasPortalAccess(studentId: string): Promise<boolean> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { status: true },
+  });
+  // Paused is an office decision, not a payment problem. Live class, assignments
+  // and the same gates the portal uses all stop here until status is Active again.
+  if (!student || student.status === "paused") return false;
   const access = await getStudentAccess(studentId);
   return access?.hasAccess ?? false;
 }

@@ -19,7 +19,6 @@
 import { prisma } from "@/lib/prisma";
 import {
   assignmentMatchesStudent,
-  belongsToLecturer,
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
@@ -94,6 +93,30 @@ function primaryAttempt(student: NamedStudent, onlineBranchId: string | null) {
   };
 }
 
+/**
+ * A named link is only "still theirs" when this tutor's class actually covers
+ * that student. `belongsToLecturer` cannot answer this: it returns true the
+ * moment `tutorId` matches, which is exactly the link we are deciding whether
+ * to keep. Using it here left a tutor with no class showing 12 students after
+ * everyone had been moved on.
+ *
+ * Private students are the exception. Naming one onto a tutor is the assignment
+ * — there is often no group class to match — so that link is never stale.
+ */
+export function namedGroupLinkIsStale(input: { classType: string; coveredByAssignment: boolean }): boolean {
+  if (input.classType === "private") return false;
+  return !input.coveredByAssignment;
+}
+
+function assignmentCoversNamedStudent(
+  assignment: LecturerAssignment,
+  student: NamedStudent,
+  onlineBranchId: string | null,
+): boolean {
+  const attempt = primaryAttempt(student, onlineBranchId);
+  return assignmentMatchesStudent(assignment, attempt.classType, attempt.student);
+}
+
 function uniqueMatchingLecturerId(
   student: NamedStudent,
   lecturers: Array<{ id: string; assignment: LecturerAssignment }>,
@@ -126,15 +149,21 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
       select: { id: true },
     }),
     prisma.lecturer.findMany({
-      where: { status: "active", deletedAt: null, ...(tenantId ? { tenantId } : {}) },
+      where: { deletedAt: null, ...(tenantId ? { tenantId } : {}) },
       select: LECTURER_ASSIGNMENT_SELECT,
     }),
   ]);
   const onlineBranchId = onlineBranch?.id ?? null;
-  const lecturers = lecturerRows.map((row) => ({
-    id: row.id,
-    assignment: readAssignment(row),
-  }));
+  // Only an active tutor can receive a student. On-leave and inactive tutors
+  // stay in the coverage check below so we do not pull a class off someone
+  // who is away but still assigned to it.
+  const lecturers = lecturerRows
+    .filter((row) => row.status === "active")
+    .map((row) => ({
+      id: row.id,
+      assignment: readAssignment(row),
+    }));
+  const assignmentByLecturer = new Map(lecturerRows.map((row) => [row.id, readAssignment(row)]));
 
   const named = await prisma.student.findMany({
     where: {
@@ -146,7 +175,8 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
   });
 
   for (const student of named as NamedStudent[]) {
-    if (belongsToLecturer(next, lecturerId, student)) continue;
+    const covered = assignmentCoversNamedStudent(next, student, onlineBranchId);
+    if (!namedGroupLinkIsStale({ classType: student.classType, coveredByAssignment: covered })) continue;
 
     if (student.tutorId === lecturerId) {
       const replacement = uniqueMatchingLecturerId(student, lecturers, onlineBranchId, lecturerId);
@@ -182,14 +212,12 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
     take: 1500,
   });
 
-  const assignmentByLecturer = new Map(lecturers.map((row) => [row.id, row.assignment]));
-
   for (const student of cohort as NamedStudent[]) {
-    if (!belongsToLecturer(next, lecturerId, student)) continue;
+    if (!assignmentCoversNamedStudent(next, student, onlineBranchId)) continue;
     if (!student.tutorId || student.tutorId === lecturerId) continue;
 
     const previousAssignment = assignmentByLecturer.get(student.tutorId);
-    if (previousAssignment && belongsToLecturer(previousAssignment, student.tutorId, student)) {
+    if (previousAssignment && assignmentCoversNamedStudent(previousAssignment, student, onlineBranchId)) {
       continue;
     }
 
@@ -201,5 +229,50 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
     if (paired.ok && paired.changed) result.moved += 1;
   }
 
+  return result;
+}
+
+/**
+ * Drop group-student links a tutor's class no longer covers, and point each
+ * of those students at the one tutor who does.
+ *
+ * The admin tutor card, the tutor's own student list and the student file all
+ * read `Student.tutorId`. A class that was cleared used to leave that column
+ * behind, so a tutor with nobody left still read "12 students" on every one of
+ * those screens. Called before those reads so the number they show is the
+ * number of students who are actually still with that tutor.
+ *
+ * Private pairings are left alone — see `namedGroupLinkIsStale`.
+ */
+export async function releaseStaleNamedStudents(input: {
+  lecturerId?: string;
+  tenantId?: string | null;
+} = {}): Promise<RehomeResult> {
+  const lecturers = await prisma.lecturer.findMany({
+    where: {
+      deletedAt: null,
+      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+      ...(input.lecturerId ? { id: input.lecturerId } : {}),
+    },
+    select: { id: true },
+  });
+
+  const result: RehomeResult = { moved: 0, unlinked: 0 };
+  for (const lecturer of lecturers) {
+    const row = await prisma.lecturer.findUnique({
+      where: { id: lecturer.id },
+      select: LECTURER_ASSIGNMENT_SELECT,
+    });
+    if (!row) continue;
+    const assignment = readAssignment(row);
+    const part = await rehomeStudentsAfterTutorAssignmentChange({
+      lecturerId: lecturer.id,
+      previous: assignment,
+      next: assignment,
+      tenantId: input.tenantId,
+    });
+    result.moved += part.moved;
+    result.unlinked += part.unlinked;
+  }
   return result;
 }

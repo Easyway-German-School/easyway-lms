@@ -132,7 +132,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
    * own /api/student/access uses.
    */
   const hasPhoto = hasProfilePhoto(student.admission);
-  const verdict = portalVerdict(access, hasPhoto);
+  const verdict = portalVerdict({ ...access, portalPaused: student.status === "paused" }, hasPhoto);
   // What their browser last SAID it rendered (lib/portal-witness.ts). Absent until
   // they have opened the portal on a build that reports it.
   const snapshot = await prisma.accessSnapshot.findUnique({

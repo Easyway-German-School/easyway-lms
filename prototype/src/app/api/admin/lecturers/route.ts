@@ -16,6 +16,7 @@ import {
   type CourseLevel,
 } from "@/lib/lecturer-assignment";
 import { KIND, notify } from "@/lib/notify";
+import { releaseStaleNamedStudents } from "@/lib/tutor-rehome";
 import {
   isEmploymentType,
   isLecturerStatus,
@@ -144,6 +145,13 @@ async function countStudents(assignment: ReturnType<typeof readAssignment>, lect
 export async function GET() {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
+
+  // A cleared class used to leave Student.tutorId pointing at the old tutor,
+  // so the card still said "12 students" after everyone had moved. Refresh
+  // those links before counting, which is the same read the tutor portal uses.
+  await releaseStaleNamedStudents({
+    tenantId: gate.session.user.tenantId ?? null,
+  }).catch((error) => console.error("Could not refresh tutor student links", error));
 
   const [lecturers, branches] = await Promise.all([
     prisma.lecturer.findMany({

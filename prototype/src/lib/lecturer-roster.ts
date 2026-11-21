@@ -5,6 +5,7 @@ import {
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
+import { releaseStaleNamedStudents } from "@/lib/tutor-rehome";
 
 /**
  * Who a tutor's students are.
@@ -68,6 +69,10 @@ export {
 export async function resolveRoster(userId: string): Promise<Roster> {
   const lecturer = await prisma.lecturer.findUnique({ where: { userId } });
   if (!lecturer) return { ok: false, reason: "no-profile" };
+
+  await releaseStaleNamedStudents({ lecturerId: lecturer.id }).catch((error) =>
+    console.error("Could not refresh this tutor's student links", error),
+  );
 
   const assignment = readAssignment(lecturer);
   const where = studentWhereForLecturer(assignment, lecturer.id);

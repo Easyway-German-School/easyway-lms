@@ -72,7 +72,8 @@ export async function currentPortalVerdict(studentId: string) {
   const planStatus = await planStatusForStudent(studentId);
   const access = accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null));
   const hasPhoto = hasProfilePhoto(student.admission);
-  return { access, hasPhoto, verdict: portalVerdict(access, hasPhoto) };
+  const portalPaused = student.status === "paused";
+  return { access, hasPhoto, verdict: portalVerdict({ ...access, portalPaused }, hasPhoto) };
 }
 
 export async function recordPortalWitness(
@@ -92,7 +93,7 @@ export async function recordPortalWitness(
   const planStatus = await planStatusForStudent(student.id);
   const access = accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null));
   const hasPhoto = hasProfilePhoto(student.admission);
-  const verdict = portalVerdict(access, hasPhoto);
+  const verdict = portalVerdict({ ...access, portalPaused: student.status === "paused" }, hasPhoto);
   const judgement = judgeWitness(input, verdict, now);
 
   const at = new Date(now);

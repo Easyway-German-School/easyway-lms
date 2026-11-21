@@ -41,6 +41,7 @@ import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggl
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import BatchLockScreen from "@/components/BatchLockScreen";
 import PhotoLockScreen from "@/components/PhotoLockScreen";
+import PortalPausedScreen from "@/components/PortalPausedScreen";
 import { usePortalWitness } from "@/lib/usePortalWitness";
 import PhotoUnlockGuide from "@/components/PhotoUnlockGuide";
 import SignOutButton from "@/components/SignOutButton";
@@ -230,7 +231,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     status === "authenticated" && !invalidSession && rawRole !== "" && rawRole !== "student";
   useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
-  const { access, hasAccess } = useStudentAccess();
+  const { access, hasAccess, portalPaused } = useStudentAccess();
   const campus = useCampusBeat(youth && hasAccess && access !== null && !inClassroom && !onCampus && !accountRevoked);
 
   /**
@@ -570,7 +571,9 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           <NotificationCenter />
         </header>
 
-        {wrongDeliveryMode ? (
+        {portalPaused ? (
+          <PortalPausedScreen />
+        ) : wrongDeliveryMode ? (
           <div className="mx-auto max-w-xl p-8">
             <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
               <h1 className="text-2xl font-bold text-[var(--foreground)]">This is an online-class page</h1>
@@ -605,13 +608,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           itself a paid feature, so it goes away entirely while locked. */}
       {/* On the new look the Chats tab IS the way in, so the floating bubble
           steps aside on phones — but a laptop has no tab bar, so it stays there. */}
-      {pathname !== "/community" && hasAccess && (
+      {pathname !== "/community" && hasAccess && !portalPaused && (
         <div className={youth ? "hidden lg:block" : "contents"}>
           <CommunityLauncher />
         </div>
       )}
       {/* "Anna is typing in General" — only for a student who can open the chat. */}
-      {hasAccess && <TypingNudge />}
+      {hasAccess && !portalPaused && <TypingNudge />}
 
       {/*
         Deliberately NOT behind `hasAccess`. A student who cannot get into the
@@ -749,24 +752,24 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           Queue-managed, so it never fights the tour or a celebration. Only
           for students actually in the portal — an unpaid lock screen has no
           missions to brief. */}
-      {hasAccess && <DailyBriefing />}
+      {hasAccess && !portalPaused && <DailyBriefing />}
 
       {/* The other half of the fee reminder: a student who is LOCKED OUT for money
           (paid nothing, under the deposit, or paused for a balance) never sees the
           briefing above, so this is their card. Checks lock state itself, shows
           at most once a day, last in the queue, and the office can switch it off.
           See components/moment/FeeReminderMoment.tsx. */}
-      <FeeReminderMoment />
+      {!portalPaused && <FeeReminderMoment />}
 
       {/* Lowest-priority nudge: physical students can't download video, but
           they can keep their notes offline if they install the app. */}
-      {hasAccess && <InstallForNotesMoment />}
+      {hasAccess && !portalPaused && <InstallForNotesMoment />}
 
       {/* "You can submit assignments now" — Becca's one-time greeting for the
           tick a student's portal unlocked with work already waiting. Behind
           `hasAccess` because the bell notification it mirrors is never sent
           to a student who is still locked out. See AssignmentsOpenMoment. */}
-      {hasAccess && <AssignmentsOpenMoment />}
+      {hasAccess && !portalPaused && <AssignmentsOpenMoment />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}
@@ -774,7 +777,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
 
       {/* Outranks all of the above, and knows it. A class that has started is
           the only thing in this portal that expires while you look at it. */}
-      <LiveClassCall />
+      {!portalPaused && <LiveClassCall />}
       {/* A class that has ended and was never rated — asked once they are back,
           and never while one is on air. See LiveFeedbackMoment. */}
       <LiveFeedbackMoment suspended={Boolean(live)} />
