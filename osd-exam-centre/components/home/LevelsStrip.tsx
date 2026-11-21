@@ -11,7 +11,7 @@ const LEVELS = [
 /** The CEFR ladder as a colour journey, from cool blue to gold. */
 export default function LevelsStrip() {
   return (
-    <section className="relative overflow-hidden bg-gradient-to-br from-[var(--navy-deep)] via-[var(--navy)] to-[#12325c] px-5 pb-32 pt-16 text-white sm:px-6 sm:pb-36 sm:pt-20">
+    <section className="relative overflow-hidden bg-gradient-to-br from-[var(--navy-deep)] via-[var(--navy)] to-[#12325c] px-5 pb-16 pt-16 text-white sm:px-6 sm:pb-20 sm:pt-20">
       <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-[var(--gold-bright)]/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -left-16 h-80 w-80 rounded-full bg-[var(--sky)]/30 blur-3xl" />
       <div className="relative mx-auto max-w-6xl">
