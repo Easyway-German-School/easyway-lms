@@ -5,7 +5,12 @@ import { useEffect } from "react";
 import type { StudentAccess } from "@/lib/access";
 import { renderedLockOf, type PortalVerdict } from "@/lib/portal-verdict";
 
-type WitnessedAccess = StudentAccess & { hasPhoto: boolean; verdict?: PortalVerdict; computedAt?: number };
+type WitnessedAccess = StudentAccess & {
+  hasPhoto: boolean;
+  portalPaused?: boolean;
+  verdict?: PortalVerdict;
+  computedAt?: number;
+};
 
 const STORAGE_KEY = "ew:portal-witness";
 /** A locked student is re-reported this often, so a screen stuck on old data is noticed. */
