@@ -60,6 +60,9 @@ export function dueStep(facts: ScheduleFacts, sent: ReadonlySet<JourneyStep>, no
     prep_invite: () =>
       paid && sent.has("payment_confirmed") && (sent.has("info_check") || Boolean(facts.infoConfirmedAt)) &&
       !facts.prepInterestAt && (since(facts.verifiedAt) ?? 0) >= 3 && daysToExam >= 10,
+    // Never scheduled — excluded from JOURNEY_ORDER below, so this rule is never consulted; it exists only
+    // because Record<JourneyStep, ...> requires every step to have one.
+    registration_link: () => false,
     admission: () => Boolean(facts.admittedAt) && daysToExam >= 0,
     // The guide follows the letter by a day — or straight away when the exam is close.
     exam_guide: () =>

@@ -50,6 +50,8 @@ export function contextFor(b: BookingForJourney, now = new Date()): EmailContext
     idUploaded: Boolean(b.passportDataPageUrl),
     daysToExam: calendarDaysBetween(now, b.session.startDate),
     certificateCollection: b.certificateCollection,
+    examRegistrationLink: b.examRegistrationLink,
+    examRegistrationDeadline: b.examRegistrationDeadline ? formatDate(b.examRegistrationDeadline) : null,
     candidateDetails: [
       { label: "Full name", value: b.fullName },
       { label: "Date of birth", value: formatDate(b.dateOfBirth) },
@@ -129,6 +131,25 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
     });
   }
   return { ok: true };
+}
+
+/**
+ * ÖSD hands Easyway a candidate's own Panthexa registration link on its own
+ * schedule, not ours — so, unlike every other step, this one is never
+ * scheduled by the daily sweep (it's deliberately left out of JOURNEY_ORDER).
+ * The office pastes the link in and this saves it and sends it immediately,
+ * `force`d past the once-only guard so a typo can be corrected and resent.
+ */
+export async function sendRegistrationLink(bookingId: string, link: string, deadline: Date | null): Promise<SendResult> {
+  await prisma.examBooking.update({
+    where: { id: bookingId },
+    data: { examRegistrationLink: link, examRegistrationDeadline: deadline },
+  });
+  const result = await sendJourneyStep(bookingId, "registration_link", { force: true });
+  if (result.ok) {
+    await prisma.examBooking.update({ where: { id: bookingId }, data: { registrationLinkSentAt: new Date() } });
+  }
+  return result;
 }
 
 /** Fire-and-log wrapper for the immediate, action-triggered sends: an email hiccup must never fail the action that caused it. */

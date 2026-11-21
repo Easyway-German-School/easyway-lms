@@ -20,6 +20,7 @@ export type JourneyStep =
   | "payment_confirmed" // Document B — with the receipt attached
   | "info_check" // Document C
   | "prep_invite" // the one soft prep-class note
+  | "registration_link" // ÖSD's own Panthexa registration link — office-triggered, not scheduled
   | "admission" // Document D
   | "exam_guide" // Documents E + F
   | "reminder_7day" // Document I
@@ -28,7 +29,12 @@ export type JourneyStep =
   | "result_released" // Document K
   | "certificate_ready"; // Document M
 
-/** Every step, in the order a candidate meets them. */
+/**
+ * Every step the daily sweep schedules, in the order a candidate meets them.
+ * `registration_link` is deliberately absent — ÖSD hands Easyway that link on
+ * its own schedule, not ours, so it only ever goes out when the office enters
+ * it and sends it (see lib/journey.ts sendRegistrationLink), never from dueStep().
+ */
 export const JOURNEY_ORDER: JourneyStep[] = [
   "booking_received", "payment_reminder", "payment_confirmed", "info_check", "prep_invite",
   "admission", "exam_guide", "reminder_7day", "reminder_24h", "result_pending", "result_released", "certificate_ready",
@@ -63,6 +69,9 @@ export type EmailContext = {
   daysToExam: number;
   certificateCollection: string | null;
   candidateDetails: { label: string; value: string }[];
+  /** ÖSD's own Panthexa registration link and its deadline — set only once the office has entered them. */
+  examRegistrationLink: string | null;
+  examRegistrationDeadline: string | null;
 };
 
 export type RenderedEmail = {
@@ -296,6 +305,29 @@ function prepInvite(ctx: EmailContext): RenderedEmail {
   };
 }
 
+/**
+ * Office-triggered, not scheduled: sent the moment ÖSD hands Easyway a
+ * candidate's own Panthexa registration link (lib/journey.ts
+ * sendRegistrationLink). Never rendered without a link — the caller checks
+ * `examRegistrationLink` first.
+ */
+function registrationLink(ctx: EmailContext): RenderedEmail {
+  return {
+    subject: subject("Complete Your ÖSD Registration", ctx),
+    attach: null,
+    html: layout(`Your exam date has been confirmed — complete your registration.`, [
+      hello(ctx),
+      p(`Your exam date on <strong>${e(ctx.examDate)}</strong> has been confirmed. Here is your registration link.`),
+      ctx.examRegistrationDeadline
+        ? p(`The registration deadline is <strong>${e(ctx.examRegistrationDeadline)}</strong>. The link will remain active until then.`)
+        : p(`Please complete your registration as soon as possible — this link will not remain active indefinitely.`),
+      button("Complete my registration", ctx.examRegistrationLink ?? ctx.bookingUrl),
+      p(`If the button above doesn't work, copy and paste this address into your browser:<br/><a href="${e(ctx.examRegistrationLink ?? "")}" style="color:${NAVY};word-break:break-all">${e(ctx.examRegistrationLink ?? "")}</a>`),
+      sign(),
+    ].join("")),
+  };
+}
+
 function admission(ctx: EmailContext): RenderedEmail {
   return {
     subject: subject("Admission Confirmed", ctx),
@@ -454,6 +486,7 @@ const RENDERERS: Record<JourneyStep, (ctx: EmailContext) => RenderedEmail> = {
   payment_confirmed: paymentConfirmed,
   info_check: infoCheck,
   prep_invite: prepInvite,
+  registration_link: registrationLink,
   admission,
   exam_guide: examGuide,
   reminder_7day: reminder7,
