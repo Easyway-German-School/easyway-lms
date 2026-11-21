@@ -174,7 +174,8 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
     select: {
       id: true,
       studentCode: true,
-      status: true,
+      // status comes from STUDENT_ACCESS_SELECT, spread below. Listing it
+      // here as well fails the production type check.
       branchId: true,
       tutorId: true,
       sessionSlot: true,
