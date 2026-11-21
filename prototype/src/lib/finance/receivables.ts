@@ -108,7 +108,9 @@ export function agingBucketFor(daysEnrolled: number): AgingBucketId {
 export const FINANCE_STUDENT_SELECT = {
   id: true,
   level: true,
-  attempt: true,
+  // Retake "attempt" lives on TuitionCharge, not Student. Selecting it here
+  // made every finance screen that spreads this object — Travel Package
+  // included — fail Prisma validation and return an empty roster.
   status: true,
   classType: true,
   pathway: true,

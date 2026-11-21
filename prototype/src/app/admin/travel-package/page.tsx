@@ -70,8 +70,14 @@ export default function TravelPackagePage() {
     setError("");
     try {
       const res = await fetch("/api/admin/travel-package", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not load the Travel Package roster");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          (typeof data.error === "string" && data.error) ||
+            (typeof data.message === "string" && data.message) ||
+            "Could not load the Travel Package roster",
+        );
+      }
       setStudents(data.students ?? []);
       setPackagePrice(data.packagePrice ?? 980000);
       setMinFirstPayment(data.minFirstPayment ?? 588000);
