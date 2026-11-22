@@ -569,8 +569,12 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
 function DocumentsPanel({ booking, email, onChange, highlight }: { booking: Booking; email: string; onChange: () => void; highlight?: boolean }) {
   const [busy, setBusy] = useState<null | "photo" | "dataPage">(null);
   const [error, setError] = useState("");
+  const [picked, setPicked] = useState<{ photo: File | null; dataPage: File | null }>({ photo: null, dataPage: null });
+  const [saved, setSaved] = useState<{ photo: boolean; dataPage: boolean }>({ photo: false, dataPage: false });
 
-  async function upload(kind: "photo" | "dataPage", file: File) {
+  async function upload(kind: "photo" | "dataPage") {
+    const file = picked[kind];
+    if (!file) return;
     setBusy(kind);
     setError("");
     try {
@@ -582,6 +586,8 @@ function DocumentsPanel({ booking, email, onChange, highlight }: { booking: Book
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not save that document");
+      setSaved((s) => ({ ...s, [kind]: true }));
+      setPicked((p) => ({ ...p, [kind]: null }));
       onChange();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save that document");
@@ -599,7 +605,7 @@ function DocumentsPanel({ booking, email, onChange, highlight }: { booking: Book
         {highlight ? "This is what's needed next" : "Documents"}
       </p>
       {highlight && !booking.passportDataPageUrl && (
-        <p className="mt-1 text-sm text-[var(--navy)]">Upload the data page of your passport below to move on to admission.</p>
+        <p className="mt-1 text-sm text-[var(--navy)]">Choose your passport's data page below, then tap Upload.</p>
       )}
       {highlight && booking.passportDataPageUrl && booking.documentStatus === "pending" && (
         <p className="mt-1 text-sm text-[var(--navy)]">Received — our office is reviewing it now.</p>
@@ -613,15 +619,55 @@ function DocumentsPanel({ booking, email, onChange, highlight }: { booking: Book
       )}
       {booking.documentStatus === "approved" && <p className="mt-2 text-xs font-semibold text-[var(--green)]">Approved</p>}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-semibold text-[var(--navy)]">
-          Passport photograph {booking.passportPhotoUrl ? "✓" : ""}
-          <input type="file" accept="image/*" disabled={busy === "photo"} onChange={(e) => e.target.files?.[0] && upload("photo", e.target.files[0])} className="mt-1 block w-full text-xs" />
-        </label>
-        <label className="block text-xs font-semibold text-[var(--navy)]">
-          Passport data page {booking.passportDataPageUrl ? "✓" : ""}
-          <input type="file" accept="image/*,application/pdf" disabled={busy === "dataPage"} onChange={(e) => e.target.files?.[0] && upload("dataPage", e.target.files[0])} className="mt-1 block w-full text-xs" />
-        </label>
+        <UploadField
+          label="Passport photograph"
+          accept="image/*"
+          already={Boolean(booking.passportPhotoUrl)}
+          file={picked.photo}
+          busy={busy === "photo"}
+          justSaved={saved.photo}
+          onPick={(f) => setPicked((p) => ({ ...p, photo: f }))}
+          onUpload={() => upload("photo")}
+        />
+        <UploadField
+          label="Passport data page"
+          accept="image/*,application/pdf"
+          already={Boolean(booking.passportDataPageUrl)}
+          file={picked.dataPage}
+          busy={busy === "dataPage"}
+          justSaved={saved.dataPage}
+          onPick={(f) => setPicked((p) => ({ ...p, dataPage: f }))}
+          onUpload={() => upload("dataPage")}
+        />
       </div>
+    </div>
+  );
+}
+
+function UploadField({ label, accept, already, file, busy, justSaved, onPick, onUpload }: {
+  label: string; accept: string; already: boolean; file: File | null; busy: boolean; justSaved: boolean;
+  onPick: (f: File | null) => void; onUpload: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <label className="block text-xs font-semibold text-[var(--navy)]">
+        {label} {already && !file ? "✓" : ""}
+        <input
+          type="file" accept={accept} disabled={busy}
+          onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          className="mt-1 block w-full text-xs"
+        />
+      </label>
+      {file && (
+        <button
+          onClick={onUpload}
+          disabled={busy}
+          className="mt-2 w-full rounded-lg bg-[var(--navy)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+        >
+          {busy ? "Uploading…" : `Upload ${file.name}`}
+        </button>
+      )}
+      {justSaved && !file && <p className="mt-1.5 text-[11px] font-semibold text-[var(--green)]">✓ Saved</p>}
     </div>
   );
 }

@@ -499,3 +499,22 @@ const RENDERERS: Record<JourneyStep, (ctx: EmailContext) => RenderedEmail> = {
 export function renderJourneyEmail(step: JourneyStep, ctx: EmailContext): RenderedEmail {
   return RENDERERS[step](ctx);
 }
+
+/**
+ * The office's own free-text note — same letterhead and signature as every
+ * other candidate email, but whatever subject and message the office typed,
+ * not one of the fixed journey steps. `message` is plain text from an admin
+ * textarea: escaped, then each blank line becomes a paragraph break.
+ */
+export function renderCustomEmail(fullName: string, referenceCode: string, subjectLine: string, message: string): RenderedEmail {
+  const paragraphs = message.split(/\n{2,}/).map((para) => p(e(para).replace(/\n/g, "<br/>"))).join("");
+  return {
+    subject: `[Easyway ÖSD] ${subjectLine} – ${referenceCode}`,
+    attach: null,
+    html: layout(subjectLine, [
+      p(`Dear ${e(firstNameOf(fullName))},`),
+      paragraphs,
+      sign(),
+    ].join("")),
+  };
+}
