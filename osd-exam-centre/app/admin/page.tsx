@@ -37,6 +37,19 @@ type Booking = {
   specialNeeds: string | null;
   prepInterestAt: string | null;
   certificateCollection: string | null;
+  phone: string;
+  gender: string | null;
+  dateOfBirth: string;
+  placeOfBirth: string;
+  countryOfBirth: string | null;
+  addressLine: string | null;
+  city: string | null;
+  country: string;
+  panthexaReference: string | null;
+  registeredAt: string | null;
+  consentAcceptedAt: string | null;
+  examRegistrationLink: string | null;
+  examRegistrationDeadline: string | null;
   session: { id: string; title: string; level: string; startDate: string };
   derived: { key: string; number: number | null; label: string; staffNext: string | null; tone: "neutral" | "waiting" | "action" | "good" | "bad" };
   checklist: { label: string; done: boolean }[];
@@ -69,6 +82,27 @@ const TONE: Record<Booking["derived"]["tone"], string> = {
 };
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
+
+/** Office-side version of the same candidate upload flow — for a walk-in or Panthexa candidate
+ *  whose ID the office is scanning in person, rather than the candidate uploading it themselves. */
+async function officeUploadDocument(kind: "photo" | "dataPage", file: File, reference: string, email: string): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("folder", kind === "photo" ? "photos" : "documents");
+  form.append("reference", reference);
+  form.append("email", email);
+  const uploadRes = await fetch("/api/upload", { method: "POST", body: form });
+  const uploadData = await uploadRes.json();
+  if (!uploadRes.ok) throw new Error(uploadData.error ?? "Upload failed");
+
+  const res = await fetch(`/api/bookings/${reference}/documents`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, ...(kind === "photo" ? { passportPhotoUrl: uploadData.url } : { passportDataPageUrl: uploadData.url }) }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Could not save that document");
+}
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -187,7 +221,7 @@ export default function AdminDashboard() {
         <div className="mt-5 space-y-3">
           {shown.length === 0 && <p className="text-sm text-[var(--ink-soft)]">Nothing here.</p>}
           {shown.map((b) => (
-            <CandidateCard key={b.id} b={b} busy={busyId === b.id} act={(body, success) => act(b.id, body, success)} />
+            <CandidateCard key={b.id} b={b} busy={busyId === b.id} act={(body, success) => act(b.id, body, success)} onUploaded={load} />
           ))}
         </div>
       </div>
@@ -195,9 +229,12 @@ export default function AdminDashboard() {
   );
 }
 
-function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body: Record<string, unknown>, success?: string) => Promise<boolean> }) {
+function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean; act: (body: Record<string, unknown>, success?: string) => Promise<boolean>; onUploaded: () => void }) {
   const [verifying, setVerifying] = useState(false);
   const [showEmails, setShowEmails] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [officeUploadBusy, setOfficeUploadBusy] = useState<null | "photo" | "dataPage">(null);
+  const [officeUploadError, setOfficeUploadError] = useState("");
   const [amount, setAmount] = useState(String(b.feeTotal));
   const [paidOn, setPaidOn] = useState(isoToday());
   const [txRef, setTxRef] = useState(b.transferReference ?? "");
@@ -208,6 +245,19 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
   const moneyIn = b.paymentStatus === "unpaid" || b.paymentStatus === "pending_verification";
   const docsToReview = b.passportDataPageUrl && b.documentStatus === "pending";
   const sent = new Set(b.journeyEmails.map((e) => e.step));
+
+  async function officeUpload(kind: "photo" | "dataPage", file: File) {
+    setOfficeUploadBusy(kind);
+    setOfficeUploadError("");
+    try {
+      await officeUploadDocument(kind, file, b.referenceCode, b.email);
+      onUploaded();
+    } catch (e) {
+      setOfficeUploadError(e instanceof Error ? e.message : "Could not save that document");
+    } finally {
+      setOfficeUploadBusy(null);
+    }
+  }
 
   async function verify() {
     const ok = await act(
@@ -222,7 +272,10 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-[var(--navy)]">
-            {b.fullName} <span className="font-mono text-xs text-[var(--ink-soft)]">{b.referenceCode}</span>
+            <button onClick={() => setShowDetails((v) => !v)} className="underline decoration-dotted underline-offset-2 hover:decoration-solid">
+              {b.fullName}
+            </button>{" "}
+            <span className="font-mono text-xs text-[var(--ink-soft)]">{b.referenceCode}</span>
           </p>
           <p className="text-xs text-[var(--ink-soft)]">
             {b.session.title} · {b.modules.includes("full") ? "Written + Oral" : b.modules.join(" + ")}{b.express ? " · express" : ""} · {b.email} · ₦{b.feeTotal.toLocaleString()}
@@ -254,7 +307,11 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
       {b.paymentStatus === "paid" && live && !["admitted", "result_pending", "result_released", "certificate_ready", "certificate_delivered"].includes(key) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {b.checklist.map((c) => (
-            <span key={c.label} className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold ${c.done ? "bg-[var(--green-soft)] text-[var(--green)]" : "bg-[var(--paper)] text-[var(--ink-soft)] ring-1 ring-[var(--line)]"}`}>
+            <span
+              key={c.label}
+              title={c.done ? undefined : b.derived.staffNext ?? "Not done yet — nothing to click here until it is."}
+              className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold ${c.done ? "bg-[var(--green-soft)] text-[var(--green)]" : "bg-[var(--paper)] text-[var(--ink-soft)] ring-1 ring-[var(--line)]"}`}
+            >
               {c.done ? "✓" : "○"} {c.label}
             </span>
           ))}
@@ -352,6 +409,55 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
         </div>
       )}
 
+      {showDetails && (
+        <div className="mt-3 rounded-sm border border-[var(--line)] bg-[var(--paper)] p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">What they entered while registering</p>
+          <dl className="mt-2 grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+            <Detail label="Phone" value={b.phone} />
+            <Detail label="Gender" value={b.gender} />
+            <Detail label="Date of birth" value={new Date(b.dateOfBirth).toLocaleDateString("en-GB")} />
+            <Detail label="Place of birth" value={b.placeOfBirth} />
+            <Detail label="Country of birth" value={b.countryOfBirth} />
+            <Detail label="Citizenship" value={b.nationality} />
+            <Detail label="Address" value={b.addressLine} />
+            <Detail label="City" value={b.city} />
+            <Detail label="Country (residence)" value={b.country} />
+            <Detail label="Repeat attempt" value={b.isRepeatAttempt ? "Yes" : "No"} />
+            {b.panthexaReference && <Detail label="Panthexa reference" value={b.panthexaReference} />}
+            {b.registeredAt && <Detail label="Registered on Panthexa" value={new Date(b.registeredAt).toLocaleDateString("en-GB")} />}
+            {b.consentAcceptedAt && <Detail label="Consented" value={new Date(b.consentAcceptedAt).toLocaleString("en-GB")} />}
+            {b.examRegistrationLink && <Detail label="ÖSD registration link sent" value="Yes — see /admin/registration-links" />}
+          </dl>
+
+          {b.documentStatus !== "approved" && (
+            <div className="mt-3 border-t border-[var(--line)] pt-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">
+                Upload their ID for them (walk-in or if they can&apos;t upload it themselves)
+              </p>
+              {officeUploadError && <p className="mt-1 text-xs text-[var(--red)]">{officeUploadError}</p>}
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <label className="block text-xs font-semibold text-[var(--navy)]">
+                  Passport photograph {b.passportPhotoUrl ? "✓" : ""}
+                  <input
+                    type="file" accept="image/*" disabled={officeUploadBusy === "photo"}
+                    onChange={(e) => e.target.files?.[0] && officeUpload("photo", e.target.files[0])}
+                    className="mt-1 block w-full text-xs"
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-[var(--navy)]">
+                  Passport data page {b.passportDataPageUrl ? "✓" : ""}
+                  <input
+                    type="file" accept="image/*,application/pdf" disabled={officeUploadBusy === "dataPage"}
+                    onChange={(e) => e.target.files?.[0] && officeUpload("dataPage", e.target.files[0])}
+                    className="mt-1 block w-full text-xs"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {docsToReview && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-sm bg-blue-50 p-2.5">
           <span className="text-xs font-semibold text-blue-900">ID documents:</span>
@@ -398,6 +504,16 @@ function CandidateCard({ b, busy, act }: { b: Booking; busy: boolean; act: (body
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string | null }) {
+  if (!value) return null;
+  return (
+    <div>
+      <dt className="inline text-[var(--ink-soft)]">{label}: </dt>
+      <dd className="inline font-semibold text-[var(--navy)]">{value}</dd>
     </div>
   );
 }
