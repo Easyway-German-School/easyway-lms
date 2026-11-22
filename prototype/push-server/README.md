@@ -1,20 +1,30 @@
 # Self-hosted push server
 
-Replaces `/api/portal/updates` polling (37K Vercel invocations/day — the
-single highest-volume route in production per Vercel's Observability
-dashboard, 2026-11-15) with a real connection: one process on a box we
-already pay for, pushing to every signed-in browser instead of each one
-asking every 8-12 seconds.
+Replaces `/api/portal/updates` AND `/api/live/state` polling (the two
+highest-volume routes in production — `/api/portal/updates` was 37K Vercel
+invocations/day per Observability, 2026-11-15) with a real connection: one
+process on a box we pay for directly, pushing to every signed-in browser
+instead of each one asking every 8-20 seconds.
 
-**Built, tested, NOT deployed, NOT wired into any client.** Nothing changes
-for real users until someone deliberately does both:
+**Code built and tested; client side fully wired; this PROCESS is not yet
+deployed anywhere.** The client (`PortalUpdates.tsx`, `push-client.ts`,
+`portal-state.ts`, `useLiveClass.tsx`) always tries to connect — nothing
+changes for real users until someone deliberately does both:
 
-1. Runs this process somewhere reachable from the internet.
-2. Sets `NEXT_PUBLIC_PUSH_SERVER_URL` in the app's production environment.
+1. Runs this process somewhere reachable from the internet, behind TLS
+   (wss://, not ws://).
+2. Sets `NEXT_PUBLIC_PUSH_SERVER_URL` in the app's production environment
+   and triggers a PRODUCTION BUILD (this is a `NEXT_PUBLIC_*` var — it is
+   baked in at build time, not read at runtime; a plain env-var update with
+   no rebuild does nothing). Per
+   [[feedback-vercel-redeploy-only-no-fresh-build]]: that rebuild must go
+   through the normal git push → Vercel git-integration pipeline, or
+   `vercel redeploy <existing-deployment-url>` — never a fresh `vercel --prod`
+   build from a local checkout.
 
-Until both of those happen, `src/lib/client/push-client.ts` is inert — see
-the comment at the top of that file. `PortalUpdates.tsx` has not been
-touched; it still only polls.
+Until both of those happen, `src/lib/client/push-client.ts`'s
+`connectPushUpdates` is a true no-op (see the comment at the top of that
+file) and every client behaves exactly as if none of this existed.
 
 ## Why this is a separate decision from building it
 
@@ -46,16 +56,25 @@ let's flip it on."
   (default 10s — matched to the "feels instant" bar the old 8-12s poll set,
   not tighter), one pass fans out to every currently-connected user in
   parallel; nobody with no open socket costs anything between ticks.
-- **Shared query logic** (`src/lib/portal-updates.ts`): extracted from the
-  Vercel route so both front doors call the exact same function, same as
-  `src/lib/cron-jobs.ts` did for the cron migration — one definition, no
-  drift risk, the actual query logic is reusable while the two front doors
-  have different trust models.
+- **Shared query logic** (`src/lib/portal-updates.ts`, `src/lib/live-state.ts`):
+  extracted from the Vercel routes so both front doors call the exact same
+  functions, same as `src/lib/cron-jobs.ts` did for the cron migration — one
+  definition, no drift risk, the actual query logic is reusable while the
+  two front doors have different trust models.
 - **Graceful degradation, not a hard cutover.** `push-client.ts` reconnects
-  with backoff on any drop. The plan (not yet built) is for `PortalUpdates.tsx`
-  to keep its existing poll as a backstop even after this is wired in — a
-  flaky mobile link losing the push connection should degrade to "as slow as
-  today", never "silently nothing".
+  with backoff on any drop. `PortalUpdates.tsx` and `useLiveClass.tsx` both
+  keep their existing HTTP poll as a backstop — backed off to a long interval
+  once the push connection is confirmed healthy (`portal-state.ts`'s
+  `usePushHealthy`), never disabled outright. A flaky mobile link losing the
+  push connection degrades to "as slow as today", never "silently nothing".
+- **Community unread** (`/api/community/unread`) is NOT answered by this
+  server on its own timer — `loadPortalUpdates` already computes that total
+  as part of its normal query, so it rides along on the same tick for free.
+  `portal-state.ts`'s `publishUnread` is what four separate client pollers
+  (the floating launcher, the Student/Lecturer/Admin shells) now read
+  instead of calling that route themselves. The route itself is untouched
+  and still answers correctly — nothing calls it from the client anymore,
+  but nothing is broken if something still does.
 
 ## Running it
 
@@ -73,30 +92,37 @@ optional.
 
 ## Where to run it
 
-Not decided. Candidates:
-- The existing Linode replica box (`139.162.150.61`) — already running the
-  cron worker, zero new infra cost, but mixes a new user-facing network
-  service onto a box that also hosts the hot-standby Postgres replica.
-- A new, small, dedicated box — cleaner isolation, but a new recurring cost
-  that hasn't been approved.
+**Recommendation: a new, small, dedicated box** (~$5-10/mo), not the
+existing Linode DB boxes. `139.162.159.191` (primary) and `139.162.150.61`
+(hot-standby replica) are confirmed to be running only Postgres + pgbouncer
++ backup/monitoring scripts today — no LMS clone, no cron worker, no push
+process. Putting a new, public-facing, always-on network service on either
+risks resource contention with live production Postgres for the sake of a
+~$5/mo saving; not worth it. This has NOT been provisioned yet — it needs
+either a Linode API token or a manually-created VPS + IP handed over.
 
-Either way: a firewall rule limiting the port to the app's own egress IPs
-isn't possible (Vercel's IPs aren't static, same reason `pg_hba.conf` is
-open on the DB boxes) — this is a public-ish endpoint gated by the
-push-token signature, not network position. TLS (wss://, not ws://) is
-required before this is reachable from a real browser on an https:// page
-— mixed content is blocked by every browser. Neither the box choice nor the
-TLS setup has been done.
+A firewall rule limiting the port to the app's own egress IPs isn't possible
+(Vercel's IPs aren't static, same reason `pg_hba.conf` is open on the DB
+boxes) — this is a public-ish endpoint gated by the push-token signature,
+not network position. TLS (wss://, not ws://) is required before this is
+reachable from a real browser on an https:// page — mixed content is
+blocked by every browser. Neither the box nor the TLS setup exists yet.
 
 ## What's NOT built yet
 
-- The actual integration into `PortalUpdates.tsx` (connect, merge pushed
-  updates with the existing poll results, keep the poll as backstop).
-- TLS / a reverse proxy in front of the raw `ws://` port.
-- Deploying this anywhere.
-- Extending the same pattern to the other high-volume polling routes
-  (`/api/community/unread`, `/api/live/recap`, `/api/community/typing/feed`)
-  — this only covers `/api/portal/updates`, the single biggest one.
+- Provisioning the actual box this runs on.
+- TLS / a reverse proxy (nginx + certbot via sslip.io, matching the pattern
+  used elsewhere in this project) in front of the raw `ws://` port.
+- Running this as a supervised process (systemd unit or equivalent) so it
+  restarts on crash/reboot — `npx tsx push-server/server.ts` run by hand
+  does not survive either.
+- Setting `NEXT_PUBLIC_PUSH_SERVER_URL` and getting the resulting rebuild
+  live in production.
+- Extending the same pattern to `/api/community/typing/feed` (needs a
+  genuinely different, event-driven design — its required latency is
+  faster than this tick's 10s interval) and `/api/live/recap` (low volume,
+  bounded to one screen, not worth it) — scoped and deliberately NOT done,
+  see the scoping note in chat history.
 
 Related: [[project-vercel-cost-migration-cron-phase1]],
 [[project-vercel-bill-oct2026-drivers]].

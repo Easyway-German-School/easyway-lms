@@ -1,14 +1,18 @@
 /**
- * The self-hosted real-time companion to /api/portal/updates — see
- * src/lib/portal-updates.ts for the shared query logic (the SAME function
- * this file calls on a timer is what the Vercel route calls per poll) and
- * src/lib/push-auth.ts for how a browser proves who it is without the
- * session cookie, which cannot cross to this server's own host/port.
+ * The self-hosted real-time companion to /api/portal/updates and
+ * /api/live/state — see src/lib/portal-updates.ts and src/lib/live-state.ts
+ * for the shared query logic (the SAME functions this file calls on a timer
+ * are what the Vercel routes call per poll) and src/lib/push-auth.ts for how
+ * a browser proves who it is without the session cookie, which cannot cross
+ * to this server's own host/port.
  *
- * NOT WIRED INTO ANY CLIENT YET. This process can be started and will
- * accept connections, but PortalUpdates.tsx still only polls — flipping a
- * client over to use this instead is a separate, deliberate decision. See
- * README.md in this folder for what that decision involves.
+ * The CLIENT side (PortalUpdates.tsx, push-client.ts, portal-state.ts,
+ * useLiveClass.tsx) is wired unconditionally — it is this PROCESS that must
+ * actually be running, reachable over WSS, and named by
+ * NEXT_PUBLIC_PUSH_SERVER_URL for any of that to do anything. Until all
+ * three are true, push-client.ts's `connectPushUpdates` is a true no-op and
+ * every client falls back to its normal HTTP poll — see README.md in this
+ * folder for the deploy steps.
  *
  * Runs with the same "trusted caller" posture as scripts/standalone-cron.ts:
  * no Next.js, no HTTP framework. Its own auth is the push-token scheme,
@@ -24,6 +28,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { runUnscoped } from "../src/lib/tenant/context";
 import { verifyPushToken } from "../src/lib/push-auth";
 import { loadPortalUpdates, type PortalUpdatesResult } from "../src/lib/portal-updates";
+import { loadLiveState, type LiveStateResult } from "../src/lib/live-state";
 import { prisma } from "../src/lib/prisma";
 
 const PORT = Number(process.env.PUSH_SERVER_PORT ?? 8081);
@@ -59,15 +64,31 @@ async function tick(): Promise<void> {
       // tab already has delivered.
       const since = states.reduce((earliest, s) => (s.since < earliest ? s.since : earliest), states[0]!.since);
       let result: PortalUpdatesResult;
+      let live: LiveStateResult | null;
       try {
-        result = await runUnscoped("push-server fan-out tick", () => loadPortalUpdates({ userId, role: states[0]!.role, since }));
+        [result, live] = await runUnscoped("push-server fan-out tick", () =>
+          Promise.all([
+            loadPortalUpdates({ userId, role: states[0]!.role, since }),
+            // Same "is my class live" query /api/live/state answers — sent on
+            // every tick alongside portal updates rather than its own timer,
+            // so a connected browser can retire that poll too.
+            loadLiveState(userId).catch((error) => {
+              console.error(`push-server: live-state failed for user ${userId}:`, error);
+              return null;
+            }),
+          ]),
+        );
       } catch (error) {
         console.error(`push-server: tick failed for user ${userId}:`, error);
         return;
       }
       const now = new Date(result.now);
       for (const client of states) {
-        if (result.updates.length > 0) send(client.socket, { type: "update", ...result });
+        // Always sent, not just when `updates` is non-empty: `unread` is a
+        // fresh snapshot every tick (e.g. read in another tab), not a delta,
+        // and a client gating its HTTP backstop off entirely on push health
+        // must still see it change without waiting for an actual new message.
+        send(client.socket, { type: "update", ...result, live });
         client.since = now;
       }
     }),

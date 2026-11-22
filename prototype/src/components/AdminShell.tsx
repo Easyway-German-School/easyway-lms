@@ -12,6 +12,7 @@ import AdminDailyBriefing from '@/components/AdminDailyBriefing';
 import NotificationCenter from '@/components/NotificationCenter';
 import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggle';
 import PortalUpdates from '@/components/PortalUpdates';
+import { useUnreadCount } from '@/lib/client/portal-state';
 import SignOutButton from '@/components/SignOutButton';
 import {
   AlertIcon,
@@ -230,8 +231,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [adminRoleLabel, setAdminRoleLabel] = useState<string | null>(null);
   /** Help requests nobody in the office has opened yet. Drives the ping. */
   const [unreadEnquiries, setUnreadEnquiries] = useState(0);
-  /** Unread community messages across every room in the school. */
-  const [unreadCommunity, setUnreadCommunity] = useState(0);
+  /** Unread community messages across every room in the school, read from PortalUpdates' own tick. See portal-state.ts. */
+  const unreadCommunity = useUnreadCount();
   /** Classes on air right now. Lights the Live classes entry. */
   const liveNow = useLiveCount();
 
@@ -279,36 +280,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
 
-  /**
-   * The community badge, same idea as the ping above. `/api/community/unread`
-   * is deliberately light — one bucketed count, no rows — and it resolves the
-   * admin scope to every room in the school, so this number is "unread anywhere
-   * in the community". The `easyway:unread-changed` event lets the floating
-   * launcher (or opening a room) drop the badge without waiting for the tick.
-   */
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/community/unread', { cache: 'no-store' });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        setUnreadCommunity(Number(data.total) || 0);
-      } catch {
-        /* A missing badge is not worth the noise. */
-      }
-    };
-
-    poll();
-    const timer = window.setInterval(poll, 120_000);
-    window.addEventListener('easyway:unread-changed', poll);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener('easyway:unread-changed', poll);
-    };
-  }, []);
 
   const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
 

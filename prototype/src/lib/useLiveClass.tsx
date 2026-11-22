@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useLiveStatePush, usePushHealthy } from "@/lib/client/portal-state";
 
 /**
  * "Is my class live?", asked once for the whole portal.
@@ -39,6 +40,15 @@ const POLL_MS = 20_000;
 /** Backed off to this once the tab is hidden. Nobody is looking. */
 const HIDDEN_POLL_MS = 90_000;
 
+/**
+ * How often the HTTP poll runs once the push server has confirmed it is
+ * live — a backstop, not the primary path. Same reasoning as
+ * PortalUpdates.tsx's POLL_BACKSTOP_MS: not disabled outright, since a stalled
+ * socket that never fires its own close event must not mean "never updates
+ * again".
+ */
+const POLL_BACKSTOP_MS = 120_000;
+
 export type LiveClassValue = {
   live: LiveClassState | null;
   loading: boolean;
@@ -76,6 +86,11 @@ function useLiveClassPoll(enabled = true): LiveClassValue {
   const [loading, setLoading] = useState(true);
   const timer = useRef<number | null>(null);
   const alive = useRef(true);
+  const pushHealthy = usePushHealthy();
+  const pushHealthyRef = useRef(pushHealthy);
+  useEffect(() => {
+    pushHealthyRef.current = pushHealthy;
+  }, [pushHealthy]);
 
   const poll = useCallback(async () => {
     try {
@@ -104,7 +119,7 @@ function useLiveClassPoll(enabled = true): LiveClassValue {
 
     function schedule() {
       if (timer.current) window.clearTimeout(timer.current);
-      const delay = document.hidden ? HIDDEN_POLL_MS : POLL_MS;
+      const delay = pushHealthyRef.current ? POLL_BACKSTOP_MS : document.hidden ? HIDDEN_POLL_MS : POLL_MS;
       timer.current = window.setTimeout(async () => {
         await poll();
         schedule();
@@ -129,6 +144,21 @@ function useLiveClassPoll(enabled = true): LiveClassValue {
       if (timer.current) window.clearTimeout(timer.current);
     };
   }, [enabled, poll]);
+
+  // The push path: /api/live/state's own answer, bundled onto the same tick
+  // as portal updates (see push-server/server.ts, live-state.ts). Applied the
+  // instant it arrives rather than waiting for the next poll tick — this is
+  // what lets the backstop above back off to begin with.
+  const { state: pushState, received: pushReceived } = useLiveStatePush();
+  useEffect(() => {
+    if (!enabled || !pushReceived || !pushState) return;
+    // Only the student shape applies here — see the comment on LiveClassProvider:
+    // this context is only ever provided from StudentShell.
+    if (pushState.role === "student" || pushState.role === null) {
+      setLive((pushState.live as LiveClassState | null) ?? null);
+      setLoading(false);
+    }
+  }, [enabled, pushReceived, pushState]);
 
   return useMemo(
     () => ({ live, loading: enabled && loading, refresh: poll }),

@@ -1,0 +1,34 @@
+; Copy to /etc/systemd/system/push-server.service on the box (drop the
+; .example suffix), adjust REPO_PATH-equivalent paths below, then:
+;
+;   systemctl daemon-reload
+;   systemctl enable --now push-server
+;   systemctl status push-server
+;   journalctl -u push-server -f        (live logs)
+;
+; Runs push-server/server.ts directly with tsx, same "no build step" pattern
+; as the cron worker. Restarts on crash or reboot — a bare `npx tsx ...` run
+; by hand does NOT survive either, which is the one thing this file exists
+; to fix.
+
+[Unit]
+Description=EasyWay LMS self-hosted push server (portal updates + live state)
+After=network.target
+
+[Service]
+Type=simple
+; Adjust to wherever the repo was cloned, e.g. /home/deploy/easyway-lms/prototype
+WorkingDirectory=/home/deploy/easyway-lms/prototype
+EnvironmentFile=/home/deploy/easyway-lms/prototype/.env.production
+ExecStart=/usr/bin/npx tsx push-server/server.ts
+Restart=on-failure
+RestartSec=5
+; Not root — create a dedicated unprivileged user if one doesn't already
+; exist from the cron-worker setup (`useradd -m deploy`).
+User=deploy
+Group=deploy
+StandardOutput=append:/var/log/push-server.log
+StandardError=append:/var/log/push-server.log
+
+[Install]
+WantedBy=multi-user.target

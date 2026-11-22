@@ -5,6 +5,7 @@ import Link from "next/link";
 import CommunityHub from "@/components/CommunityHub";
 import { TypingDots } from "@/components/typing/TypingUI";
 import { COMMUNITY_PANEL_EVENT, useTypingFeed } from "@/lib/client/typing-feed";
+import { useUnreadCount } from "@/lib/client/portal-state";
 
 /**
  * Floating launcher: a smiley button that opens the community hub inline,
@@ -32,40 +33,12 @@ function CloseIcon({ className }: { className?: string }) {
 
 export default function CommunityLauncher() {
   const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
+  // Read from PortalUpdates' own tick (push or poll) instead of running a
+  // separate poll for the same number — see portal-state.ts.
+  const unread = useUnreadCount();
   // Somebody mid-sentence in one of my rooms → a live bubble on the button.
   const typingFeed = useTypingFeed();
   const someoneTyping = !open && typingFeed.rooms.length > 0;
-
-  // Keep the badge current: poll while the panel is shut, and re-check on tab
-  // focus so someone coming back to the browser sees the truth immediately.
-  useEffect(() => {
-    let cancelled = false;
-
-    const refresh = async () => {
-      try {
-        // no-store: this same URL is polled over and over, and a memory-cache
-        // hit would freeze the badge on a stale number.
-        const res = await fetch("/api/community/unread", { cache: "no-store" });
-        const data = await res.json();
-        if (!cancelled) setUnread(Number(data.total) || 0);
-      } catch {
-        /* Offline or signed out — leave the last known count alone. */
-      }
-    };
-
-    refresh();
-    const timer = setInterval(refresh, 60_000);
-    window.addEventListener("focus", refresh);
-    window.addEventListener("easyway:unread-changed", refresh);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("easyway:unread-changed", refresh);
-    };
-  }, []);
 
   // Tell the floating typing pill to step aside while the chat itself is open —
   // the room shows its own dots.
