@@ -6,7 +6,7 @@ import { missingAdmissionFields } from "@/lib/candidate-status";
 import { arrivalClock, calendarDaysBetween, formatClock, formatDate, formatLongDate } from "@/lib/exam-time";
 import { buildInvoice, invoiceNumberFor, moduleSummary, paymentReferenceFor } from "@/lib/invoice";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
-import { renderJourneyEmail, type EmailContext, type JourneyStep } from "@/lib/journey-emails";
+import { renderCustomEmail, renderJourneyEmail, type EmailContext, type JourneyStep } from "@/lib/journey-emails";
 import { dueStep } from "@/lib/journey-schedule";
 
 /**
@@ -150,6 +150,27 @@ export async function sendRegistrationLink(bookingId: string, link: string, dead
     await prisma.examBooking.update({ where: { id: bookingId }, data: { registrationLinkSentAt: new Date() } });
   }
   return result;
+}
+
+/**
+ * The office's own free-text note to one candidate — not one of the fixed
+ * journey steps, so it's logged under its own unique step name each time
+ * (`custom:<timestamp>`) rather than the once-per-step slot every other
+ * email uses, so sending several of these to the same candidate doesn't
+ * collide with each other or overwrite the log.
+ */
+export async function sendCustomEmail(bookingId: string, subjectLine: string, message: string): Promise<SendResult> {
+  const booking = await prisma.examBooking.findUnique({ where: { id: bookingId } });
+  if (!booking) return { ok: false, error: "Booking not found" };
+
+  const rendered = renderCustomEmail(booking.fullName, booking.referenceCode, subjectLine, message);
+  const sent = await sendEmail({ to: booking.email, subject: rendered.subject, html: rendered.html });
+  if (!sent) return { ok: false, error: "The email could not be sent." };
+
+  await prisma.journeyEmail.create({
+    data: { bookingId, step: `custom:${Date.now()}`, subject: rendered.subject, toEmail: booking.email },
+  });
+  return { ok: true };
 }
 
 /** Fire-and-log wrapper for the immediate, action-triggered sends: an email hiccup must never fail the action that caused it. */

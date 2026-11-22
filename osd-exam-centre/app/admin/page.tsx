@@ -198,6 +198,7 @@ export default function AdminDashboard() {
         <div className="mt-4 flex flex-wrap gap-3">
           <PanthexaIntakeForm onCreated={load} />
           <ManualBookingForm onCreated={load} />
+          <BulkEmailForm />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -226,6 +227,104 @@ export default function AdminDashboard() {
         </div>
       </div>
     </AdminShell>
+  );
+}
+
+const CATEGORY_LABEL: Record<string, string> = {
+  unpaid: "Haven't paid",
+  id_missing: "Haven't uploaded their ID",
+  details_incomplete: "Details still incomplete",
+  everyone_live: "Everyone (not cancelled/no-show)",
+};
+
+/** One email to every live candidate matching a plain category — not the per-candidate "resend" dropdown, a mass send. */
+function BulkEmailForm() {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState("unpaid");
+  const [step, setStep] = useState("");
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">
+        Email a whole category…
+      </button>
+    );
+  }
+
+  async function send() {
+    const label = CATEGORY_LABEL[category];
+    const what = step ? STEP_LABEL[step] : `"${subject}"`;
+    if (!window.confirm(`Send ${what} to everyone in "${label}"? This emails every matching candidate right now.`)) return;
+    setSending(true);
+    setError("");
+    setResult("");
+    try {
+      const res = await fetch("/api/admin/bookings/bulk-email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(step ? { category, step } : { category, custom: { subject, message } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not send that");
+      setResult(`Matched ${data.matched}, sent ${data.sent}${data.failed ? `, ${data.failed} failed` : ""}.`);
+      setSubject("");
+      setMessage("");
+      setStep("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send that");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const ready = step ? true : Boolean(subject.trim() && message.trim());
+
+  return (
+    <div className="w-full seal-border rounded-sm bg-white p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-[var(--navy)]">Email a whole category</p>
+        <button onClick={() => setOpen(false)} className="text-xs font-semibold text-[var(--ink-soft)]">Close</button>
+      </div>
+      {error && <p className="mt-2 rounded-sm bg-[var(--red-soft)] p-2 text-xs text-[var(--red)]">{error}</p>}
+      {result && <p className="mt-2 rounded-sm bg-[var(--green-soft)] p-2 text-xs text-[var(--green)]">{result}</p>}
+
+      <label className="mt-3 block text-xs font-semibold text-[var(--navy)]">
+        Who
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-1 w-full rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs">
+          {Object.entries(CATEGORY_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+      </label>
+
+      <label className="mt-3 block text-xs font-semibold text-[var(--navy)]">
+        A fixed journey email…
+        <select value={step} onChange={(e) => setStep(e.target.value)} className="mt-1 w-full rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs">
+          <option value="">— or write a custom one below —</option>
+          {Object.entries(STEP_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+      </label>
+
+      {!step && (
+        <>
+          <input
+            value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
+            className="mt-3 w-full rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs"
+          />
+          <textarea
+            value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message to everyone in this category…" rows={4}
+            className="mt-2 w-full rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs"
+          />
+        </>
+      )}
+
+      <button disabled={sending || !ready} onClick={send} className="mt-3 rounded-sm bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">
+        {sending ? "Sending…" : "Send to this category"}
+      </button>
+    </div>
   );
 }
 
@@ -502,8 +601,55 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
               Send
             </button>
           </div>
+          <CustomEmailComposer bookingId={b.id} fullName={b.fullName} busy={busy} act={act} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** The office's own free-text note to this one candidate — for whatever isn't one of the fixed journey steps. */
+function CustomEmailComposer({ bookingId, fullName, busy, act }: { bookingId: string; fullName: string; busy: boolean; act: (body: Record<string, unknown>, success?: string) => Promise<boolean> }) {
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="mt-2 text-xs font-semibold text-[var(--navy)] underline underline-offset-4">
+        Or write a different email…
+      </button>
+    );
+  }
+
+  async function send() {
+    setSending(true);
+    try {
+      const ok = await act({ customEmail: { subject, message } }, `Sent to ${fullName}.`);
+      if (ok) { setSubject(""); setMessage(""); setOpen(false); }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-sm border border-[var(--line)] bg-[var(--paper)] p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Write a different email</p>
+      <input
+        value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
+        className="mt-2 w-full rounded-sm border border-[var(--line)] bg-white px-2 py-1.5 text-xs"
+      />
+      <textarea
+        value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your message to this candidate…" rows={4}
+        className="mt-2 w-full rounded-sm border border-[var(--line)] bg-white px-2 py-1.5 text-xs"
+      />
+      <div className="mt-2 flex gap-2">
+        <button disabled={busy || sending || !subject.trim() || !message.trim()} onClick={send} className="rounded-sm bg-[var(--navy)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+          {sending ? "Sending…" : "Send"}
+        </button>
+        <button onClick={() => setOpen(false)} className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)]">Cancel</button>
+      </div>
     </div>
   );
 }

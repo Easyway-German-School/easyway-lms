@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/admin-auth";
 import { cancelBooking, confirmBookingPayment, markNoShow, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
 import { admitCandidate, markCertificateDelivered, markCertificateReady, releaseResult } from "@/lib/lifecycle";
-import { sendJourneyStep, sendRegistrationLink } from "@/lib/journey";
+import { sendCustomEmail, sendJourneyStep, sendRegistrationLink } from "@/lib/journey";
 import { JOURNEY_ORDER, type JourneyStep } from "@/lib/journey-emails";
 import { jsonRoute } from "@/lib/api-route";
 
@@ -87,6 +87,16 @@ export const PATCH = jsonRoute(async (req: NextRequest, { params }: { params: Pr
       if (Number.isNaN(deadline.getTime())) return NextResponse.json({ error: "Enter a valid registration deadline." }, { status: 400 });
     }
     const result = await sendRegistrationLink(id, link, deadline);
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // The office writing a one-off note that isn't any of the fixed journey steps.
+  if (body.customEmail) {
+    const subjectLine = String(body.customEmail.subject ?? "").trim();
+    const message = String(body.customEmail.message ?? "").trim();
+    if (!subjectLine || !message) return NextResponse.json({ error: "A subject and a message are required." }, { status: 400 });
+    const result = await sendCustomEmail(id, subjectLine, message);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
     return NextResponse.json({ ok: true });
   }
