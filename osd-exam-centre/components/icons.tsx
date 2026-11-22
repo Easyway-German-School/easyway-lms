@@ -128,3 +128,16 @@ export const HomeIcon = make(
   </>,
 );
 export const MountainIcon = make(<path d="M2 20l6.5-11 4 6.5L15 12l7 8H2z" />);
+export const EyeIcon = make(
+  <>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+    <circle cx="12" cy="12" r="3" />
+  </>,
+);
+export const EyeOffIcon = make(
+  <>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 5.2A10.6 10.6 0 0112 5c6.5 0 10 7 10 7a16.9 16.9 0 01-3.6 4.6M6.6 6.6C4 8.3 2 12 2 12s3.5 7 10 7a10 10 0 004.4-1" />
+    <path d="M9.9 9.9a3 3 0 004.2 4.2" />
+  </>,
+);
