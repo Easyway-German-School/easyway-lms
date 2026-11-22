@@ -126,6 +126,9 @@ function BookingPageInner() {
         ) : (
           <div className="rounded-2xl bg-white p-6 shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5 sm:p-8">
             <JourneyTracker booking={booking} />
+            {booking.journey.find((s) => s.key === "id")?.state === "current" && (
+              <DocumentsPanel booking={booking} email={email} onChange={load} highlight />
+            )}
             {paid ? (
               <RegistrationProgress booking={booking} email={email} onChange={load} />
             ) : (
@@ -134,7 +137,9 @@ function BookingPageInner() {
           </div>
         )}
 
-        {!admitted && <DocumentsPanel booking={booking} email={email} onChange={load} />}
+        {!admitted && booking.journey.find((s) => s.key === "id")?.state !== "current" && (
+          <DocumentsPanel booking={booking} email={email} onChange={load} />
+        )}
       </main>
       <SiteFooter />
     </div>
@@ -514,7 +519,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
                 Pay from a commercial bank, not a wallet/MFB app. This booking is not reversible or refundable once confirmed.
               </p>
               <label className="mt-4 block text-xs font-semibold text-[var(--navy)]">
-                Upload your payment receipt
+                Upload your payment receipt (required)
                 <input type="file" accept="image/*,application/pdf" onChange={(e) => setSlipFile(e.target.files?.[0] ?? null)} className="mt-1 block w-full text-xs" />
               </label>
               <input
@@ -528,6 +533,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
               >
                 {submitting ? "Submitting…" : "I've paid — submit receipt"}
               </button>
+              {!slipFile && <p className="mt-1.5 text-[11px] text-[var(--ink-soft)]">Choose the receipt file above first — the button turns on once one is selected.</p>}
             </>
           )}
 
@@ -560,7 +566,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
   );
 }
 
-function DocumentsPanel({ booking, email, onChange }: { booking: Booking; email: string; onChange: () => void }) {
+function DocumentsPanel({ booking, email, onChange, highlight }: { booking: Booking; email: string; onChange: () => void; highlight?: boolean }) {
   const [busy, setBusy] = useState<null | "photo" | "dataPage">(null);
   const [error, setError] = useState("");
 
@@ -585,8 +591,22 @@ function DocumentsPanel({ booking, email, onChange }: { booking: Booking; email:
   }
 
   return (
-    <div className="mt-8 rounded-lg border border-[var(--line)] bg-[var(--paper-raised)] p-6 print:hidden">
-      <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Documents</p>
+    <div className={highlight
+      ? "mt-5 rounded-lg border-2 border-[var(--gold-bright)] bg-[var(--gold-soft)]/30 p-6 print:hidden"
+      : "mt-8 rounded-lg border border-[var(--line)] bg-[var(--paper-raised)] p-6 print:hidden"
+    }>
+      <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">
+        {highlight ? "This is what's needed next" : "Documents"}
+      </p>
+      {highlight && !booking.passportDataPageUrl && (
+        <p className="mt-1 text-sm text-[var(--navy)]">Upload the data page of your passport below to move on to admission.</p>
+      )}
+      {highlight && booking.passportDataPageUrl && booking.documentStatus === "pending" && (
+        <p className="mt-1 text-sm text-[var(--navy)]">Received — our office is reviewing it now.</p>
+      )}
+      {highlight && booking.documentStatus === "rejected" && booking.documentRejectedReason && (
+        <p className="mt-1 rounded-lg bg-[var(--red-soft)] p-2 text-xs text-[var(--red)]">{booking.documentRejectedReason} — please upload again.</p>
+      )}
       {error && <p className="mt-2 text-xs text-[var(--red)]">{error}</p>}
       {booking.documentRejectedReason && (
         <p className="mt-2 rounded-lg bg-[var(--red-soft)] p-2 text-xs text-[var(--red)]">{booking.documentRejectedReason}</p>
