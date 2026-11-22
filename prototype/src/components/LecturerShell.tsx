@@ -11,6 +11,7 @@ import { homePathForRole } from '@/lib/portal';
 import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
 import PortalUpdates from "@/components/PortalUpdates";
+import { useUnreadCount } from "@/lib/client/portal-state";
 import TypingNudge from "@/components/TypingNudge";
 import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -167,30 +168,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
    * on the sidebar's Community entry. Same light endpoint the student launcher
    * uses; `easyway:unread-changed` lets opening a room clear it early.
    */
-  const [unreadCommunity, setUnreadCommunity] = useState(0);
+  const unreadCommunity = useUnreadCount();
   /** This tutor's class is on air. Lights the Live classroom entry. Not polled inside /live, where they are already in it. */
   const liveNow = useLiveCount(!pathname?.startsWith('/live'));
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/community/unread', { cache: 'no-store' });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        setUnreadCommunity(Number(data.total) || 0);
-      } catch {
-        /* A missing badge is not worth the noise. */
-      }
-    };
-    poll();
-    const timer = window.setInterval(poll, 120_000);
-    window.addEventListener('easyway:unread-changed', poll);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener('easyway:unread-changed', poll);
-    };
-  }, []);
 
   useEffect(() => {
     setDrawerOpen(false);

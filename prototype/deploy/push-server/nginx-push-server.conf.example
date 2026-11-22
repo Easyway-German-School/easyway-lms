@@ -1,0 +1,40 @@
+# Reverse proxy: terminates TLS (wss://) and forwards to push-server's plain
+# ws:// on 127.0.0.1:8081. A browser on an https:// page refuses to open a
+# plain ws:// connection to anything but localhost (mixed content), so this
+# step is not optional once NEXT_PUBLIC_PUSH_SERVER_URL points at a real box.
+#
+# DOMAIN below: use sslip.io if there's no real domain pointed at this box's
+# IP yet — e.g. a box at 203.0.113.9 gets `203-0-113-9.sslip.io`, which
+# resolves to that IP with zero DNS setup (wildcard DNS Let's Encrypt can
+# issue a cert against). Swap for a real subdomain later with no client
+# change needed beyond updating NEXT_PUBLIC_PUSH_SERVER_URL.
+#
+# Setup:
+#   apt install -y nginx certbot python3-certbot-nginx
+#   cp nginx-push-server.conf.example /etc/nginx/sites-available/push-server
+#   # edit DOMAIN below first
+#   ln -s /etc/nginx/sites-available/push-server /etc/nginx/sites-enabled/
+#   nginx -t && systemctl reload nginx
+#   certbot --nginx -d DOMAIN   # issues the cert AND rewrites this file's
+#                                # server block to add the TLS directives —
+#                                # the block below is deliberately the
+#                                # pre-certbot, plain-HTTP starting point.
+
+server {
+    listen 80;
+    server_name DOMAIN; # e.g. 203-0-113-9.sslip.io
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        # Long-lived connections — the default proxy_read_timeout (60s) would
+        # kill an idle-but-open WebSocket well inside a normal browsing
+        # session. The client reconnects on any drop, but there's no reason
+        # to force it to.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
