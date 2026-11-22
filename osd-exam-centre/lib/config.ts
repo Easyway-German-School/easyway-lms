@@ -28,7 +28,7 @@ export const OFFICE = {
   centreName: "ÖSD EXAMINATION CENTRE",
   examCentreOnInvoice: "Easyway Language School Ltd.",
   addressLine: process.env.OFFICE_ADDRESS || "23, Unity Road, Ikeja, Lagos",
-  email: process.env.OFFICE_EMAIL || "exams@easywaylanguageschool.com",
+  email: process.env.OFFICE_EMAIL || "support@easywaylanguageschool.com",
   phone: process.env.OFFICE_PHONE || "+234 708 900 2534",
   website: process.env.OFFICE_WEBSITE || "www.easywaylanguageschool.com",
   /** Signs the booking confirmation (Document A). */

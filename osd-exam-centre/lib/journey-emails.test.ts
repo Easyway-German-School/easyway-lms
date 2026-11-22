@@ -40,7 +40,7 @@ describe("every journey email", () => {
     // Manual §47: "[Easyway ÖSD] <what> – <reference>"
     expect(email.subject).toMatch(/^\[Easyway ÖSD\] .+ – EW-OSD-2026-OBB052$/);
     expect(email.html).toContain("EW-OSD-2026-OBB052");
-    expect(email.html).toContain("exams@easywaylanguageschool.com"); // a contact channel, §46
+    expect(email.html).toContain("support@easywaylanguageschool.com"); // a contact channel, §46
     expect(step).toBeTruthy();
   });
 

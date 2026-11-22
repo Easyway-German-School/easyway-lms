@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SiteFooter } from "@/components/SiteChrome";
 import NeedHelp from "@/components/NeedHelp";
 import PageHero from "@/components/PageHero";
+import BookingJourney from "@/components/BookingJourney";
 import { ArrowRightIcon } from "@/components/icons";
 import vienna from "@/assets/images/vienna.jpg";
 
@@ -33,8 +34,6 @@ const MODULE_LABEL: Record<string, string> = {
 };
 
 const ID_TYPES = ["International Passport", "National ID Card (NIN)", "Driver's License", "Voter's Card", "Other"];
-
-const STEP_TITLES = ["Choose sitting", "Your details", "Modules & fee", "Review"];
 
 // Kept in sync by hand with lib/booking.ts's levelHasIndividualModules (this
 // client page can't import it — see the admin sessions page for why). A1/A2
@@ -153,21 +152,7 @@ export default function BookPage() {
         position="object-[40%_50%]"
       />
       <main className="relative z-10 mx-auto -mt-16 max-w-2xl px-5 pb-20 sm:px-6">
-        <div className="rounded-2xl bg-white px-5 py-4 shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5">
-          <div className="hidden items-center gap-2 sm:flex">
-            {STEP_TITLES.map((title, i) => (
-              <div key={title} className="flex flex-1 items-center gap-2">
-                <span className="step-dot" data-active={i === step} data-done={i < step} />
-                <span className={`text-xs font-medium ${i === step ? "text-[var(--navy)]" : "text-[var(--ink-soft)]"}`}>{title}</span>
-                {i < STEP_TITLES.length - 1 && <span className="h-px flex-1 bg-[var(--line)]" />}
-              </div>
-            ))}
-          </div>
-          <p className="text-xs font-semibold text-[var(--navy)] sm:hidden">
-            Step {step + 1} of {STEP_TITLES.length} · {STEP_TITLES[step]}
-          </p>
-        </div>
-
+        <BookingJourney step={step} />
         <div className="mt-3 flex items-center justify-between gap-3">
           <p className="text-xs text-[var(--ink-soft)]">Stuck on something?</p>
           <NeedHelp defaultEmail={form.email || undefined} defaultName={form.fullName || undefined} />
@@ -187,7 +172,7 @@ export default function BookPage() {
           style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
         />
 
-        <div className="mt-8 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
+        <div key={step} className="fade-up mt-8 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
           {step === 0 && (
             <div className="space-y-3">
               {!loaded ? (
