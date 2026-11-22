@@ -17,13 +17,13 @@ export default function HomePage() {
     <div className="min-h-screen">
       <main>
         <Hero />
-        <Marquee />
-        <Destinations />
         <LevelsStrip />
         <DeparturesBoard />
         <HowItWorks />
         <ExamDayEssentials />
+        <Destinations />
         <PrepBanner />
+        <Marquee />
       </main>
       <SiteFooter />
     </div>

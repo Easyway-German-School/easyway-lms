@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/admin-auth";
 import { cancelBooking, confirmBookingPayment, markNoShow, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
 import { admitCandidate, markCertificateDelivered, markCertificateReady, releaseResult } from "@/lib/lifecycle";
-import { sendJourneyStep } from "@/lib/journey";
+import { sendJourneyStep, sendRegistrationLink } from "@/lib/journey";
 import { JOURNEY_ORDER, type JourneyStep } from "@/lib/journey-emails";
 import { jsonRoute } from "@/lib/api-route";
 
@@ -72,6 +72,22 @@ export const PATCH = jsonRoute(async (req: NextRequest, { params }: { params: Pr
   if (body.certificateDelivered) {
     const result = await markCertificateDelivered(id);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // The office entering ÖSD's own Panthexa registration link (and its deadline) and emailing it to the
+  // candidate right away — see lib/journey.ts sendRegistrationLink. Re-enterable: a typo can be corrected
+  // and resent, same as resendStep below.
+  if (body.registrationLink) {
+    const link = String(body.registrationLink.link ?? "").trim();
+    if (!/^https?:\/\/\S+$/.test(link)) return NextResponse.json({ error: "Enter a valid registration link (starting with http:// or https://)." }, { status: 400 });
+    let deadline: Date | null = null;
+    if (body.registrationLink.deadline) {
+      deadline = new Date(String(body.registrationLink.deadline));
+      if (Number.isNaN(deadline.getTime())) return NextResponse.json({ error: "Enter a valid registration deadline." }, { status: 400 });
+    }
+    const result = await sendRegistrationLink(id, link, deadline);
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
     return NextResponse.json({ ok: true });
   }
 

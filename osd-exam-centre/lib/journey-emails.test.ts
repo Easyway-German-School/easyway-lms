@@ -29,6 +29,8 @@ const ctx: EmailContext = {
   daysToExam: 24,
   certificateCollection: "From 12 Nov, 10am–4pm, with valid ID",
   candidateDetails: [{ label: "Full name", value: "Dr. Yejide Lamina" }],
+  examRegistrationLink: "https://osd-examregistration.com/register/JTHDDX",
+  examRegistrationDeadline: "4 January 2027",
 };
 
 const all = JOURNEY_ORDER.map((step) => [step, renderJourneyEmail(step, ctx)] as const);
@@ -128,13 +130,36 @@ describe("the admission letter (Document D)", () => {
   });
 });
 
+describe("the ÖSD registration link (office-triggered, not scheduled)", () => {
+  it("is deliberately left out of the sweep's own order", () => {
+    expect(JOURNEY_ORDER).not.toContain("registration_link");
+  });
+  it("states the confirmed date, the deadline, and links to ÖSD's own registration page", () => {
+    const html = renderJourneyEmail("registration_link", ctx).html;
+    expect(html).toContain("Thursday, 29 October 2026");
+    expect(html).toContain("4 January 2027");
+    expect(html).toContain("https://osd-examregistration.com/register/JTHDDX");
+  });
+  it("falls back to a general urgency note when no deadline was given", () => {
+    const html = renderJourneyEmail("registration_link", { ...ctx, examRegistrationDeadline: null }).html;
+    expect(html).not.toContain("registration deadline is");
+    expect(html).toContain("as soon as possible");
+  });
+});
+
 describe("safety", () => {
   it("escapes a hostile candidate name in every email", () => {
     const evil = { ...ctx, fullName: `Eve <script>alert(1)</script> "Bobby" & Co` };
-    for (const step of JOURNEY_ORDER as JourneyStep[]) {
+    for (const step of [...JOURNEY_ORDER, "registration_link"] as JourneyStep[]) {
       const html = renderJourneyEmail(step, evil).html;
       expect(html, step).not.toContain("<script>");
     }
+  });
+
+  it("escapes a hostile registration link", () => {
+    const evil = { ...ctx, examRegistrationLink: `https://evil.example/"><script>alert(1)</script>` };
+    const html = renderJourneyEmail("registration_link", evil).html;
+    expect(html).not.toContain("<script>");
   });
 
   it("finds a first name past titles", () => {

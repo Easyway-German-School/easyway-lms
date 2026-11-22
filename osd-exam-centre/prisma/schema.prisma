@@ -167,6 +167,16 @@ model ExamBooking {
   /// The date they registered on Panthexa (printed on the invoice). Falls
   /// back to createdAt for a direct booking.
   registeredAt      DateTime?
+  /// The candidate's own ÖSD/Panthexa registration link — ÖSD sends this to
+  /// Easyway once the sitting is confirmed; the office pastes it in here and
+  /// the candidate is emailed immediately (lib/journey.ts sendRegistrationLink).
+  /// Null for a direct booking, which never goes through Panthexa.
+  examRegistrationLink     String?
+  /// The deadline printed in that email — after this date the link ÖSD gave
+  /// out is no longer active.
+  examRegistrationDeadline DateTime?
+  /// When the registration-link email actually went out — not set until it does.
+  registrationLinkSentAt   DateTime?
   /// EW-OSD-INV-2026-XXXXX — the same suffix as referenceCode so a bank
   /// narration ("LAMINA EW-OSD-INV-2026-OBB052") finds the booking at a glance.
   invoiceNumber     String?   @unique
