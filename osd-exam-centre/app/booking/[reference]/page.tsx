@@ -6,6 +6,7 @@ import { SiteFooter } from "@/components/SiteChrome";
 import PageHero from "@/components/PageHero";
 import NeedHelp from "@/components/NeedHelp";
 import EditBookingDetails from "@/components/EditBookingDetails";
+import Confetti from "@/components/Confetti";
 import hallstatt from "@/assets/images/hero-hallstatt.jpg";
 
 type Booking = {
@@ -472,6 +473,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
     <div>
       {justBooked && (
         <div className="relative mb-6 overflow-hidden rounded-xl bg-gradient-to-br from-[var(--navy)] via-[#12325c] to-[var(--navy)] px-5 py-5 text-white ring-1 ring-[var(--gold-bright)]/50">
+          <Confetti />
           <div className="pointer-events-none absolute -right-8 -top-10 h-32 w-32 rounded-full bg-[var(--gold-bright)]/25 blur-2xl" />
           <p className="font-serif-display relative text-xl font-semibold">
             Congratulations on your booking! <span aria-hidden="true">✈</span>
