@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findUser, comparePassword } = vi.hoisted(() => ({
+const { findUser, comparePassword, checkRateLimit } = vi.hoisted(() => ({
   findUser: vi.fn(),
   comparePassword: vi.fn(),
+  checkRateLimit: vi.fn(() => ({ ok: true, retryAfter: 0, remaining: 1 })),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -17,7 +18,7 @@ vi.mock("bcryptjs", () => ({
 }));
 
 vi.mock("@/lib/rate-limit", () => ({
-  checkRateLimit: () => ({ ok: true }),
+  checkRateLimit,
   clearRateLimit: vi.fn(),
   clientIp: () => "127.0.0.1",
 }));
@@ -81,5 +82,29 @@ describe("credentials sign-in", () => {
       where: { email: "student@example.com" },
     });
     expect(comparePassword).toHaveBeenCalledWith("correct-password", "stored-hash");
+  });
+
+  it("does not spend the shared school IP allowance on a correct password", async () => {
+    checkRateLimit.mockClear();
+    await authorize(
+      { email: "student@example.com", password: "correct-password" },
+      { headers: {} } as never,
+    );
+    const keys = checkRateLimit.mock.calls.map((call) => String(call[0]));
+    expect(keys).toContain("signin:email:student@example.com");
+    expect(keys.some((key) => key.startsWith("signin:ip:"))).toBe(false);
+  });
+
+  it("counts a wrong password against the shared IP, and still says invalid credentials", async () => {
+    comparePassword.mockResolvedValue(false);
+    checkRateLimit.mockClear();
+    await expect(
+      authorize(
+        { email: "student@example.com", password: "wrong-password" },
+        { headers: {} } as never,
+      ),
+    ).rejects.toThrow("Invalid credentials");
+    const keys = checkRateLimit.mock.calls.map((call) => String(call[0]));
+    expect(keys.some((key) => key.startsWith("signin:ip:"))).toBe(true);
   });
 });

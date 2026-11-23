@@ -37,9 +37,23 @@ export default function SignInForm() {
         return;
       }
 
-      // Candidates have no student portal to land in.
-      const me = await fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+      // The password can be accepted a moment before the session cookie is
+      // visible to the next request. Sending the student to the dashboard
+      // on an empty session bounces them straight back to this form.
+      let me: { user?: { role?: string } } | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        me = await fetch("/api/auth/session", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        if (me?.user?.role) break;
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+      }
       const role = String(me?.user?.role ?? "").toLowerCase();
+      if (!role) {
+        setError("Sign-in did not stick. Please try again in a moment.");
+        setLoading(false);
+        return;
+      }
       router.push(role === "candidate" ? "/candidate" : "/dashboard");
     } catch {
       // A network hiccup, a slow serverless function, or a non-JSON response

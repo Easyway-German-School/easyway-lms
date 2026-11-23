@@ -23,6 +23,26 @@
 
 const SESSION_COOKIE = /(^|\s|;)(__Secure-)?next-auth\.session-token(\.\d+)?=/;
 
+function readSetCookies(response: Response): string[] {
+  if (typeof response.headers.getSetCookie === "function") {
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length > 0) return cookies;
+  }
+  const raw = response.headers.get("set-cookie");
+  return raw ? [raw] : [];
+}
+
+/** True when the session route answered "there is no session". */
+async function emptySessionBody(response: Response): Promise<boolean> {
+  if (!response.ok) return false;
+  try {
+    const body: unknown = await response.clone().json();
+    return !body || typeof body !== "object" || Object.keys(body as object).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Does this Set-Cookie header delete a session-token cookie? */
 export function clearsSessionCookie(setCookie: string): boolean {
   if (!/^\s*(__Secure-)?next-auth\.session-token(\.\d+)?=/.test(setCookie)) return false;
@@ -55,9 +75,14 @@ export async function guardSessionResponse(input: {
   if (method !== "GET" || !pathname.endsWith("/api/auth/session")) return { action: "pass" };
   if (!requestCarriesSessionCookie(cookieHeader)) return { action: "pass" };
 
-  const setCookies =
-    typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
-  if (!setCookies.some(clearsSessionCookie)) return { action: "pass" };
+  const setCookies = readSetCookies(response);
+  const clearing = setCookies.some(clearsSessionCookie);
+  // An empty 200 is what the browser treats as "signed out". NextAuth does
+  // that both by clearing the cookie and, when the clear header is not
+  // visible to getSetCookie, by returning {} alone. A cookie that still
+  // decodes is not a sign-out either way.
+  const empty = clearing ? false : await emptySessionBody(response);
+  if (!clearing && !empty) return { action: "pass" };
 
   let decodes = false;
   try {
