@@ -29,11 +29,24 @@ import { runUnscoped } from "../src/lib/tenant/context";
 import { verifyPushToken } from "../src/lib/push-auth";
 import { loadPortalUpdates, type PortalUpdatesResult } from "../src/lib/portal-updates";
 import { loadLiveState, type LiveStateResult } from "../src/lib/live-state";
+import { typingFeedFor } from "../src/lib/community-typing";
 import { prisma } from "../src/lib/prisma";
 
 const PORT = Number(process.env.PUSH_SERVER_PORT ?? 8081);
 /** How often a connected user's updates are checked. Matches the "feels instant" bar the 8-12s HTTP poll set, not tighter — this is a replacement for that poll, not a reason to hit the DB harder than it did. */
 const POLL_INTERVAL_MS = Number(process.env.PUSH_POLL_INTERVAL_MS ?? 10_000);
+/**
+ * Typing is the one feed that genuinely needs faster delivery than the main
+ * tick — a ping only lives 7s (see community-typing.ts), and the client used
+ * to poll this one as fast as 2.5s for exactly that reason. A SEPARATE,
+ * faster loop rather than folding it into `tick()`: it is a different
+ * question (per-channel, not per-user state) with a different freshness
+ * bar, and `typingFeedFor` is a single cheap indexed read with its own 30s
+ * room-scope cache — cheap enough to ask this often for every connected
+ * user, which is the whole trade this box exists to make (DB load instead
+ * of per-poll Vercel invocations).
+ */
+const TYPING_INTERVAL_MS = Number(process.env.PUSH_TYPING_INTERVAL_MS ?? 3_000);
 const AUTH_TIMEOUT_MS = 10_000;
 
 const secret = process.env.NEXTAUTH_SECRET;
@@ -42,8 +55,23 @@ if (!secret) {
   process.exit(1);
 }
 
-type ClientState = { socket: WebSocket; userId: string; role: string | null; since: Date };
+type ClientState = {
+  socket: WebSocket;
+  userId: string;
+  role: string | null;
+  since: Date;
+  /** Last typing-feed signature sent to THIS socket, so an unchanged "nobody typing" doesn't repeat every 3s. */
+  typingSignature: string;
+};
 const clients = new Set<ClientState>();
+
+function typingSignatureOf(feed: { enabled: boolean; rooms: { channelId: string; typers: { id: string }[] }[] }): string {
+  return (
+    (feed.enabled ? "on" : "off") +
+    "|" +
+    feed.rooms.map((room) => `${room.channelId}:${room.typers.map((t) => t.id).join(",")}`).join("|")
+  );
+}
 
 function send(socket: WebSocket, payload: unknown) {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
@@ -95,6 +123,39 @@ async function tick(): Promise<void> {
   );
 }
 
+async function typingTick(): Promise<void> {
+  const byUser = new Map<string, ClientState[]>();
+  for (const client of clients) {
+    const list = byUser.get(client.userId) ?? [];
+    list.push(client);
+    byUser.set(client.userId, list);
+  }
+
+  await Promise.all(
+    [...byUser.entries()].map(async ([userId, states]) => {
+      let feed: Awaited<ReturnType<typeof typingFeedFor>>;
+      try {
+        feed = await runUnscoped("push-server typing tick", () =>
+          typingFeedFor({ userId, role: states[0]!.role ?? "" }),
+        );
+      } catch (error) {
+        console.error(`push-server: typing tick failed for user ${userId}:`, error);
+        return;
+      }
+      const signature = typingSignatureOf(feed);
+      for (const client of states) {
+        // Unlike the main tick, this one DOES skip unchanged sends — at a 3s
+        // cadence the overwhelming majority of ticks are "still nobody
+        // typing", and this is purely a visual indicator with no cursor to
+        // keep correct, so there is no reason to pay the message for it.
+        if (client.typingSignature === signature) continue;
+        client.typingSignature = signature;
+        send(client.socket, { type: "typing", ...feed });
+      }
+    }),
+  );
+}
+
 const wss = new WebSocketServer({ port: PORT });
 
 wss.on("connection", (socket) => {
@@ -140,7 +201,7 @@ wss.on("connection", (socket) => {
     }
 
     authed = true;
-    const state: ClientState = { socket, userId: verdict.userId, role: user.role, since: new Date() };
+    const state: ClientState = { socket, userId: verdict.userId, role: user.role, since: new Date(), typingSignature: "" };
     clients.add(state);
     send(socket, { type: "ready" });
     socket.on("close", () => clients.delete(state));
@@ -152,10 +213,17 @@ const timer = setInterval(() => {
   tick().catch((error) => console.error("push-server: tick crashed:", error));
 }, POLL_INTERVAL_MS);
 
-console.log(`push-server listening on :${PORT}, polling connected users every ${POLL_INTERVAL_MS}ms`);
+const typingTimer = setInterval(() => {
+  typingTick().catch((error) => console.error("push-server: typing tick crashed:", error));
+}, TYPING_INTERVAL_MS);
+
+console.log(
+  `push-server listening on :${PORT}, polling connected users every ${POLL_INTERVAL_MS}ms (typing every ${TYPING_INTERVAL_MS}ms)`,
+);
 
 function shutdown() {
   clearInterval(timer);
+  clearInterval(typingTimer);
   wss.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2_000).unref();
 }

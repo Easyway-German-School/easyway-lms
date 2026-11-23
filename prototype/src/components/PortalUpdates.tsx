@@ -8,6 +8,7 @@ import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
 import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
 import { connectPushUpdates } from "@/lib/client/push-client";
 import { publishUnread, publishLiveState, publishPushHealthy } from "@/lib/client/portal-state";
+import { applyPushTyping } from "@/lib/client/typing-feed";
 import type { PushTickPayload } from "@/lib/client/push-client";
 import type { PortalUpdatesResult } from "@/lib/portal-updates";
 
@@ -212,6 +213,7 @@ export default function PortalUpdates() {
         pushHealthyRef.current = status === "open";
         publishPushHealthy(status === "open");
       },
+      (typing) => applyPushTyping(typing),
     );
     return () => {
       pushHealthyRef.current = false;
