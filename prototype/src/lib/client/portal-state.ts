@@ -75,13 +75,17 @@ export function usePushHealthy(): boolean {
  * isn't connected)", which callers read the same way as "haven't polled
  * yet" — never rendered as "nothing is live", only as "don't know".
  */
-let liveState: LiveStateResult | null = null;
-let liveStateReceived = false;
+type LiveStateSnapshot = { state: LiveStateResult | null; received: boolean };
+// A fresh { ... } object on every getSnapshot call is NOT Object.is-stable,
+// so useSyncExternalStore sees "changed" on every render and re-renders
+// forever (React error #185, "Maximum update depth exceeded") — this
+// crashed every page that used useLiveClass.tsx. The snapshot object must
+// only be rebuilt when the underlying value actually changes.
+let liveSnapshot: LiveStateSnapshot = { state: null, received: false };
 const liveListeners = new Set<() => void>();
 
 export function publishLiveState(next: LiveStateResult | null | undefined) {
-  liveStateReceived = true;
-  liveState = next ?? null;
+  liveSnapshot = { state: next ?? null, received: true };
   liveListeners.forEach((listener) => listener());
 }
 
@@ -92,11 +96,9 @@ function subscribeLive(listener: () => void) {
   };
 }
 
+const LIVE_STATE_SERVER_SNAPSHOT: LiveStateSnapshot = { state: null, received: false };
+
 /** `received` is false until the first push message lands — callers use it to decide whether to trust `state` yet or keep polling. */
-export function useLiveStatePush(): { state: LiveStateResult | null; received: boolean } {
-  return useSyncExternalStore(
-    subscribeLive,
-    () => ({ state: liveState, received: liveStateReceived }),
-    () => ({ state: null, received: false }),
-  );
+export function useLiveStatePush(): LiveStateSnapshot {
+  return useSyncExternalStore(subscribeLive, () => liveSnapshot, () => LIVE_STATE_SERVER_SNAPSHOT);
 }
