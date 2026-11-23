@@ -2,7 +2,6 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { startPolling } from "@/lib/client/poll";
-import { getPushHealthy } from "@/lib/client/portal-state";
 import type { Typer } from "@/lib/typing";
 
 /**
@@ -48,14 +47,6 @@ const OFF: TypingFeedSnapshot = { enabled: false, rooms: [], byChannel: {} };
 /** How often to ask: quicker while the community screen itself is open. */
 const SLOW_MS = 5_000;
 const FAST_MS = 2_500;
-/**
- * How often the HTTP poll runs once push has confirmed it is live — same
- * backstop reasoning as PortalUpdates.tsx and useLiveClass.tsx. Typing itself
- * is now answered by push-server's own faster loop (every 3s, see
- * push-server/server.ts's typingTick) over the same connection
- * PortalUpdates.tsx already holds open, so this poll becomes pure backstop.
- */
-const POLL_BACKSTOP_MS = 120_000;
 
 let snapshot: TypingFeedSnapshot = IDLE;
 let signature = "";
@@ -98,20 +89,6 @@ async function fetchFeed() {
   publish(buildSnapshot(Array.isArray(data.rooms) ? data.rooms : []));
 }
 
-/**
- * The push path: push-server's own typingTick answer, applied the instant it
- * arrives. Called from PortalUpdates.tsx's single shared connection — see
- * its onTyping wiring. Same shape as the HTTP response, same `publish`.
- */
-export function applyPushTyping(data: { enabled?: boolean; rooms?: TypingRoom[] }) {
-  if (data.enabled === false) {
-    publish(OFF);
-    stopLoop();
-    return;
-  }
-  publish(buildSnapshot(Array.isArray(data.rooms) ? data.rooms : []));
-}
-
 function onVisibilityChange() {
   // A hidden tab's dots would be stale by the time anyone looked at it. Clear
   // them; the loop refetches the instant the tab is visible again.
@@ -125,8 +102,7 @@ function startLoop() {
     visibilityBound = true;
   }
   stopPolling = startPolling(fetchFeed, {
-    intervalMs: () =>
-      getPushHealthy() ? POLL_BACKSTOP_MS : [...subscribers].some((s) => s.fast) ? FAST_MS : SLOW_MS,
+    intervalMs: () => ([...subscribers].some((s) => s.fast) ? FAST_MS : SLOW_MS),
   });
 }
 

@@ -66,11 +66,6 @@ export function usePushHealthy(): boolean {
   return useSyncExternalStore(subscribeHealth, () => pushHealthy, () => false);
 }
 
-/** Plain (non-hook) read for callers outside React, like typing-feed.ts's module-level polling loop. */
-export function getPushHealthy(): boolean {
-  return pushHealthy;
-}
-
 /**
  * "IS MY CLASS LIVE RIGHT NOW", PUSHED ALONGSIDE THE SAME TICK.
  *
