@@ -125,11 +125,12 @@ function statusBanner(text: string, tone: "wait" | "good" = "wait"): string {
   return `<p style="margin:0 0 16px;padding:11px 14px;background:${bg};color:${fg};font-size:13px;font-weight:700;letter-spacing:.06em;border-radius:6px">${e(text)}</p>`;
 }
 
-function button(label: string, href: string, kind: "primary" | "quiet" = "primary"): string {
+function button(label: string, href: string, kind: "primary" | "quiet" = "primary", newTab = false): string {
   const style = kind === "primary"
     ? `background:${NAVY};color:#ffffff;border:1px solid ${NAVY}`
     : `background:#ffffff;color:${NAVY};border:1px solid ${NAVY}`;
-  return `<p style="margin:6px 0 18px"><a href="${e(href)}" style="display:inline-block;padding:11px 20px;border-radius:6px;font-size:14px;font-weight:700;text-decoration:none;${style}">${e(label)}</a></p>`;
+  const target = newTab ? ` target="_blank" rel="noopener noreferrer"` : "";
+  return `<p style="margin:6px 0 18px"><a href="${e(href)}"${target} style="display:inline-block;padding:11px 20px;border-radius:6px;font-size:14px;font-weight:700;text-decoration:none;${style}">${e(label)}</a></p>`;
 }
 
 function referenceBlock(ctx: EmailContext): string {
@@ -321,8 +322,10 @@ function registrationLink(ctx: EmailContext): RenderedEmail {
       ctx.examRegistrationDeadline
         ? p(`The registration deadline is <strong>${e(ctx.examRegistrationDeadline)}</strong>. The link will remain active until then.`)
         : p(`Please complete your registration as soon as possible — this link will not remain active indefinitely.`),
-      button("Complete my registration", ctx.examRegistrationLink ?? ctx.bookingUrl),
+      button("Complete my registration", ctx.examRegistrationLink ?? ctx.bookingUrl, "primary", true),
       p(`If the button above doesn't work, copy and paste this address into your browser:<br/><a href="${e(ctx.examRegistrationLink ?? "")}" style="color:${NAVY};word-break:break-all">${e(ctx.examRegistrationLink ?? "")}</a>`),
+      p(`That opens on ÖSD's own registration site in a new tab — once you're done, come back here to check your next steps.`),
+      button("Back to my booking", ctx.bookingUrl, "quiet"),
       sign(),
     ].join("")),
   };
@@ -353,8 +356,9 @@ function admission(ctx: EmailContext): RenderedEmail {
             ctx.examRegistrationDeadline
               ? p(`The registration deadline is <strong>${e(ctx.examRegistrationDeadline)}</strong>. The link will remain active until then.`)
               : p(`Please complete your registration as soon as possible — this link will not remain active indefinitely.`),
-            button("Complete my registration", ctx.examRegistrationLink),
+            button("Complete my registration", ctx.examRegistrationLink, "primary", true),
             p(`If the button above doesn't work, copy and paste this address into your browser:<br/><a href="${e(ctx.examRegistrationLink)}" style="color:${NAVY};word-break:break-all">${e(ctx.examRegistrationLink)}</a>`),
+            p(`That opens on ÖSD's own registration site in a new tab — once you're done, your admission slip below is right where you left it.`),
           ]
         : []),
       heading("Important"),

@@ -37,6 +37,8 @@ type Booking = {
   documentRejectedReason: string | null;
   seatNumber: number | null;
   status: string;
+  examRegistrationLink: string | null;
+  examRegistrationDeadline: string | null;
   invoiceNumber: string;
   derived: { key: string; label: string };
   journey: { key: string; label: string; state: "done" | "current" | "todo"; hint: string | null }[];
@@ -388,6 +390,28 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
           Print admission slip
         </button>
       </div>
+
+      {booking.examRegistrationLink && (
+        <div className="seal-border mt-8 rounded-lg bg-[var(--gold-soft)]/30 p-5 print:hidden">
+          <p className="text-sm font-bold uppercase tracking-wide text-[var(--navy)]">One last step — register with ÖSD</p>
+          <p className="mt-1.5 text-sm text-[var(--ink-soft)]">
+            {booking.examRegistrationDeadline
+              ? <>Complete your official ÖSD registration by <strong className="text-[var(--navy)]">{new Date(booking.examRegistrationDeadline).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> — the link stays active until then.</>
+              : "Complete your official ÖSD registration as soon as you can — the link won't stay active indefinitely."}
+          </p>
+          <a
+            href={booking.examRegistrationLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-2 rounded-full bg-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-[var(--navy)]/25 transition hover:brightness-125"
+          >
+            Complete my ÖSD registration ↗
+          </a>
+          <p className="mt-2 text-xs text-[var(--ink-soft)]">
+            This opens ÖSD&apos;s own registration site in a new tab — this page stays open right here, so just switch back once you&apos;re done.
+          </p>
+        </div>
+      )}
 
       <div className="mt-8 rounded-lg border border-[var(--line)] p-5 print:hidden">
         <p className="text-sm font-semibold text-[var(--navy)]">What to bring, and what not to do</p>
