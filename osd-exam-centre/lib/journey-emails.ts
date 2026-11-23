@@ -330,9 +330,9 @@ function registrationLink(ctx: EmailContext): RenderedEmail {
 
 function admission(ctx: EmailContext): RenderedEmail {
   return {
-    subject: subject("Admission Confirmed", ctx),
+    subject: subject("Exam Registration Confirmed", ctx),
     attach: null,
-    html: layout("You have been admitted to your ÖSD examination.", [
+    html: layout("Your exam registration has been confirmed.", [
       hello(ctx),
       p(`We are pleased to confirm that you have been admitted to the following ÖSD examination:`),
       rows([
@@ -346,6 +346,17 @@ function admission(ctx: EmailContext): RenderedEmail {
         ...(ctx.seatNumber !== null ? [{ label: "Seat number", value: String(ctx.seatNumber) }] : []),
       ]),
       statusBanner("ADMITTED", "good"),
+      ...(ctx.examRegistrationLink
+        ? [
+            heading("One last step — your ÖSD registration"),
+            p(`Your exam date on <strong>${e(ctx.examDate)}</strong> has been confirmed. Here is your official ÖSD registration link for final onboarding.`),
+            ctx.examRegistrationDeadline
+              ? p(`The registration deadline is <strong>${e(ctx.examRegistrationDeadline)}</strong>. The link will remain active until then.`)
+              : p(`Please complete your registration as soon as possible — this link will not remain active indefinitely.`),
+            button("Complete my registration", ctx.examRegistrationLink),
+            p(`If the button above doesn't work, copy and paste this address into your browser:<br/><a href="${e(ctx.examRegistrationLink)}" style="color:${NAVY};word-break:break-all">${e(ctx.examRegistrationLink)}</a>`),
+          ]
+        : []),
       heading("Important"),
       p(`Please bring the valid identification document used for your examination registration. Your identity will be checked before the examination. Please arrive early enough to complete the admission and security procedures before the examination begins.`),
       p(`Please do not bring: ${PROHIBITED.map(e).join("; ")}.`),

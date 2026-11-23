@@ -180,7 +180,7 @@ describe.skipIf(!enabled || !isLocal)("candidate journey (real database)", { tim
     const before = outbox.length;
     expect(await admitCandidate(bookingId)).toEqual({ ok: true });
     expect(outbox).toHaveLength(before + 1);
-    expect(outbox.at(-1)?.subject).toBe(`[Easyway ÖSD] Admission Confirmed – ${ref}`);
+    expect(outbox.at(-1)?.subject).toBe(`[Easyway ÖSD] Exam Registration Confirmed – ${ref}`);
     expect(await admitCandidate(bookingId)).toEqual({ ok: true }); // idempotent
     expect(outbox).toHaveLength(before + 1);
 

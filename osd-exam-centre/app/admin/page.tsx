@@ -64,7 +64,7 @@ const STEP_LABEL: Record<string, string> = {
   payment_confirmed: "Payment confirmed (B + receipt)",
   info_check: "Check your details (C)",
   prep_invite: "Prep-class note",
-  admission: "Admission letter (D)",
+  admission: "Exam registration confirmed (D)",
   exam_guide: "Examination guide (E/F)",
   reminder_7day: "7-day reminder (I)",
   reminder_24h: "24-hour reminder (J)",
