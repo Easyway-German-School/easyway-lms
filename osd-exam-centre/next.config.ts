@@ -44,6 +44,12 @@ const nextConfig: NextConfig = {
    * four cost nothing and close off a handful of well-known attack classes
    * outright.
    */
+  // /osdexams is a second, easier-to-say name for the registration page —
+  // same page, same code, just reachable under both URLs.
+  async rewrites() {
+    return [{ source: "/osdexams", destination: "/book" }];
+  },
+
   async headers() {
     return [
       {
