@@ -20,11 +20,15 @@
  */
 import type { PortalUpdatesResult } from "@/lib/portal-updates";
 import type { LiveStateResult } from "@/lib/live-state";
+import type { TypingFeedRoom } from "@/lib/community-typing";
 
 /** The push server bundles live-state onto the same tick as portal updates — see push-server/server.ts. */
 export type PushTickPayload = PortalUpdatesResult & { live?: LiveStateResult | null };
+/** Sent on its own, faster timer — see push-server/server.ts's typingTick. */
+export type PushTypingPayload = { enabled: boolean; rooms: TypingFeedRoom[] };
 
 export type PushUpdateHandler = (result: PushTickPayload) => void;
+export type PushTypingHandler = (result: PushTypingPayload) => void;
 /**
  * "open" fires once the server has actually accepted the auth token (its
  * `{type:"ready"}` reply), not just on the raw socket opening — that is the
@@ -45,7 +49,11 @@ export function pushServerUrl(): string | null {
   return url && url.trim() ? url.trim() : null;
 }
 
-export function connectPushUpdates(onUpdate: PushUpdateHandler, onStatus?: PushStatusHandler): PushConnection {
+export function connectPushUpdates(
+  onUpdate: PushUpdateHandler,
+  onStatus?: PushStatusHandler,
+  onTyping?: PushTypingHandler,
+): PushConnection {
   const maybeUrl = pushServerUrl();
   if (!maybeUrl) return { close: () => {} };
   const url: string = maybeUrl; // narrowed once, so the nested `open()` closure below sees `string`, not `string | null`
@@ -86,6 +94,8 @@ export function connectPushUpdates(onUpdate: PushUpdateHandler, onStatus?: PushS
         onStatus?.("open");
       } else if (type === "update") {
         onUpdate(payload as PushTickPayload);
+      } else if (type === "typing") {
+        onTyping?.(payload as PushTypingPayload);
       }
     });
     socket.addEventListener("close", () => {
