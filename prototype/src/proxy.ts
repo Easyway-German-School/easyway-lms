@@ -298,6 +298,9 @@ function contentSecurityPolicy(): string {
   ];
 
   const livekit = liveKitConnectSrc();
+  // The self-hosted push server (push-server/server.ts) — a true no-op until
+  // this is set, so nothing to add to connect-src until it deliberately is.
+  const pushServer = process.env.NEXT_PUBLIC_PUSH_SERVER_URL?.trim();
 
   return [
     "default-src 'self'",
@@ -311,7 +314,7 @@ function contentSecurityPolicy(): string {
     // them, so permit HTTPS media while keeping scripts and connections scoped.
     `media-src 'self' blob: https: ${media.join(" ")}`,
     "font-src 'self' data:",
-    `connect-src 'self' https://api.paystack.co ${livekit.join(" ")} ${media.join(" ")}`,
+    `connect-src 'self' https://api.paystack.co ${livekit.join(" ")} ${media.join(" ")}${pushServer ? ` ${pushServer}` : ""}`,
     `frame-src 'self' https://checkout.paystack.com ${embeddedMedia.join(" ")}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
