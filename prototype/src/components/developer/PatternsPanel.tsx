@@ -111,6 +111,24 @@ const PATTERNS: Array<{
     live: "bulkhead",
   },
   {
+    id: "infra-guard",
+    number: "07",
+    name: "Self-healing (infrastructure circuit breaker)",
+    problem:
+      "2026-11-23: a push-server tick ran a query every 3 seconds for every connected user. Under real class-time load that overloaded the primary database badly enough that SSH to the DB box itself stopped responding, and the first anyone heard about it was a WhatsApp group of tutors, hours later.",
+    idea:
+      "The breaker pattern (03 above) applied to infrastructure, not a single dependency: watch the one number that actually mattered last time (active Postgres connections), and if it crosses the line that caused the incident, stop the one thing that caused it — automatically, with a cooldown so it cannot flap, and restart it once the number recovers. Same narrow scope as the portal-resync pattern: this can only ever start or stop ONE named service, never touch student data or the database itself.",
+    status: "new",
+    where: [
+      { file: "src/lib/infra-guard.ts", note: "The decision: re-derives pg_stat_activity fresh every run, stop above 40 active connections, restart below 20 (a gap on purpose, so it doesn't flap at the edge), 5-minute cooldown between actions." },
+      { file: "scripts/infra-guard.ts", note: "The ONE place the actual systemctl call happens — run every minute by crontab on the push-server box itself, since that's the only place the command means anything. The lib stays pure; this stays the one side effect." },
+      { file: "src/app/api/admin/developer/auto-heal/route.ts", note: "Same kill switch as the portal-resync pattern, picked by ?pattern=infra-guard — behind `security`." },
+    ],
+    gap:
+      "Only watches one metric (connection count) and controls one service (push-server). It would not catch a different box, a different cause, or a slow-but-not-saturated DB. Each new incident shape needs its own equally narrow case written on purpose — never a generic \"something's wrong, try restarting things\" fallback, which is how you get a breaker that makes an incident worse by restarting something mid-recovery.",
+    live: "infra-guard",
+  },
+  {
     id: "auto-heal",
     number: "06",
     name: "Self-healing (the one automatic repair)",
@@ -180,6 +198,17 @@ const ACTION_LABEL: Record<string, string> = {
   expired: "abandoned (expired)",
 };
 
+const INFRA_ACTION_LABEL: Record<string, string> = {
+  stopped: "stopped push-server",
+  restarted: "restarted push-server",
+  dry_run_stop: "would stop (dry-run)",
+  dry_run_restart: "would restart (dry-run)",
+  healthy: "checked — healthy",
+  already_stopped: "checked — already stopped",
+  already_running: "checked — already running",
+  cooldown: "cooldown (just acted)",
+};
+
 function ago(iso: string | null): string {
   if (!iso) return "never run yet";
   const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -188,11 +217,26 @@ function ago(iso: string | null): string {
   return `${Math.round(seconds / 3600)}h ago`;
 }
 
-function AutoHealLive({ stats, onToggle }: { stats: AutoHealStats; onToggle: (patch: { enabled?: boolean; dryRun?: boolean }) => void }) {
+function AutoHealLive({
+  stats,
+  onToggle,
+  labels = ACTION_LABEL,
+  liveLabel = "Live — sending real pushes",
+  dryRunLabel = "Dry-run — click to send real pushes",
+  rateLabel,
+}: {
+  stats: AutoHealStats;
+  onToggle: (patch: { enabled?: boolean; dryRun?: boolean }) => void;
+  labels?: Record<string, string>;
+  liveLabel?: string;
+  dryRunLabel?: string;
+  /** Overrides the "max N/hour" text — this pattern's cooldown isn't an hourly cap. */
+  rateLabel?: string;
+}) {
   if (!stats) return <p className="text-xs text-[var(--muted)]">No reading yet — the pattern has not run, or the migration has not been applied.</p>;
   const { pattern, last24h, last7d } = stats;
   const row = (counts: Partial<Record<string, number>>) =>
-    Object.entries(ACTION_LABEL)
+    Object.entries(labels)
       .filter(([key]) => counts[key])
       .map(([key, label]) => `${counts[key]} ${label}`)
       .join(" · ") || "nothing yet";
@@ -212,9 +256,9 @@ function AutoHealLive({ stats, onToggle }: { stats: AutoHealStats; onToggle: (pa
           onClick={() => onToggle({ dryRun: !pattern.dryRun })}
           className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${pattern.dryRun ? "bg-amber-500/15 text-amber-600" : "bg-blue-500/15 text-blue-500"}`}
         >
-          {pattern.dryRun ? "Dry-run — click to send real pushes" : "Live — sending real pushes"}
+          {pattern.dryRun ? dryRunLabel : liveLabel}
         </button>
-        <span className="text-[11px] text-[var(--muted)]">max {pattern.maxPerHour}/hour · last run {ago(stats.lastRunAt)}</span>
+        <span className="text-[11px] text-[var(--muted)]">{rateLabel ?? `max ${pattern.maxPerHour}/hour`} · last run {ago(stats.lastRunAt)}</span>
       </div>
       <div className="text-xs">
         <p><span className="font-bold">Last 24h:</span> <span className="text-[var(--muted)]">{row(last24h)}</span></p>
@@ -228,10 +272,14 @@ export default function PatternsPanel({
   resilience,
   autoHeal = null,
   onToggleAutoHeal,
+  infraGuard = null,
+  onToggleInfraGuard,
 }: {
   resilience: Snapshot[];
   autoHeal?: AutoHealStats;
   onToggleAutoHeal?: (patch: { enabled?: boolean; dryRun?: boolean }) => void;
+  infraGuard?: AutoHealStats;
+  onToggleInfraGuard?: (patch: { enabled?: boolean; dryRun?: boolean }) => void;
 }) {
   const [open, setOpen] = useState<string | null>("breaker");
 
@@ -305,6 +353,18 @@ export default function PatternsPanel({
                     <div className="rounded-2xl border border-[var(--border)] p-3">
                       <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Live · across the whole platform</p>
                       <AutoHealLive stats={autoHeal} onToggle={(patch) => onToggleAutoHeal?.(patch)} />
+                    </div>
+                  ) : p.live === "infra-guard" ? (
+                    <div className="rounded-2xl border border-[var(--border)] p-3">
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Live · the push-server box, checked every minute</p>
+                      <AutoHealLive
+                        stats={infraGuard}
+                        onToggle={(patch) => onToggleInfraGuard?.(patch)}
+                        labels={INFRA_ACTION_LABEL}
+                        liveLabel="Live — can actually stop/restart push-server"
+                        dryRunLabel="Dry-run — click to let it actually act"
+                        rateLabel="5-min cooldown between actions"
+                      />
                     </div>
                   ) : p.live ? (
                     <div className="rounded-2xl border border-[var(--border)] p-3">
