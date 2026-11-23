@@ -522,7 +522,10 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
               </p>
               <label className="mt-4 block text-xs font-semibold text-[var(--navy)]">
                 Upload your payment receipt (required)
-                <input type="file" accept="image/*,application/pdf" onChange={(e) => setSlipFile(e.target.files?.[0] ?? null)} className="mt-1 block w-full text-xs" />
+                <input
+                  type="file" accept="image/*,application/pdf" onChange={(e) => setSlipFile(e.target.files?.[0] ?? null)}
+                  className="mt-1 block w-full text-sm text-[var(--ink-soft)] file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-[var(--navy)] file:px-4 file:py-2.5 file:text-sm file:font-semibold file:text-white"
+                />
               </label>
               <input
                 type="text" placeholder="Transfer reference (optional)" value={reference} onChange={(e) => setReference(e.target.value)}
@@ -657,7 +660,7 @@ function UploadField({ label, accept, already, file, busy, justSaved, onPick, on
         <input
           type="file" accept={accept} disabled={busy}
           onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-          className="mt-1 block w-full text-xs"
+          className="mt-1 block w-full text-sm text-[var(--ink-soft)] file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-[var(--navy)] file:px-4 file:py-2.5 file:text-sm file:font-semibold file:text-white disabled:cursor-not-allowed disabled:file:opacity-40"
         />
       </label>
       {file && (

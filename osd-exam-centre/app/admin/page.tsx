@@ -540,7 +540,7 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
                   <input
                     type="file" accept="image/*" disabled={officeUploadBusy === "photo"}
                     onChange={(e) => e.target.files?.[0] && officeUpload("photo", e.target.files[0])}
-                    className="mt-1 block w-full text-xs"
+                    className="mt-1 block w-full text-sm text-[var(--ink-soft)] file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-[var(--navy)] file:px-4 file:py-2.5 file:text-sm file:font-semibold file:text-white disabled:cursor-not-allowed disabled:file:opacity-40"
                   />
                 </label>
                 <label className="block text-xs font-semibold text-[var(--navy)]">
@@ -548,7 +548,7 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
                   <input
                     type="file" accept="image/*,application/pdf" disabled={officeUploadBusy === "dataPage"}
                     onChange={(e) => e.target.files?.[0] && officeUpload("dataPage", e.target.files[0])}
-                    className="mt-1 block w-full text-xs"
+                    className="mt-1 block w-full text-sm text-[var(--ink-soft)] file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-[var(--navy)] file:px-4 file:py-2.5 file:text-sm file:font-semibold file:text-white disabled:cursor-not-allowed disabled:file:opacity-40"
                   />
                 </label>
               </div>
