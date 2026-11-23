@@ -181,7 +181,10 @@ export function candidateJourney(facts: StatusFacts): JourneyStepView[] {
       key: "id", label: "ID check", done: idDone,
       hint: facts.passportDataPageUrl ? "Our team is reviewing your ID." : "Upload the data page of your ID.",
     },
-    { key: "admission", label: "Admission", done: Boolean(facts.admittedAt), hint: "The office admits you once everything checks out." },
+    {
+      key: "admission", label: "Exam Registration Confirmed", done: Boolean(facts.admittedAt),
+      hint: "The office confirms your exam registration once everything checks out, and sends your ÖSD (Panthexa) registration link.",
+    },
     { key: "exam", label: "Examination day", done: Boolean(facts.examCompletedAt), hint: "" },
     { key: "result", label: "Official result", done: Boolean(facts.resultReleasedAt), hint: "Released through the official ÖSD process." },
     { key: "certificate", label: "Certificate", done: Boolean(facts.certificateDeliveredAt), hint: "" },
