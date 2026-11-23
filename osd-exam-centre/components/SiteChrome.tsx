@@ -65,10 +65,10 @@ export function SiteFooter() {
     <footer className="relative overflow-hidden bg-gradient-to-b from-[var(--navy)] to-[var(--navy-deep)] text-white/75">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--gold-bright)]/60 to-transparent" />
       <div className="mx-auto grid max-w-6xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr]">
-        <div>
-          <div className="flex items-center gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
             <BrandLockup />
-            <span className="font-serif-display text-lg font-semibold text-white">
+            <span className="font-serif-display min-w-0 text-lg font-semibold text-white">
               Easyway <span className="text-[var(--gold-bright)]">ÖSD</span> Examination Centre
             </span>
           </div>

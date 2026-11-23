@@ -132,7 +132,8 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
       <button
         onClick={submit}
         disabled={
-          busy || !form.sessionId || !form.fullName || !form.email ||
+          busy || !form.sessionId || !form.fullName || !form.email || !form.phone ||
+          !form.addressLine || !form.city || !form.dateOfBirth || !form.placeOfBirth ||
           !form.countryOfBirth || !form.nationality || !form.idType || !form.idNumber || !form.idExpiry
         }
         className="mt-3 rounded-sm bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"

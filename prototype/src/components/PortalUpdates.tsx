@@ -7,6 +7,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
 import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
 import { connectPushUpdates } from "@/lib/client/push-client";
+import { publishUnread, publishLiveState, publishPushHealthy } from "@/lib/client/portal-state";
+import type { PushTickPayload } from "@/lib/client/push-client";
 import type { PortalUpdatesResult } from "@/lib/portal-updates";
 
 /**
@@ -166,6 +168,9 @@ export default function PortalUpdates() {
    */
   const ingest = useCallback((data: PortalUpdatesResult, locked: boolean) => {
     if (data.now) sinceRef.current = data.now;
+    // Already computed as part of this same query — see portal-state.ts for
+    // why this replaces four separate /api/community/unread pollers.
+    publishUnread(Number(data.unread) || 0);
 
     const fresh = (data.updates ?? []).filter((update) => !seenRef.current.has(update.id)) as Update[];
     if (fresh.length) {
@@ -196,13 +201,21 @@ export default function PortalUpdates() {
   // re-renders (a tutorial opening, for instance).
   useEffect(() => {
     const connection = connectPushUpdates(
-      (data) => ingest(data, tutorialLockedRef.current),
+      (data: PushTickPayload) => {
+        ingest(data, tutorialLockedRef.current);
+        // Not part of the shared `ingest` path — the HTTP poll never carries
+        // this field (see /api/live/state, still its own route), only the
+        // push tick does. See live-state.ts / useLiveClass.tsx.
+        if ("live" in data) publishLiveState(data.live);
+      },
       (status) => {
         pushHealthyRef.current = status === "open";
+        publishPushHealthy(status === "open");
       },
     );
     return () => {
       pushHealthyRef.current = false;
+      publishPushHealthy(false);
       connection.close();
     };
   }, [ingest]);

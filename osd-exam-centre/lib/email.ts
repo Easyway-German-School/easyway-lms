@@ -46,7 +46,7 @@ export async function sendEmail(input: {
       from: process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>",
       // Replies go to the exams desk even while the From address rides on a
       // different verified sending domain (the manual's mailbox is
-      // exams@easywaylanguageschool.com; the domain Brevo has verified is not).
+      // support@easywaylanguageschool.com; the domain Brevo has verified is not).
       replyTo: OFFICE.email,
       to: input.to,
       subject: input.subject,

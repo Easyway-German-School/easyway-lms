@@ -19,8 +19,12 @@
  * as a backstop until this proves itself (see PortalUpdates.tsx).
  */
 import type { PortalUpdatesResult } from "@/lib/portal-updates";
+import type { LiveStateResult } from "@/lib/live-state";
 
-export type PushUpdateHandler = (result: PortalUpdatesResult) => void;
+/** The push server bundles live-state onto the same tick as portal updates — see push-server/server.ts. */
+export type PushTickPayload = PortalUpdatesResult & { live?: LiveStateResult | null };
+
+export type PushUpdateHandler = (result: PushTickPayload) => void;
 /**
  * "open" fires once the server has actually accepted the auth token (its
  * `{type:"ready"}` reply), not just on the raw socket opening — that is the
@@ -81,7 +85,7 @@ export function connectPushUpdates(onUpdate: PushUpdateHandler, onStatus?: PushS
         reconnectDelay = RECONNECT_BASE_MS; // a successful auth means the link is good again
         onStatus?.("open");
       } else if (type === "update") {
-        onUpdate(payload as PortalUpdatesResult);
+        onUpdate(payload as PushTickPayload);
       }
     });
     socket.addEventListener("close", () => {

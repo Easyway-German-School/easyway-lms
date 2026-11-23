@@ -80,7 +80,7 @@ export const DEFAULT_EXAM_CAMPAIGN: ExamCampaignConfig = {
   startPopupsOn: "2026-09-08",
   registerUrl: "https://osd-examregistration.com/register/JTHDDX",
   practiceUrl: "https://osd.at/downloads/#a1",
-  contactEmail: "exams@easywaylanguageschool.com",
+  contactEmail: "support@easywaylanguageschool.com",
   venues: [
     { name: "Allen Avenue centre", address: "No. 1 Allen Avenue, Ikeja, Lagos" },
     { name: "Unity Road centre", address: "No. 23 Unity Road, Ikeja, Lagos" },

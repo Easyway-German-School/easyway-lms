@@ -32,7 +32,7 @@ export const OFFICE = {
   // component — Next.js only inlines NEXT_PUBLIC_-prefixed vars into the
   // browser bundle, so the plain OFFICE_EMAIL always resolved to the
   // fallback string there, no matter how the server rendered this page.
-  email: process.env.NEXT_PUBLIC_OFFICE_EMAIL || process.env.OFFICE_EMAIL || "exams@easywaylanguageschool.com",
+  email: process.env.NEXT_PUBLIC_OFFICE_EMAIL || process.env.OFFICE_EMAIL || "support@easywaylanguageschool.com",
   phone: process.env.OFFICE_PHONE || "+234 708 900 2534",
   website: process.env.OFFICE_WEBSITE || "www.easywaylanguageschool.com",
   /** Signs the booking confirmation (Document A). */

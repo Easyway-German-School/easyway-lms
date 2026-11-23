@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
+import { useUnreadCount } from "@/lib/client/portal-state";
 import TypingNudge from "@/components/TypingNudge";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
@@ -235,32 +236,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const campus = useCampusBeat(youth && hasAccess && access !== null && !inClassroom && !onCampus && !accountRevoked);
 
   /**
-   * Unread class-group chat, on the sidebar's Community entry — the same number
-   * the floating launcher shows, read from the same light endpoint. Both listen
-   * for `easyway:unread-changed` so opening a room clears them together.
+   * Unread class-group chat, on the sidebar's Community entry — the same
+   * number the floating launcher shows, read from PortalUpdates' own tick
+   * instead of a separate poll. See portal-state.ts.
    */
-  const [unreadCommunity, setUnreadCommunity] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/community/unread", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        setUnreadCommunity(Number(data.total) || 0);
-      } catch {
-        /* Silent — a missing badge is not worth a console line. */
-      }
-    };
-    poll();
-    const timer = window.setInterval(poll, 120_000);
-    window.addEventListener("easyway:unread-changed", poll);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener("easyway:unread-changed", poll);
-    };
-  }, []);
+  const unreadCommunity = useUnreadCount();
 
   /**
    * The live classroom belongs to students who attend over video.
