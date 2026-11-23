@@ -28,7 +28,11 @@ export const OFFICE = {
   centreName: "ÖSD EXAMINATION CENTRE",
   examCentreOnInvoice: "Easyway Language School Ltd.",
   addressLine: process.env.OFFICE_ADDRESS || "23, Unity Road, Ikeja, Lagos",
-  email: process.env.OFFICE_EMAIL || "exams@easywaylanguageschool.com",
+  // NEXT_PUBLIC_ first: OFFICE.email is also read from NeedHelp.tsx, a client
+  // component — Next.js only inlines NEXT_PUBLIC_-prefixed vars into the
+  // browser bundle, so the plain OFFICE_EMAIL always resolved to the
+  // fallback string there, no matter how the server rendered this page.
+  email: process.env.NEXT_PUBLIC_OFFICE_EMAIL || process.env.OFFICE_EMAIL || "exams@easywaylanguageschool.com",
   phone: process.env.OFFICE_PHONE || "+234 708 900 2534",
   website: process.env.OFFICE_WEBSITE || "www.easywaylanguageschool.com",
   /** Signs the booking confirmation (Document A). */
