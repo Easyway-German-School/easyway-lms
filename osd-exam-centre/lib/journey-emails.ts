@@ -314,15 +314,15 @@ function prepInvite(ctx: EmailContext): RenderedEmail {
  */
 function registrationLink(ctx: EmailContext): RenderedEmail {
   return {
-    subject: subject("Complete Your ÖSD Registration", ctx),
+    subject: subject("One Last Step — Send Your Registration to Germany", ctx),
     attach: null,
-    html: layout(`Your exam date has been confirmed — complete your registration.`, [
+    html: layout(`Your booking has been received — just one last thing.`, [
       hello(ctx),
-      p(`Your exam date on <strong>${e(ctx.examDate)}</strong> has been confirmed. Here is your registration link.`),
+      p(`Your booking for <strong>${e(examName(ctx))}</strong> on <strong>${e(ctx.examDate)}</strong> has been received. Just one last thing: send your registration to Germany by registering on the official ÖSD portal below — ÖSD will receive your booking directly from there.`),
       ctx.examRegistrationDeadline
-        ? p(`The registration deadline is <strong>${e(ctx.examRegistrationDeadline)}</strong>. The link will remain active until then.`)
-        : p(`Please complete your registration as soon as possible — this link will not remain active indefinitely.`),
-      button("Complete my registration", ctx.examRegistrationLink ?? ctx.bookingUrl, "primary", true),
+        ? statusBanner(`REGISTER BY ${ctx.examRegistrationDeadline.toUpperCase()} — SEATS AREN'T HELD PAST THIS DATE`, "wait")
+        : statusBanner(`DO THIS NOW — THE LINK WON'T STAY ACTIVE INDEFINITELY`, "wait"),
+      button("Register with ÖSD now", ctx.examRegistrationLink ?? ctx.bookingUrl, "primary", true),
       p(`If the button above doesn't work, copy and paste this address into your browser:<br/><a href="${e(ctx.examRegistrationLink ?? "")}" style="color:${NAVY};word-break:break-all">${e(ctx.examRegistrationLink ?? "")}</a>`),
       p(`That opens on ÖSD's own registration site in a new tab — once you're done, come back here to check your next steps.`),
       button("Back to my booking", ctx.bookingUrl, "quiet"),
@@ -351,12 +351,12 @@ function admission(ctx: EmailContext): RenderedEmail {
       statusBanner("ADMITTED", "good"),
       ...(ctx.examRegistrationLink
         ? [
-            heading("One last step — your ÖSD registration"),
-            p(`Your exam date on <strong>${e(ctx.examDate)}</strong> has been confirmed. Here is your official ÖSD registration link for final onboarding.`),
+            heading("One last step — send your registration to Germany"),
+            p(`Your booking has been received — just one last thing: send your registration to Germany by registering on the official ÖSD portal below. ÖSD will receive your booking directly from there.`),
             ctx.examRegistrationDeadline
-              ? p(`The registration deadline is <strong>${e(ctx.examRegistrationDeadline)}</strong>. The link will remain active until then.`)
-              : p(`Please complete your registration as soon as possible — this link will not remain active indefinitely.`),
-            button("Complete my registration", ctx.examRegistrationLink, "primary", true),
+              ? statusBanner(`REGISTER BY ${ctx.examRegistrationDeadline.toUpperCase()} — SEATS AREN'T HELD PAST THIS DATE`, "wait")
+              : statusBanner(`DO THIS NOW — THE LINK WON'T STAY ACTIVE INDEFINITELY`, "wait"),
+            button("Register with ÖSD now", ctx.examRegistrationLink, "primary", true),
             p(`If the button above doesn't work, copy and paste this address into your browser:<br/><a href="${e(ctx.examRegistrationLink)}" style="color:${NAVY};word-break:break-all">${e(ctx.examRegistrationLink)}</a>`),
             p(`That opens on ÖSD's own registration site in a new tab — once you're done, your admission slip below is right where you left it.`),
           ]

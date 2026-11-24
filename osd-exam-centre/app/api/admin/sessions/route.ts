@@ -73,6 +73,34 @@ export const POST = jsonRoute(async (req: NextRequest) => {
 });
 
 /**
+ * Deletes a sitting outright — only when nothing real is riding on it. A
+ * sitting with any bookings (even a single cancelled one) is refused rather
+ * than cascade-deleted: that would permanently destroy a candidate's payment
+ * and ID records along with it. The office cancels or moves those bookings
+ * first; only then does the sitting itself go away. An empty draft or demo
+ * sitting deletes in one click.
+ */
+export const DELETE = jsonRoute(async (req: NextRequest) => {
+  if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const sessionId = req.nextUrl.searchParams.get("sessionId");
+  if (!sessionId) return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
+
+  const bookingCount = await prisma.examBooking.count({ where: { sessionId } });
+  if (bookingCount > 0) {
+    return NextResponse.json(
+      { error: `Can't delete — ${bookingCount} booking${bookingCount === 1 ? "" : "s"} exist on this sitting. Cancel or move them first.` },
+      { status: 400 },
+    );
+  }
+
+  await prisma.$transaction([
+    prisma.examModulePrice.deleteMany({ where: { sessionId } }),
+    prisma.examSession.delete({ where: { id: sessionId } }),
+  ]);
+  return NextResponse.json({ ok: true });
+});
+
+/**
  * Edits an existing sitting — including just the publish toggle, which used
  * to be this route's only job. Fixing a typo'd fee or date after candidates
  * have already booked doesn't change their feeTotal (that was snapshotted
