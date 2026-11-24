@@ -98,10 +98,12 @@ export const authOptions: AuthOptions = {
          * guessing a password needs and far above what a real person typing
          * from memory ever hits.
          *
-         * Counted before the bcrypt compare, so a refused attempt costs us
-         * nothing. That is half the point: bcrypt is expensive by design, and
-         * an unmetered sign-in route is a way to spend our CPU, not just our
-         * patience.
+         * The per-email count is taken before the bcrypt compare, so a refused
+         * attempt against one account costs us nothing. bcrypt is expensive
+         * by design, and an unmetered sign-in route is a way to spend our
+         * CPU, not just our patience. The shared-IP count is taken only
+         * after a wrong password — see below — because the school shares
+         * one address.
          */
         const email = credentials.email.trim().toLowerCase();
         const ip = clientIp(req?.headers);
@@ -110,16 +112,12 @@ export const authOptions: AuthOptions = {
           windowMs: 15 * 60 * 1000,
           max: 10,
         });
-        const byIp = checkRateLimit(`signin:ip:${ip}`, {
-          windowMs: 15 * 60 * 1000,
-          max: 50,
-        });
 
-        if (!byEmail.ok || !byIp.ok) {
+        if (!byEmail.ok) {
           /**
-           * One message for both, and it names no account. Saying "this
-           * account is locked" would confirm the address exists — turning the
-           * protection into the enumeration oracle it was added to prevent.
+           * One message, and it names no account. Saying "this account is
+           * locked" would confirm the address exists — turning the protection
+           * into the enumeration oracle it was added to prevent.
            */
           throw new Error(
             "Too many sign-in attempts. Please wait a few minutes and try again.",
@@ -131,6 +129,26 @@ export const authOptions: AuthOptions = {
         });
 
         if (!user || !(await bcryptjs.compare(credentials.password, user.password))) {
+          /**
+           * The shared-IP counter used to run BEFORE this, and it was never
+           * cleared on success. A school signs in from one address. Fifty
+           * attempts — including correct passwords — on one warm server
+           * locked every student behind that address for fifteen minutes,
+           * and the refusal is not an exception NextAuth records, so the
+           * incident table stayed empty while the class could not get in.
+           *
+           * Count only failures, and allow a class to mistype. The per-email
+           * cap above is what stops guessing one account.
+           */
+          const byIp = checkRateLimit(`signin:ip:${ip}`, {
+            windowMs: 15 * 60 * 1000,
+            max: 500,
+          });
+          if (!byIp.ok) {
+            throw new Error(
+              "Too many sign-in attempts. Please wait a few minutes and try again.",
+            );
+          }
           throw new Error("Invalid credentials");
         }
 

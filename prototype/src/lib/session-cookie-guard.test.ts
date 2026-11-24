@@ -8,17 +8,17 @@ import {
 
 const COOKIE = "__Secure-next-auth.session-token=abc.def";
 
-function responseSetting(...cookies: string[]) {
+function responseSetting(body: string, ...cookies: string[]) {
   const headers = new Headers({ "Content-Type": "application/json" });
   for (const c of cookies) headers.append("set-cookie", c);
-  return new Response("{}", { status: 200, headers });
+  return new Response(body, { status: 200, headers });
 }
 
 const input = (over: Partial<Parameters<typeof guardSessionResponse>[0]> = {}) => ({
   method: "GET",
   pathname: "/api/auth/session",
   cookieHeader: COOKIE,
-  response: responseSetting("__Secure-next-auth.session-token=; Max-Age=0; Path=/"),
+  response: responseSetting("{}", "__Secure-next-auth.session-token=; Max-Age=0; Path=/"),
   cookieDecodes: async () => true,
   ...over,
 });
@@ -71,13 +71,29 @@ describe("guardSessionResponse", () => {
     expect(result.action).toBe("pass");
   });
 
-  it("does not even try to decode when nothing is being cleared", async () => {
+  it("does not decode when the body is a real session and nothing is being cleared", async () => {
     const cookieDecodes = vi.fn(async () => true);
     const result = await guardSessionResponse(
-      input({ response: responseSetting("__Secure-next-auth.session-token=newvalue; Path=/"), cookieDecodes }),
+      input({
+        response: responseSetting(
+          JSON.stringify({ user: { id: "u1" } }),
+          "__Secure-next-auth.session-token=newvalue; Path=/",
+        ),
+        cookieDecodes,
+      }),
     );
     expect(result.action).toBe("pass");
     expect(cookieDecodes).not.toHaveBeenCalled();
+  });
+
+  it("keeps a cookie that still decodes when the body is an empty session", async () => {
+    const result = await guardSessionResponse(
+      input({ response: new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }) }),
+    );
+    expect(result.action).toBe("replace");
+    if (result.action !== "replace") return;
+    expect(result.response.status).toBe(503);
+    expect(result.response.headers.getSetCookie()).toEqual([]);
   });
 
   it("leaves every other route, method and cookie-less request alone", async () => {

@@ -709,10 +709,15 @@ function AccessPanel({ onDiagnose }: { onDiagnose: (target: NonNullable<Diagnose
 function PatternsTab() {
   const [resilience, setResilience] = useState<React.ComponentProps<typeof PatternsPanel>["resilience"]>([]);
   const [autoHeal, setAutoHeal] = useState<AutoHealStats | null>(null);
+  const [infraGuard, setInfraGuard] = useState<AutoHealStats | null>(null);
   const loadAutoHeal = useCallback(async () => {
     try {
       const response = await fetch("/api/admin/developer/auto-heal", { cache: "no-store" });
-      if (response.ok) setAutoHeal((await response.json()).stats);
+      if (response.ok) {
+        const body = await response.json();
+        setAutoHeal(body.stats);
+        setInfraGuard(body.infraGuard);
+      }
     } catch {
       /* keep the last reading */
     }
@@ -735,7 +740,11 @@ function PatternsTab() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
         });
-        if (response.ok) setAutoHeal((await response.json()).stats);
+        if (response.ok) {
+          const body = await response.json();
+          setAutoHeal(body.stats);
+          setInfraGuard(body.infraGuard);
+        }
       } catch {
         /* the next poll will reconcile */
       }
@@ -743,7 +752,35 @@ function PatternsTab() {
     [],
   );
 
-  return <PatternsPanel resilience={resilience} autoHeal={autoHeal} onToggleAutoHeal={toggleAutoHeal} />;
+  const toggleInfraGuard = useCallback(
+    async (patch: { enabled?: boolean; dryRun?: boolean }) => {
+      try {
+        const response = await fetch("/api/admin/developer/auto-heal?pattern=infra-guard", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        if (response.ok) {
+          const body = await response.json();
+          setAutoHeal(body.stats);
+          setInfraGuard(body.infraGuard);
+        }
+      } catch {
+        /* the next poll will reconcile */
+      }
+    },
+    [],
+  );
+
+  return (
+    <PatternsPanel
+      resilience={resilience}
+      autoHeal={autoHeal}
+      onToggleAutoHeal={toggleAutoHeal}
+      infraGuard={infraGuard}
+      onToggleInfraGuard={toggleInfraGuard}
+    />
+  );
 }
 
 /* ------------------------------------------------------------------------ */
