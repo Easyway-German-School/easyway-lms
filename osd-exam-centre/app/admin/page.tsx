@@ -50,13 +50,20 @@ type Booking = {
   consentAcceptedAt: string | null;
   examRegistrationLink: string | null;
   examRegistrationDeadline: string | null;
+  registrationLinkSentAt: string | null;
   session: { id: string; title: string; level: string; startDate: string };
   derived: { key: string; number: number | null; label: string; staffNext: string | null; tone: "neutral" | "waiting" | "action" | "good" | "bad" };
   checklist: { label: string; done: boolean }[];
   journeyEmails: { step: string; subject: string; sentAt: string }[];
 };
 
-type Filter = "action" | "waiting" | "leads" | "all";
+type Filter = "action" | "waiting" | "examWaiting" | "leads" | "all";
+
+/** Everything on our side is done — paid, details confirmed, ID approved — but ÖSD's own
+ *  Panthexa registration link hasn't gone out yet. The office's one job here is to send it. */
+function isWaitingForExam(b: Booking): boolean {
+  return (b.derived.key === "ready_to_admit" || b.derived.key === "admitted") && !b.registrationLinkSentAt;
+}
 
 const STEP_LABEL: Record<string, string> = {
   booking_received: "Booking received (A + invoice)",
@@ -164,6 +171,7 @@ export default function AdminDashboard() {
   const counts = useMemo(() => ({
     action: bookings.filter((b) => b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending").length,
     waiting: bookings.filter((b) => b.derived.tone === "waiting").length,
+    examWaiting: bookings.filter(isWaitingForExam).length,
     leads: bookings.filter((b) => b.prepInterestAt).length,
     all: bookings.length,
   }), [bookings]);
@@ -175,6 +183,7 @@ export default function AdminDashboard() {
     .filter((b) => {
       if (filter === "action") return b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending";
       if (filter === "waiting") return b.derived.tone === "waiting";
+      if (filter === "examWaiting") return isWaitingForExam(b);
       if (filter === "leads") return Boolean(b.prepInterestAt);
       return true;
     })
@@ -183,6 +192,7 @@ export default function AdminDashboard() {
   const tabs: { key: Filter; label: string }[] = [
     { key: "action", label: "Needs the office" },
     { key: "waiting", label: "Waiting on candidate" },
+    { key: "examWaiting", label: "Waiting for Exam" },
     { key: "leads", label: "Prep-class leads" },
     { key: "all", label: "Everyone" },
   ];
@@ -508,6 +518,12 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
         </div>
       )}
 
+      {live && isWaitingForExam(b) && (
+        <div className="mt-3">
+          <RegistrationLinkComposer bookingId={b.id} fullName={b.fullName} busy={busy} act={act} />
+        </div>
+      )}
+
       {showDetails && (
         <div className="mt-3 rounded-sm border border-[var(--line)] bg-[var(--paper)] p-3">
           <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">What they entered while registering</p>
@@ -647,6 +663,55 @@ function CustomEmailComposer({ bookingId, fullName, busy, act }: { bookingId: st
       <div className="mt-2 flex gap-2">
         <button disabled={busy || sending || !subject.trim() || !message.trim()} onClick={send} className="rounded-sm bg-[var(--navy)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
           {sending ? "Sending…" : "Send"}
+        </button>
+        <button onClick={() => setOpen(false)} className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)]">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+/** The office's one job for a candidate who's done everything on our side: paste the Panthexa
+ *  link ÖSD handed over, and the candidate is emailed it immediately with its deadline. */
+function RegistrationLinkComposer({ bookingId, fullName, busy, act }: { bookingId: string; fullName: string; busy: boolean; act: (body: Record<string, unknown>, success?: string) => Promise<boolean> }) {
+  const [open, setOpen] = useState(false);
+  const [link, setLink] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [sending, setSending] = useState(false);
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} disabled={busy} className="rounded-sm bg-[var(--gold-bright)] px-3 py-1.5 text-xs font-bold uppercase text-[var(--navy-deep)]">
+        Send Panthexa link…
+      </button>
+    );
+  }
+
+  async function send() {
+    setSending(true);
+    try {
+      const ok = await act({ registrationLink: { link: link.trim(), deadline: deadline || undefined } }, `Panthexa link emailed to ${fullName}.`);
+      if (ok) { setLink(""); setDeadline(""); setOpen(false); }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-sm border border-[var(--gold-bright)] bg-[var(--gold-soft)]/30 p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-[var(--navy)]">Send their ÖSD (Panthexa) registration link</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-[2fr_1fr]">
+        <input
+          type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://osd-examregistration.com/register/..."
+          className="w-full rounded-sm border border-[var(--line)] bg-white px-2 py-1.5 text-xs"
+        />
+        <input
+          type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)}
+          className="w-full rounded-sm border border-[var(--line)] bg-white px-2 py-1.5 text-xs"
+        />
+      </div>
+      <div className="mt-2 flex gap-2">
+        <button disabled={busy || sending || !link.trim()} onClick={send} className="rounded-sm bg-[var(--navy)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+          {sending ? "Sending…" : "Save & email candidate"}
         </button>
         <button onClick={() => setOpen(false)} className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)]">Cancel</button>
       </div>

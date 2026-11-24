@@ -184,6 +184,19 @@ export default function AdminSessionsPage() {
     await load();
   }
 
+  async function deleteSession(s: Session) {
+    if (!window.confirm(`Delete "${s.title}" (${new Date(s.startDate).toLocaleDateString()})? This can't be undone.`)) return;
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/sessions?sessionId=${s.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not delete that sitting");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete that sitting");
+    }
+  }
+
   if (!loaded) return <AdminShell><AdminLoader /></AdminShell>;
 
   return (
@@ -350,6 +363,13 @@ export default function AdminSessionsPage() {
                   className={`rounded-sm px-3 py-1.5 text-xs font-bold uppercase ${s.published ? "bg-[var(--green-soft)] text-[var(--green)]" : "border border-[var(--line)] text-[var(--ink-soft)]"}`}
                 >
                   {s.published ? "Published" : "Draft"}
+                </button>
+                <button
+                  onClick={() => deleteSession(s)}
+                  title={s._count.bookings > 0 ? "Has bookings — cancel or move them first" : "Delete this sitting"}
+                  className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
+                >
+                  Delete
                 </button>
               </div>
             </div>

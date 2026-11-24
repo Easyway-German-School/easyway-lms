@@ -393,11 +393,14 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
 
       {booking.examRegistrationLink && (
         <div className="seal-border mt-8 rounded-lg bg-[var(--gold-soft)]/30 p-5 print:hidden">
-          <p className="text-sm font-bold uppercase tracking-wide text-[var(--navy)]">One last step — register with ÖSD</p>
+          <p className="text-sm font-bold uppercase tracking-wide text-[var(--navy)]">One last step — send your registration to Germany</p>
           <p className="mt-1.5 text-sm text-[var(--ink-soft)]">
+            Your booking has been received. Just one last thing: send your registration to Germany by registering on the official ÖSD portal below — ÖSD will receive your booking directly from there.
+          </p>
+          <p className="mt-2 rounded-sm bg-[var(--red-soft)] px-3 py-2 text-xs font-bold uppercase tracking-wide text-[var(--red)]">
             {booking.examRegistrationDeadline
-              ? <>Complete your official ÖSD registration by <strong className="text-[var(--navy)]">{new Date(booking.examRegistrationDeadline).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> — the link stays active until then.</>
-              : "Complete your official ÖSD registration as soon as you can — the link won't stay active indefinitely."}
+              ? <>Register by {new Date(booking.examRegistrationDeadline).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} — seats aren&apos;t held past this date.</>
+              : "Do this now — the link won't stay active indefinitely."}
           </p>
           <a
             href={booking.examRegistrationLink}
@@ -405,7 +408,7 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
             rel="noopener noreferrer"
             className="mt-3 inline-flex items-center gap-2 rounded-full bg-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-[var(--navy)]/25 transition hover:brightness-125"
           >
-            Complete my ÖSD registration ↗
+            Register with ÖSD now ↗
           </a>
           <p className="mt-2 text-xs text-[var(--ink-soft)]">
             This opens ÖSD&apos;s own registration site in a new tab — this page stays open right here, so just switch back once you&apos;re done.

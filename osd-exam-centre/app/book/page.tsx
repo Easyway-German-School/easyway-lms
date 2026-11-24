@@ -18,11 +18,23 @@ type Session = {
   venueAddress: string;
   startDate: string;
   endDate: string;
+  registrationDeadline: string;
   feeWholeExam: number;
   modulePrices: ModulePrice[];
   remaining: number;
   capacity: number;
 };
+
+/** Real scarcity, never fabricated: driven only by the actual seat count and
+ *  the actual registration deadline already on the sitting. */
+function urgencyBadge(s: Pick<Session, "remaining" | "capacity" | "registrationDeadline">): { label: string; className: string } | null {
+  if (s.remaining <= 0) return null; // "Full" already shown separately
+  const daysLeft = Math.ceil((new Date(s.registrationDeadline).getTime() - Date.now()) / 86_400_000);
+  if (daysLeft <= 3) return { label: daysLeft <= 0 ? "Registration closes today" : `Only ${daysLeft} day${daysLeft === 1 ? "" : "s"} left to register`, className: "bg-[var(--red-soft)] text-[var(--red)]" };
+  if (s.remaining / s.capacity <= 0.2) return { label: `Only ${s.remaining} seat${s.remaining === 1 ? "" : "s"} left`, className: "bg-[var(--red-soft)] text-[var(--red)]" };
+  if (daysLeft <= 14) return { label: `Register within ${daysLeft} days`, className: "bg-[var(--gold-soft)] text-[var(--navy)]" };
+  return null;
+}
 
 const MODULE_LABEL: Record<string, string> = {
   written: "Written",
@@ -203,6 +215,14 @@ export default function BookPage() {
                         <p className="mt-1 text-xs text-[var(--ink-soft)]">
                           {s.remaining > 0 ? `${s.remaining} of ${s.capacity} seats left` : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
                         </p>
+                        {(() => {
+                          const badge = urgencyBadge(s);
+                          return badge && (
+                            <span className={`mt-1.5 inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>
+                              {badge.label}
+                            </span>
+                          );
+                        })()}
                       </span>
                       <ArrowRightIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)] transition group-hover:translate-x-0.5 group-hover:text-[var(--gold)]" />
                     </label>
