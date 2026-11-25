@@ -20,6 +20,7 @@ export type SubmitSupportMessageInput = {
   bookingReference?: string | null;
   name: string;
   email: string;
+  phone?: string | null;
   message: string;
 };
 
@@ -29,9 +30,13 @@ const MESSAGE_RATE_WINDOW_MS = 60 * 60 * 1000;
 export async function submitSupportMessage(input: SubmitSupportMessageInput): Promise<{ ok: true } | { ok: false; error: string }> {
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
+  const phone = input.phone?.trim() || null;
   const message = input.message.trim();
   if (!name || !email || !message) {
     return { ok: false, error: "Name, email and a message are required." };
+  }
+  if (!phone || phone.length < 7) {
+    return { ok: false, error: "Please leave a phone number so the office can reach you." };
   }
 
   const recentCount = await prisma.supportMessage.count({
@@ -41,16 +46,16 @@ export async function submitSupportMessage(input: SubmitSupportMessageInput): Pr
     return { ok: false, error: "Too many messages sent recently — please wait before sending another." };
   }
 
-  let booking: { id: string; referenceCode: string; session: { title: string } } | null = null;
+  let booking: { id: string; referenceCode: string; phone: string; session: { title: string } } | null = null;
   if (input.bookingReference) {
     booking = await prisma.examBooking.findUnique({
       where: { referenceCode: input.bookingReference },
-      select: { id: true, referenceCode: true, session: { select: { title: true } } },
+      select: { id: true, referenceCode: true, phone: true, session: { select: { title: true } } },
     });
   }
 
   await prisma.supportMessage.create({
-    data: { bookingId: booking?.id ?? null, name, email, message },
+    data: { bookingId: booking?.id ?? null, name, email, phone, message },
   });
 
   const officeEmail = process.env.OFFICE_NOTIFICATION_EMAIL;
@@ -59,7 +64,7 @@ export async function submitSupportMessage(input: SubmitSupportMessageInput): Pr
       to: officeEmail,
       subject: booking ? `Help request — ${booking.referenceCode}` : "Help request — ÖSD Exam Centre",
       html: `
-        <p><strong>${escapeHtml(name)}</strong> (${escapeHtml(email)}) needs help${booking ? ` with booking <strong>${booking.referenceCode}</strong> (${escapeHtml(booking.session.title)})` : ""}:</p>
+        <p><strong>${escapeHtml(name)}</strong> (${escapeHtml(email)}${phone ? ` · ${escapeHtml(phone)}` : ""}) needs help${booking ? ` with booking <strong>${booking.referenceCode}</strong> (${escapeHtml(booking.session.title)})` : ""}:</p>
         <p>${escapeHtml(message)}</p>
       `,
     });
@@ -70,4 +75,25 @@ export async function submitSupportMessage(input: SubmitSupportMessageInput): Pr
 
 export async function resolveSupportMessage(id: string): Promise<void> {
   await prisma.supportMessage.update({ where: { id }, data: { status: "resolved", resolvedAt: new Date() } });
+}
+
+/** Office replies to a help request from /admin/support — stored channel stays the same inbox. */
+export async function replyToSupportMessage(
+  id: string,
+  input: { subject: string; body: string },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const subject = input.subject.trim();
+  const body = input.body.trim();
+  if (!subject || !body) return { ok: false, error: "Subject and message are required." };
+
+  const msg = await prisma.supportMessage.findUnique({ where: { id } });
+  if (!msg) return { ok: false, error: "That help request was not found." };
+
+  const sent = await sendEmail({
+    to: msg.email,
+    subject,
+    html: `<p>Hi ${escapeHtml(msg.name)},</p><p>${escapeHtml(body).replace(/\n/g, "<br>")}</p><p>— Easyway ÖSD Exam Centre</p>`,
+  });
+  if (!sent) return { ok: false, error: "Could not send that email — check SMTP settings." };
+  return { ok: true };
 }

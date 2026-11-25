@@ -180,6 +180,8 @@ export type CreateBookingInput = {
   isRepeatAttempt?: boolean;
   specialNeeds?: string;
   modules: string[]; // ["full"] or a subset of MODULES
+  /** Express result (≈1 week) — only honoured when the sitting has expressFee > 0. */
+  express?: boolean;
   /** True the instant the candidate ticks the consent checkbox — see ExamBooking.consentAcceptedAt. */
   consentAccepted: boolean;
 };
@@ -257,10 +259,17 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
   }
 
   const modules = input.modules.length ? input.modules : ["full"];
-  const feeTotal = computeFee(session, modules);
-  if (feeTotal === null) {
+  const examFee = computeFee(session, modules);
+  if (examFee === null) {
     return { ok: false, error: "Could not price that selection of modules.", code: "invalid" };
   }
+
+  const express = Boolean(input.express);
+  if (express && session.expressFee <= 0) {
+    return { ok: false, error: "This sitting doesn't offer the express result.", code: "invalid" };
+  }
+  const expressFee = express ? session.expressFee : 0;
+  const feeTotal = examFee + expressFee;
 
   const referenceCode = await uniqueReferenceCode(session.startDate.getFullYear());
 
@@ -287,6 +296,8 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       isRepeatAttempt: input.isRepeatAttempt ?? false,
       specialNeeds: input.specialNeeds?.trim() || null,
       modules,
+      express,
+      expressFee,
       feeTotal,
       consentAcceptedAt: new Date(),
     },

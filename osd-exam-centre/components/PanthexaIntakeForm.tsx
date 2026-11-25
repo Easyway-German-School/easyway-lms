@@ -148,10 +148,17 @@ export default function PanthexaIntakeForm({ onCreated }: { onCreated: () => voi
           </label>
         ))}
         {session && session.expressFee > 0 && (
-          <label className="flex items-center gap-1.5 font-semibold text-[var(--navy)]">
-            <input type="checkbox" checked={express} onChange={(e) => setExpress(e.target.checked)} />
-            Express result (+₦{session.expressFee.toLocaleString()})
-          </label>
+          <div className="rounded-sm border border-[var(--gold)]/40 bg-[var(--gold-soft)]/20 p-2.5">
+            <label className="flex items-start gap-2 text-xs font-semibold text-[var(--navy)]">
+              <input type="checkbox" checked={express} onChange={(e) => setExpress(e.target.checked)} className="mt-0.5" />
+              <span>
+                Express result (+₦{session.expressFee.toLocaleString()})
+                <span className="mt-1 block font-normal text-[11px] text-[var(--ink-soft)]">
+                  Result prepared as fast as possible — typically within about one week after the exam.
+                </span>
+              </span>
+            </label>
+          </div>
         )}
       </div>
 

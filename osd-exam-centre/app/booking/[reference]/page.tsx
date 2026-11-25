@@ -28,6 +28,8 @@ type Booking = {
   specialNeeds: string | null;
   modules: string[];
   feeTotal: number;
+  express: boolean;
+  expressFee: number;
   paymentMethod: string | null;
   paymentStatus: string;
   transferRejectedReason: string | null;
@@ -263,7 +265,7 @@ function RegistrationProgress({ booking, email, onChange }: { booking: Booking; 
         </div>
       )}
       <div className="mt-6">
-        <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} />
+        <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} defaultPhone={booking.phone} />
       </div>
     </div>
   );
@@ -393,14 +395,11 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
 
       {booking.examRegistrationLink && (
         <div className="seal-border mt-8 rounded-lg bg-[var(--gold-soft)]/30 p-5 print:hidden">
-          <p className="text-sm font-bold uppercase tracking-wide text-[var(--navy)]">One last step — send your registration to Germany</p>
+          <p className="text-sm font-bold uppercase tracking-wide text-[var(--navy)]">One last step — register with ÖSD</p>
           <p className="mt-1.5 text-sm text-[var(--ink-soft)]">
-            Your booking has been received. Just one last thing: send your registration to Germany by registering on the official ÖSD portal below — ÖSD will receive your booking directly from there.
-          </p>
-          <p className="mt-2 rounded-sm bg-[var(--red-soft)] px-3 py-2 text-xs font-bold uppercase tracking-wide text-[var(--red)]">
             {booking.examRegistrationDeadline
-              ? <>Register by {new Date(booking.examRegistrationDeadline).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} — seats aren&apos;t held past this date.</>
-              : "Do this now — the link won't stay active indefinitely."}
+              ? <>Complete your official ÖSD registration by <strong className="text-[var(--navy)]">{new Date(booking.examRegistrationDeadline).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> — the link stays active until then.</>
+              : "Complete your official ÖSD registration as soon as you can — the link won't stay active indefinitely."}
           </p>
           <a
             href={booking.examRegistrationLink}
@@ -408,7 +407,7 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
             rel="noopener noreferrer"
             className="mt-3 inline-flex items-center gap-2 rounded-full bg-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-[var(--navy)]/25 transition hover:brightness-125"
           >
-            Register with ÖSD now ↗
+            Complete my ÖSD registration ↗
           </a>
           <p className="mt-2 text-xs text-[var(--ink-soft)]">
             This opens ÖSD&apos;s own registration site in a new tab — this page stays open right here, so just switch back once you&apos;re done.
@@ -425,7 +424,7 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
           <li>• Phones and smart watches off and out of reach for the whole exam.</li>
         </ul>
         <div className="mt-4">
-          <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} />
+          <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} defaultPhone={booking.phone} />
         </div>
       </div>
 
@@ -528,6 +527,11 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
       {booking.paymentStatus === "unpaid" && (
         <div className="mt-6 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
           <p className="text-sm font-semibold text-[var(--navy)]">Amount due: ₦{booking.feeTotal.toLocaleString()}</p>
+          {booking.express && (
+            <p className="mt-1 text-xs font-semibold text-[var(--navy)]">
+              Includes Express result{booking.expressFee ? ` (+₦${booking.expressFee.toLocaleString()})` : ""} — typically ready within about one week after the exam.
+            </p>
+          )}
           <p className="mt-1 text-xs text-[var(--ink-soft)]">
             Invoice {booking.invoiceNumber} ·{" "}
             <a className="font-semibold text-[var(--navy)] underline" href={invoiceHref(booking, email)}>Download invoice (PDF)</a>
@@ -592,7 +596,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
       )}
 
       <div className="mt-6">
-        <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} />
+        <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} defaultPhone={booking.phone} />
       </div>
     </div>
   );

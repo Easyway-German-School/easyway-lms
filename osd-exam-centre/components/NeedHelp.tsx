@@ -20,17 +20,20 @@ export default function NeedHelp({
   bookingReference,
   defaultName,
   defaultEmail,
+  defaultPhone,
   tone = "light",
 }: {
   bookingReference?: string;
   defaultName?: string;
   defaultEmail?: string;
+  defaultPhone?: string;
   /** "dark" for use on the navy footer, where the default navy link would vanish. */
   tone?: "light" | "dark";
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(defaultName ?? "");
   const [email, setEmail] = useState(defaultEmail ?? "");
+  const [phone, setPhone] = useState(defaultPhone ?? "");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -44,7 +47,7 @@ export default function NeedHelp({
       const res = await fetch("/api/support", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ bookingReference, name, email, message, website }),
+        body: JSON.stringify({ bookingReference, name, email, phone, message, website }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not send that");
@@ -116,6 +119,13 @@ export default function NeedHelp({
           className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
         />
       </div>
+      <input
+        type="tel"
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
+        placeholder="Phone number (required)"
+        className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+      />
       <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}
@@ -126,7 +136,7 @@ export default function NeedHelp({
       <div className="mt-2 flex gap-2">
         <button
           onClick={send}
-          disabled={!name.trim() || !email.trim() || !message.trim() || sending}
+          disabled={!name.trim() || !email.trim() || phone.trim().length < 7 || !message.trim() || sending}
           className="rounded-lg bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
         >
           {sending ? "Sending…" : "Send"}

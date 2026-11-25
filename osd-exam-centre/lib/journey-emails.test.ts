@@ -40,7 +40,7 @@ describe("every journey email", () => {
     // Manual §47: "[Easyway ÖSD] <what> – <reference>"
     expect(email.subject).toMatch(/^\[Easyway ÖSD\] .+ – EW-OSD-2026-OBB052$/);
     expect(email.html).toContain("EW-OSD-2026-OBB052");
-    expect(email.html).toContain("support@easywaylanguageschool.com"); // a contact channel, §46
+    expect(email.html).toContain("exams@easywaylanguageschool.com"); // a contact channel, §46
     expect(step).toBeTruthy();
   });
 
@@ -137,13 +137,13 @@ describe("the ÖSD registration link (office-triggered, not scheduled)", () => {
   it("states the confirmed date, the deadline, and links to ÖSD's own registration page", () => {
     const html = renderJourneyEmail("registration_link", ctx).html;
     expect(html).toContain("Thursday, 29 October 2026");
-    expect(html).toContain("4 JANUARY 2027");
+    expect(html).toContain("4 January 2027");
     expect(html).toContain("https://osd-examregistration.com/register/JTHDDX");
   });
   it("falls back to a general urgency note when no deadline was given", () => {
     const html = renderJourneyEmail("registration_link", { ...ctx, examRegistrationDeadline: null }).html;
-    expect(html).not.toContain("REGISTER BY");
-    expect(html).toContain("DO THIS NOW");
+    expect(html).not.toContain("registration deadline is");
+    expect(html).toContain("as soon as possible");
   });
 });
 

@@ -10,7 +10,20 @@ export const GET = jsonRoute(async () => {
 
   const messages = await prisma.supportMessage.findMany({
     orderBy: { createdAt: "desc" },
-    include: { booking: { select: { referenceCode: true, session: { select: { title: true } } } } },
+    include: {
+      booking: {
+        select: {
+          referenceCode: true,
+          phone: true,
+          fullName: true,
+          email: true,
+          status: true,
+          paymentStatus: true,
+          feeTotal: true,
+          session: { select: { title: true, level: true, startDate: true } },
+        },
+      },
+    },
   });
   return NextResponse.json({ messages });
 });

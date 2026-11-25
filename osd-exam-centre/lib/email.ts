@@ -43,10 +43,10 @@ export async function sendEmail(input: {
   }
   try {
     await client.sendMail({
-      from: process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>",
-      // Replies go to the exams desk even while the From address rides on a
-      // different verified sending domain (the manual's mailbox is
-      // support@easywaylanguageschool.com; the domain Brevo has verified is not).
+      from: process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <exams@easywaylanguageschool.com>",
+      // Replies go to the exams desk (OFFICE.email → exams@…). If Brevo only
+      // has a different sending domain verified, set SMTP_FROM explicitly to
+      // that verified address — Reply-To still lands on exams@.
       replyTo: OFFICE.email,
       to: input.to,
       subject: input.subject,

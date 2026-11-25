@@ -6,6 +6,7 @@ import AdminShell from "@/components/AdminShell";
 import AdminLoader from "@/components/AdminLoader";
 import ManualBookingForm from "@/components/ManualBookingForm";
 import PanthexaIntakeForm from "@/components/PanthexaIntakeForm";
+import Modal from "@/components/Modal";
 
 type Booking = {
   id: string;
@@ -17,6 +18,7 @@ type Booking = {
   feeTotal: number;
   modules: string[];
   express: boolean;
+  expressFee: number;
   paymentStatus: string;
   status: string;
   paymentMethod: string | null;
@@ -50,20 +52,13 @@ type Booking = {
   consentAcceptedAt: string | null;
   examRegistrationLink: string | null;
   examRegistrationDeadline: string | null;
-  registrationLinkSentAt: string | null;
   session: { id: string; title: string; level: string; startDate: string };
   derived: { key: string; number: number | null; label: string; staffNext: string | null; tone: "neutral" | "waiting" | "action" | "good" | "bad" };
   checklist: { label: string; done: boolean }[];
   journeyEmails: { step: string; subject: string; sentAt: string }[];
 };
 
-type Filter = "action" | "waiting" | "examWaiting" | "leads" | "all";
-
-/** Everything on our side is done — paid, details confirmed, ID approved — but ÖSD's own
- *  Panthexa registration link hasn't gone out yet. The office's one job here is to send it. */
-function isWaitingForExam(b: Booking): boolean {
-  return (b.derived.key === "ready_to_admit" || b.derived.key === "admitted") && !b.registrationLinkSentAt;
-}
+type Filter = "action" | "waiting" | "active" | "cancelled" | "leads" | "all";
 
 const STEP_LABEL: Record<string, string> = {
   booking_received: "Booking received (A + invoice)",
@@ -89,6 +84,13 @@ const TONE: Record<Booking["derived"]["tone"], string> = {
 };
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
+
+function isCancelledBooking(b: Pick<Booking, "status">) {
+  return b.status === "cancelled" || b.status === "no_show";
+}
+function isLiveBooking(b: Pick<Booking, "status">) {
+  return !isCancelledBooking(b);
+}
 
 /** Office-side version of the same candidate upload flow — for a walk-in or Panthexa candidate
  *  whose ID the office is scanning in person, rather than the candidate uploading it themselves. */
@@ -169,10 +171,11 @@ export default function AdminDashboard() {
   }
 
   const counts = useMemo(() => ({
-    action: bookings.filter((b) => b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending").length,
-    waiting: bookings.filter((b) => b.derived.tone === "waiting").length,
-    examWaiting: bookings.filter(isWaitingForExam).length,
-    leads: bookings.filter((b) => b.prepInterestAt).length,
+    action: bookings.filter((b) => isLiveBooking(b) && (b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending")).length,
+    waiting: bookings.filter((b) => isLiveBooking(b) && b.derived.tone === "waiting").length,
+    active: bookings.filter((b) => isLiveBooking(b)).length,
+    cancelled: bookings.filter((b) => isCancelledBooking(b)).length,
+    leads: bookings.filter((b) => isLiveBooking(b) && b.prepInterestAt).length,
     all: bookings.length,
   }), [bookings]);
 
@@ -181,18 +184,20 @@ export default function AdminDashboard() {
   const q = query.trim().toLowerCase();
   const shown = bookings
     .filter((b) => {
-      if (filter === "action") return b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending";
-      if (filter === "waiting") return b.derived.tone === "waiting";
-      if (filter === "examWaiting") return isWaitingForExam(b);
-      if (filter === "leads") return Boolean(b.prepInterestAt);
+      if (filter === "action") return isLiveBooking(b) && (b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending");
+      if (filter === "waiting") return isLiveBooking(b) && b.derived.tone === "waiting";
+      if (filter === "active") return isLiveBooking(b);
+      if (filter === "cancelled") return isCancelledBooking(b);
+      if (filter === "leads") return isLiveBooking(b) && Boolean(b.prepInterestAt);
       return true;
     })
-    .filter((b) => !q || `${b.fullName} ${b.email} ${b.referenceCode} ${b.invoiceNumber ?? ""}`.toLowerCase().includes(q));
+    .filter((b) => !q || `${b.fullName} ${b.email} ${b.phone} ${b.referenceCode} ${b.invoiceNumber ?? ""}`.toLowerCase().includes(q));
 
   const tabs: { key: Filter; label: string }[] = [
     { key: "action", label: "Needs the office" },
     { key: "waiting", label: "Waiting on candidate" },
-    { key: "examWaiting", label: "Waiting for Exam" },
+    { key: "active", label: "Active candidates" },
+    { key: "cancelled", label: "Cancelled / no-show" },
     { key: "leads", label: "Prep-class leads" },
     { key: "all", label: "Everyone" },
   ];
@@ -381,13 +386,19 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-[var(--navy)]">
-            <button onClick={() => setShowDetails((v) => !v)} className="underline decoration-dotted underline-offset-2 hover:decoration-solid">
+            <button
+              type="button"
+              onClick={() => setShowDetails(true)}
+              className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid"
+              title="Open full candidate record"
+            >
               {b.fullName}
             </button>{" "}
             <span className="font-mono text-xs text-[var(--ink-soft)]">{b.referenceCode}</span>
           </p>
-          <p className="text-xs text-[var(--ink-soft)]">
-            {b.session.title} · {b.modules.includes("full") ? "Written + Oral" : b.modules.join(" + ")}{b.express ? " · express" : ""} · {b.email} · ₦{b.feeTotal.toLocaleString()}
+          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+            {b.session.title} · {b.modules.includes("full") ? "Written + Oral" : b.modules.join(" + ")} · {b.email}
+            {b.phone ? ` · ${b.phone}` : ""} · ₦{b.feeTotal.toLocaleString()}
           </p>
           {b.idNumber && (
             <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
@@ -399,6 +410,11 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
           {b.specialNeeds && <p className="mt-0.5 text-xs font-semibold text-[var(--navy)]">Special needs: {b.specialNeeds}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {b.express && (
+            <span title={b.expressFee ? `Express result (+₦${b.expressFee.toLocaleString()})` : "Express result requested"} className="rounded-sm bg-[var(--navy)] px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+              Express{b.expressFee ? ` · ₦${b.expressFee.toLocaleString()}` : ""}
+            </span>
+          )}
           {b.prepInterestAt && <span className="rounded-sm bg-[var(--gold-bright)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--navy-deep)]">Asked about prep</span>}
           <span
             title={b.source === "panthexa" ? "Registered on ÖSD's official Panthexa site; the office keyed this one in." : "Booked directly on this website."}
@@ -436,11 +452,32 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
         </div>
       )}
 
+      {/* Uploaded files stay reachable forever — verifying payment used to hide the slip link. */}
+      {(b.transferProofUrl || b.passportPhotoUrl || b.passportDataPageUrl) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--line)] bg-[var(--paper)] px-3 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]">Records</span>
+          {b.transferProofUrl && (
+            <a href={b.transferProofUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] bg-white px-2.5 py-1 text-xs font-semibold text-[var(--navy)] hover:border-[var(--navy)]">
+              Payment slip
+            </a>
+          )}
+          {b.passportPhotoUrl && (
+            <a href={b.passportPhotoUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] bg-white px-2.5 py-1 text-xs font-semibold text-[var(--navy)] hover:border-[var(--navy)]">
+              Passport photo
+            </a>
+          )}
+          {b.passportDataPageUrl && (
+            <a href={b.passportDataPageUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] bg-white px-2.5 py-1 text-xs font-semibold text-[var(--navy)] hover:border-[var(--navy)]">
+              ID data page
+            </a>
+          )}
+        </div>
+      )}
+
       {/* ---- the one next action, by where the candidate is ---- */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {live && moneyIn && (
           <>
-            {b.transferProofUrl && <a href={b.transferProofUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--navy)] underline">View their slip</a>}
             <button disabled={busy} onClick={() => setVerifying((v) => !v)} className="rounded-sm bg-[var(--green)] px-3 py-1.5 text-xs font-semibold text-white">
               Verify payment…
             </button>
@@ -518,34 +555,69 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
         </div>
       )}
 
-      {live && isWaitingForExam(b) && (
-        <div className="mt-3">
-          <RegistrationLinkComposer bookingId={b.id} fullName={b.fullName} busy={busy} act={act} />
-        </div>
-      )}
-
       {showDetails && (
-        <div className="mt-3 rounded-sm border border-[var(--line)] bg-[var(--paper)] p-3">
-          <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">What they entered while registering</p>
-          <dl className="mt-2 grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
-            <Detail label="Phone" value={b.phone} />
-            <Detail label="Gender" value={b.gender} />
-            <Detail label="Date of birth" value={new Date(b.dateOfBirth).toLocaleDateString("en-GB")} />
-            <Detail label="Place of birth" value={b.placeOfBirth} />
-            <Detail label="Country of birth" value={b.countryOfBirth} />
-            <Detail label="Citizenship" value={b.nationality} />
-            <Detail label="Address" value={b.addressLine} />
-            <Detail label="City" value={b.city} />
-            <Detail label="Country (residence)" value={b.country} />
-            <Detail label="Repeat attempt" value={b.isRepeatAttempt ? "Yes" : "No"} />
-            {b.panthexaReference && <Detail label="Panthexa reference" value={b.panthexaReference} />}
-            {b.registeredAt && <Detail label="Registered on Panthexa" value={new Date(b.registeredAt).toLocaleDateString("en-GB")} />}
-            {b.consentAcceptedAt && <Detail label="Consented" value={new Date(b.consentAcceptedAt).toLocaleString("en-GB")} />}
-            {b.examRegistrationLink && <Detail label="ÖSD registration link sent" value="Yes — see /admin/registration-links" />}
+        <Modal title={b.fullName} onClose={() => setShowDetails(false)} wide>
+          <p className="mb-3 text-xs text-[var(--ink-soft)]">
+            <span className="font-mono font-semibold text-[var(--navy)]">{b.referenceCode}</span>
+            {" · "}{b.session.title}
+            {" · "}{b.derived.label}
+          </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <a
+              href={`mailto:${b.email}?subject=${encodeURIComponent(`Re: your ÖSD booking ${b.referenceCode}`)}`}
+              className="rounded-sm bg-[var(--navy)] px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              Reply by email
+            </a>
+            {b.phone && (
+              <a href={`tel:${b.phone}`} className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--navy)]">
+                Call {b.phone}
+              </a>
+            )}
+            {b.transferProofUrl && (
+              <a href={b.transferProofUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--navy)]">
+                Payment slip
+              </a>
+            )}
+            {b.passportPhotoUrl && (
+              <a href={b.passportPhotoUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--navy)]">
+                Passport photo
+              </a>
+            )}
+            {b.passportDataPageUrl && (
+              <a href={b.passportDataPageUrl} target="_blank" rel="noopener noreferrer" className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--navy)]">
+                ID data page
+              </a>
+            )}
+          </div>
+          <dl className="grid gap-px overflow-hidden rounded-sm border border-[var(--line)] bg-[var(--line)] sm:grid-cols-2">
+            <DetailCell label="Phone" value={b.phone} />
+            <DetailCell label="Email" value={b.email} />
+            <DetailCell label="Gender" value={b.gender} />
+            <DetailCell label="Date of birth" value={new Date(b.dateOfBirth).toLocaleDateString("en-GB")} />
+            <DetailCell label="Place of birth" value={b.placeOfBirth} />
+            <DetailCell label="Country of birth" value={b.countryOfBirth} />
+            <DetailCell label="Citizenship" value={b.nationality} />
+            <DetailCell label="Address" value={b.addressLine} />
+            <DetailCell label="City" value={b.city} />
+            <DetailCell label="Country (residence)" value={b.country} />
+            <DetailCell label="1st ID" value={b.idType && b.idNumber ? `${b.idType} · ${b.idNumber}` : null} />
+            <DetailCell label="1st ID expiry" value={b.idExpiry ? new Date(b.idExpiry).toLocaleDateString("en-GB") : null} />
+            <DetailCell label="2nd ID to bring" value={b.secondaryIdType} />
+            <DetailCell label="Repeat attempt" value={b.isRepeatAttempt ? "Yes" : "No"} />
+            <DetailCell label="Express result" value={b.express ? `Yes${b.expressFee ? ` (+₦${b.expressFee.toLocaleString()})` : ""}` : "No"} />
+            <DetailCell label="Fee total" value={`₦${b.feeTotal.toLocaleString()}`} />
+            <DetailCell label="Payment status" value={b.paymentStatus} />
+            <DetailCell label="Booking status" value={b.status} />
+            {b.panthexaReference && <DetailCell label="Panthexa reference" value={b.panthexaReference} />}
+            {b.registeredAt && <DetailCell label="Registered on Panthexa" value={new Date(b.registeredAt).toLocaleDateString("en-GB")} />}
+            {b.consentAcceptedAt && <DetailCell label="Consented" value={new Date(b.consentAcceptedAt).toLocaleString("en-GB")} />}
+            {b.examRegistrationLink && <DetailCell label="ÖSD registration link sent" value="Yes — see /admin/registration-links" />}
+            {b.specialNeeds && <DetailCell label="Special needs" value={b.specialNeeds} />}
           </dl>
 
           {b.documentStatus !== "approved" && (
-            <div className="mt-3 border-t border-[var(--line)] pt-3">
+            <div className="mt-4 rounded-sm border border-[var(--line)] bg-[var(--paper)] p-3">
               <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">
                 Upload their ID for them (walk-in or if they can&apos;t upload it themselves)
               </p>
@@ -570,7 +642,7 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
               </div>
             </div>
           )}
-        </div>
+        </Modal>
       )}
 
       {docsToReview && (
@@ -670,61 +742,12 @@ function CustomEmailComposer({ bookingId, fullName, busy, act }: { bookingId: st
   );
 }
 
-/** The office's one job for a candidate who's done everything on our side: paste the Panthexa
- *  link ÖSD handed over, and the candidate is emailed it immediately with its deadline. */
-function RegistrationLinkComposer({ bookingId, fullName, busy, act }: { bookingId: string; fullName: string; busy: boolean; act: (body: Record<string, unknown>, success?: string) => Promise<boolean> }) {
-  const [open, setOpen] = useState(false);
-  const [link, setLink] = useState("");
-  const [deadline, setDeadline] = useState("");
-  const [sending, setSending] = useState(false);
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} disabled={busy} className="rounded-sm bg-[var(--gold-bright)] px-3 py-1.5 text-xs font-bold uppercase text-[var(--navy-deep)]">
-        Send Panthexa link…
-      </button>
-    );
-  }
-
-  async function send() {
-    setSending(true);
-    try {
-      const ok = await act({ registrationLink: { link: link.trim(), deadline: deadline || undefined } }, `Panthexa link emailed to ${fullName}.`);
-      if (ok) { setLink(""); setDeadline(""); setOpen(false); }
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="mt-3 rounded-sm border border-[var(--gold-bright)] bg-[var(--gold-soft)]/30 p-3">
-      <p className="text-xs font-bold uppercase tracking-wide text-[var(--navy)]">Send their ÖSD (Panthexa) registration link</p>
-      <div className="mt-2 grid gap-2 sm:grid-cols-[2fr_1fr]">
-        <input
-          type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://osd-examregistration.com/register/..."
-          className="w-full rounded-sm border border-[var(--line)] bg-white px-2 py-1.5 text-xs"
-        />
-        <input
-          type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)}
-          className="w-full rounded-sm border border-[var(--line)] bg-white px-2 py-1.5 text-xs"
-        />
-      </div>
-      <div className="mt-2 flex gap-2">
-        <button disabled={busy || sending || !link.trim()} onClick={send} className="rounded-sm bg-[var(--navy)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
-          {sending ? "Sending…" : "Save & email candidate"}
-        </button>
-        <button onClick={() => setOpen(false)} className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)]">Cancel</button>
-      </div>
-    </div>
-  );
-}
-
-function Detail({ label, value }: { label: string; value: string | null }) {
+function DetailCell({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
-    <div>
-      <dt className="inline text-[var(--ink-soft)]">{label}: </dt>
-      <dd className="inline font-semibold text-[var(--navy)]">{value}</dd>
+    <div className="bg-white px-3 py-2.5">
+      <dt className="text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]">{label}</dt>
+      <dd className="mt-0.5 text-sm font-semibold text-[var(--navy)] break-words">{value}</dd>
     </div>
   );
 }
