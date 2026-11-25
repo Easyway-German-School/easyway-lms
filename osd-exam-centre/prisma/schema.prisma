@@ -74,6 +74,12 @@ model ExamSession {
   arrivalMinutesBefore Int     @default(60)
   published            Boolean @default(false)
 
+  /// Manual display order for the public booking list and the admin sittings
+  /// page. Lower = higher on the page. Defaults are seeded by CEFR level
+  /// (A1→C2) so a fresh install already reads in difficulty order; the
+  /// office can then nudge individual sittings with the up/down controls.
+  sortOrder Int @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -81,6 +87,7 @@ model ExamSession {
   bookings     ExamBooking[]
 
   @@index([published, startDate])
+  @@index([sortOrder])
 }
 
 /// A per-skill price, for a candidate who only needs to re-sit one module
@@ -295,6 +302,9 @@ model SupportMessage {
 
   name    String
   email   String
+  /// Optional — collected on the Need Help form so the office can call back
+  /// without hunting through a booking record first.
+  phone   String?
   message String
 
   /// open | resolved

@@ -40,6 +40,7 @@ type Session = {
   examFormat: string;
   feeWholeExam: number;
   expressFee: number;
+  sortOrder: number;
   startTime: string | null;
   arrivalMinutesBefore: number;
   published: boolean;
@@ -184,17 +185,36 @@ export default function AdminSessionsPage() {
     await load();
   }
 
-  async function deleteSession(s: Session) {
-    if (!window.confirm(`Delete "${s.title}" (${new Date(s.startDate).toLocaleDateString()})? This can't be undone.`)) return;
-    setError("");
-    try {
-      const res = await fetch(`/api/admin/sessions?sessionId=${s.id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Could not delete that sitting");
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not delete that sitting");
-    }
+  /** Swap this sitting with its neighbour so the public booking list follows the office's order. */
+  async function moveSitting(index: number, direction: -1 | 1) {
+    const swapWith = index + direction;
+    if (swapWith < 0 || swapWith >= sessions.length) return;
+    const next = [...sessions];
+    const a = next[index];
+    const b = next[swapWith];
+    const aOrder = a.sortOrder;
+    const bOrder = b.sortOrder;
+    // If they somehow share a sortOrder (fresh seed), give them distinct slots.
+    const reorder =
+      aOrder === bOrder
+        ? [
+            { id: a.id, sortOrder: index + direction },
+            { id: b.id, sortOrder: index },
+          ]
+        : [
+            { id: a.id, sortOrder: bOrder },
+            { id: b.id, sortOrder: aOrder },
+          ];
+    // Optimistic UI so the list doesn't jump after the round-trip.
+    next[index] = { ...b, sortOrder: reorder[1].sortOrder };
+    next[swapWith] = { ...a, sortOrder: reorder[0].sortOrder };
+    setSessions(next);
+    await fetch("/api/admin/sessions", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reorder }),
+    });
+    await load();
   }
 
   if (!loaded) return <AdminShell><AdminLoader /></AdminShell>;
@@ -203,7 +223,10 @@ export default function AdminSessionsPage() {
     <AdminShell>
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between">
-          <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Sittings</h1>
+          <div>
+            <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Sittings</h1>
+            <p className="mt-1 text-xs text-[var(--ink-soft)]">Use ↑ ↓ to set the order candidates see on the booking page (A1 → C2 by default).</p>
+          </div>
           <button onClick={startCreate} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white">
             New sitting
           </button>
@@ -320,18 +343,41 @@ export default function AdminSessionsPage() {
         )}
 
         <div className="mt-6 space-y-3">
-          {sessions.map((s) => (
+          {sessions.map((s, index) => (
             <div key={s.id} className="seal-border flex flex-wrap items-center justify-between gap-3 rounded-sm bg-white p-4">
-              <div>
-                <p className="font-semibold text-[var(--navy)]">{s.title}</p>
-                <p className="text-xs text-[var(--ink-soft)]">
-                  {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s.examFormat} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
-                  {s.displaySeatsRemaining !== null && (
-                    <span className="ml-1 font-semibold text-[var(--navy)]">
-                      · showing &quot;{s.displaySeatsRemaining} left&quot; publicly
-                    </span>
-                  )}
-                </p>
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex shrink-0 flex-col gap-1">
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    onClick={() => moveSitting(index, -1)}
+                    title="Move up"
+                    className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-xs font-bold text-[var(--navy)] disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    disabled={index === sessions.length - 1}
+                    onClick={() => moveSitting(index, 1)}
+                    title="Move down"
+                    className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-xs font-bold text-[var(--navy)] disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--navy)]">{s.title}</p>
+                  <p className="text-xs text-[var(--ink-soft)]">
+                    {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s.examFormat} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
+                    {s.expressFee > 0 && <> · express ₦{s.expressFee.toLocaleString()}</>}
+                    {s.displaySeatsRemaining !== null && (
+                      <span className="ml-1 font-semibold text-[var(--navy)]">
+                        · showing &quot;{s.displaySeatsRemaining} left&quot; publicly
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -363,13 +409,6 @@ export default function AdminSessionsPage() {
                   className={`rounded-sm px-3 py-1.5 text-xs font-bold uppercase ${s.published ? "bg-[var(--green-soft)] text-[var(--green)]" : "border border-[var(--line)] text-[var(--ink-soft)]"}`}
                 >
                   {s.published ? "Published" : "Draft"}
-                </button>
-                <button
-                  onClick={() => deleteSession(s)}
-                  title={s._count.bookings > 0 ? "Has bookings — cancel or move them first" : "Delete this sitting"}
-                  className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
-                >
-                  Delete
                 </button>
               </div>
             </div>

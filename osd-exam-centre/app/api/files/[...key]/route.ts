@@ -22,11 +22,14 @@ export const GET = jsonRoute(async (_req: NextRequest, { params }: { params: Pro
   const file = await readUpload(key.join("/"));
   if (!file) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
+  // private + short cache keeps the slip reopenable in the same admin
+  // session without implying the file was deleted (no-store made some
+  // browsers look like the link "went empty" after the first view).
   return new NextResponse(new Uint8Array(file.buffer), {
     headers: {
       "Content-Type": file.contentType,
       "Content-Disposition": "inline",
-      "Cache-Control": "private, no-store",
+      "Cache-Control": "private, max-age=300",
     },
   });
 });

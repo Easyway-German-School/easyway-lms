@@ -25,6 +25,7 @@ const schema = z.object({
   specialNeeds: z.string().optional(),
   secondaryIdType: z.string().optional(),
   modules: z.array(z.enum(BOOKABLE_MODULES)).min(1),
+  express: z.boolean().optional(),
   consentAccepted: z.literal(true, { message: "You must accept the rules and data-consent notice." }),
   // Honeypot: a real candidate never sees or fills this field (hidden
   // off-screen in the form) — anything filling it is a bot. Deliberately NOT

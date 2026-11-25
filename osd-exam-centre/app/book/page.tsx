@@ -18,23 +18,13 @@ type Session = {
   venueAddress: string;
   startDate: string;
   endDate: string;
-  registrationDeadline: string;
   feeWholeExam: number;
+  /** 0 = this sitting doesn't offer express results. */
+  expressFee: number;
   modulePrices: ModulePrice[];
   remaining: number;
   capacity: number;
 };
-
-/** Real scarcity, never fabricated: driven only by the actual seat count and
- *  the actual registration deadline already on the sitting. */
-function urgencyBadge(s: Pick<Session, "remaining" | "capacity" | "registrationDeadline">): { label: string; className: string } | null {
-  if (s.remaining <= 0) return null; // "Full" already shown separately
-  const daysLeft = Math.ceil((new Date(s.registrationDeadline).getTime() - Date.now()) / 86_400_000);
-  if (daysLeft <= 3) return { label: daysLeft <= 0 ? "Registration closes today" : `Only ${daysLeft} day${daysLeft === 1 ? "" : "s"} left to register`, className: "bg-[var(--red-soft)] text-[var(--red)]" };
-  if (s.remaining / s.capacity <= 0.2) return { label: `Only ${s.remaining} seat${s.remaining === 1 ? "" : "s"} left`, className: "bg-[var(--red-soft)] text-[var(--red)]" };
-  if (daysLeft <= 14) return { label: `Register within ${daysLeft} days`, className: "bg-[var(--gold-soft)] text-[var(--navy)]" };
-  return null;
-}
 
 const MODULE_LABEL: Record<string, string> = {
   written: "Written",
@@ -67,6 +57,7 @@ export default function BookPage() {
   const [sessionId, setSessionId] = useState("");
   const [selection, setSelection] = useState<"full" | "custom">("full");
   const [modules, setModules] = useState<Set<string>>(new Set());
+  const [express, setExpress] = useState(false);
 
   const [form, setForm] = useState({
     fullName: "", email: "", phone: "", addressLine: "", city: "", country: "Nigeria",
@@ -96,7 +87,13 @@ export default function BookPage() {
     }
   }, [session, selection]);
 
-  const feeTotal = useMemo(() => {
+  // Switching sittings clears express — a fee from the previous sitting must
+  // never silently ride onto a sitting that doesn't offer it.
+  useEffect(() => {
+    setExpress(false);
+  }, [sessionId]);
+
+  const examFee = useMemo(() => {
     if (!session) return 0;
     if (selection === "full") return session.feeWholeExam;
     const priceByModule = new Map(session.modulePrices.map((m) => [m.module, m.price]));
@@ -104,6 +101,10 @@ export default function BookPage() {
     for (const m of modules) total += priceByModule.get(m) ?? 0;
     return total;
   }, [session, selection, modules]);
+
+  const expressAvailable = Boolean(session && session.expressFee > 0);
+  const expressFee = express && expressAvailable ? session!.expressFee : 0;
+  const feeTotal = examFee + expressFee;
 
   function toggleModule(m: string) {
     setModules((prev) => {
@@ -139,6 +140,7 @@ export default function BookPage() {
           sessionId,
           ...form,
           modules: selection === "full" ? ["full"] : Array.from(modules),
+          express: express && expressAvailable,
           consentAccepted: consent,
           website,
         }),
@@ -167,7 +169,7 @@ export default function BookPage() {
         <BookingJourney step={step} />
         <div className="mt-3 flex items-center justify-between gap-3">
           <p className="text-xs text-[var(--ink-soft)]">Stuck on something?</p>
-          <NeedHelp defaultEmail={form.email || undefined} defaultName={form.fullName || undefined} />
+          <NeedHelp defaultEmail={form.email || undefined} defaultName={form.fullName || undefined} defaultPhone={form.phone || undefined} />
         </div>
 
         {error &&<p className="mt-6 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
@@ -215,14 +217,6 @@ export default function BookPage() {
                         <p className="mt-1 text-xs text-[var(--ink-soft)]">
                           {s.remaining > 0 ? `${s.remaining} of ${s.capacity} seats left` : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
                         </p>
-                        {(() => {
-                          const badge = urgencyBadge(s);
-                          return badge && (
-                            <span className={`mt-1.5 inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>
-                              {badge.label}
-                            </span>
-                          );
-                        })()}
                       </span>
                       <ArrowRightIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)] transition group-hover:translate-x-0.5 group-hover:text-[var(--gold)]" />
                     </label>
@@ -339,9 +333,47 @@ export default function BookPage() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between rounded-lg bg-[var(--gold-soft)]/40 px-4 py-3">
-                <span className="text-sm font-semibold text-[var(--navy)]">Total</span>
-                <span className="font-serif-display text-2xl text-[var(--navy)]">₦{feeTotal.toLocaleString()}</span>
+              {expressAvailable && (
+                <div className="rounded-lg border border-[var(--gold)]/50 bg-[var(--gold-soft)]/25 p-4">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={express}
+                      onChange={(e) => setExpress(e.target.checked)}
+                      className="mt-1 h-4 w-4 accent-[var(--navy)]"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="text-sm font-semibold text-[var(--navy)]">Add Express Option</span>
+                        <span className="text-sm font-bold text-[var(--navy)]">+₦{session.expressFee.toLocaleString()}</span>
+                      </span>
+                      <span className="mt-1.5 block text-xs leading-relaxed text-[var(--ink-soft)]">
+                        Express means your official result is prepared as fast as possible — typically within about
+                        one week after the examination — for candidates who need the certificate urgently.
+                        Standard processing takes longer. Tick this only if you need the speed.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              <div className="rounded-lg bg-[var(--gold-soft)]/40 px-4 py-3">
+                {express && expressAvailable && (
+                  <div className="mb-2 flex justify-between text-xs text-[var(--ink-soft)]">
+                    <span>Exam fee</span>
+                    <span>₦{examFee.toLocaleString()}</span>
+                  </div>
+                )}
+                {express && expressAvailable && (
+                  <div className="mb-2 flex justify-between text-xs text-[var(--ink-soft)]">
+                    <span>Express result</span>
+                    <span>₦{expressFee.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-[var(--navy)]">Total</span>
+                  <span className="font-serif-display text-2xl text-[var(--navy)]">₦{feeTotal.toLocaleString()}</span>
+                </div>
               </div>
             </div>
           )}
@@ -355,6 +387,10 @@ export default function BookPage() {
               <Row label="ID" value={`${form.idType} · ${form.idNumber}`} />
               <Row label="2nd ID to bring" value={form.secondaryIdType} />
               <Row label="Modules" value={selection === "full" ? "Whole exam" : Array.from(modules).map((m) => MODULE_LABEL[m]).join(", ")} />
+              <Row
+                label="Express result"
+                value={express && expressAvailable ? `Yes — +₦${expressFee.toLocaleString()} (≈1 week)` : "Not requested"}
+              />
               <Row label="Amount due" value={`₦${feeTotal.toLocaleString()}`} strong />
 
               <div className="rounded-lg bg-[var(--gold-soft)]/30 p-4">

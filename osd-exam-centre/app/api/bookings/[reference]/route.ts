@@ -80,6 +80,7 @@ export function shapeBooking(booking: NonNullable<Awaited<ReturnType<typeof pris
     examRegistrationDeadline: booking.examRegistrationDeadline,
     invoiceNumber: booking.invoiceNumber ?? invoiceNumberFor(booking.referenceCode),
     express: booking.express,
+    expressFee: booking.expressFee,
     // Derived, never stored — see lib/candidate-status.ts.
     derived: deriveStatus(booking),
     journey: candidateJourney(booking),
