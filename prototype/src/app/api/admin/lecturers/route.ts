@@ -16,7 +16,10 @@ import {
   type CourseLevel,
 } from "@/lib/lecturer-assignment";
 import { KIND, notify } from "@/lib/notify";
-import { releaseStaleNamedStudents } from "@/lib/tutor-rehome";
+import {
+  rehomeStudentsAfterTutorDeactivation,
+  releaseStaleNamedStudents,
+} from "@/lib/tutor-rehome";
 import {
   isEmploymentType,
   isLecturerStatus,
@@ -547,6 +550,24 @@ export async function PATCH(request: NextRequest) {
   }
 
   /**
+   * Deactivating a tutor used to leave Student.tutorId pointing at them —
+   * their card read "0 students" (class match stopped counting) while every
+   * student profile still named them, and those students could not join the
+   * live class the replacement tutor opened. Move everyone to the active
+   * tutor teaching the same course, batch and level.
+   */
+  let rehomed: { moved: number; unlinked: number } | null = null;
+  if (statusChanged && nextStatus === "inactive" && previousStatus !== "inactive") {
+    rehomed = await rehomeStudentsAfterTutorDeactivation({
+      lecturerId,
+      tenantId: lecturer.tenantId ?? gate.session.user.tenantId ?? null,
+    }).catch((error) => {
+      console.error("Tutor rehome after deactivation failed", { lecturerId, error });
+      return { moved: 0, unlinked: 0 };
+    });
+  }
+
+  /**
    * Tell the tutor their status moved — except when it moved to inactive,
    * which is the one case where a portal notification reaches nobody: they can
    * no longer sign in to read it. That conversation belongs to the office.
@@ -600,7 +621,7 @@ export async function PATCH(request: NextRequest) {
     toldBatches = told?.told ?? [];
   }
 
-  return NextResponse.json({ success: true, toldBatches });
+  return NextResponse.json({ success: true, toldBatches, rehomed });
 }
 
 export async function DELETE(request: NextRequest) {
@@ -629,6 +650,12 @@ export async function DELETE(request: NextRequest) {
   if (lecturers.length !== lecturerIds.length) return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
 
   for (const lecturer of lecturers) {
+    // Move named students onto a matching active tutor before the row goes —
+    // wiping tutorId alone left profiles empty and live join broken.
+    await rehomeStudentsAfterTutorDeactivation({
+      lecturerId: lecturer.id,
+      tenantId: gate.session.user.tenantId ?? null,
+    }).catch((error) => console.error("Tutor rehome before delete failed", { lecturerId: lecturer.id, error }));
     await prisma.session.deleteMany({ where: { userId: lecturer.userId } });
     await prisma.student.updateMany({ where: { tutorId: lecturer.id }, data: { tutorId: null } });
     // Co-tutor links are a hard delete — the lecturer row is only soft-deleted

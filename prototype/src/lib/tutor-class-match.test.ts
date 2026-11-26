@@ -210,6 +210,21 @@ describe("planLink — how a fitting student is linked", () => {
     expect(plan(morningA1, student({ tutorId: "other" })).action).toBe("shares_class");
   });
 
+  it("replaces an inactive primary instead of adding beside them", () => {
+    // Regression: Link-all treated inactive Adenike as a real primary, added
+    // Amaka as co-tutor, and student profiles kept showing Adenike forever.
+    const stuck = student({ tutorId: "adenike", primaryTutorActive: false });
+    expect(plan(morningA1, stuck)).toMatchObject({ action: "add_primary", seat: "campus" });
+    const onlineStuck = student({
+      branchId: ONLINE,
+      deliveryMode: "online",
+      sessionSlot: "evening",
+      tutorId: "adenike",
+      primaryTutorActive: false,
+    });
+    expect(plan(onlineEvening, onlineStuck).action).toBe("add_primary");
+  });
+
   it("a private student who already has a tutor is a conflict, never auto-linked", () => {
     const privateOnly = readAssignment({
       classTypes: ["private"],

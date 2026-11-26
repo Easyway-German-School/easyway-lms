@@ -65,6 +65,7 @@ export const LINK_STUDENT_SELECT = {
   admission: true,
   tutorId: true,
   coTutors: { select: { lecturerId: true } },
+  tutor: { select: { status: true } },
 } as const;
 
 type RawLinkStudent = {
@@ -78,7 +79,17 @@ type RawLinkStudent = {
   admission: unknown;
   tutorId: string | null;
   coTutors: { lecturerId: string }[];
+  tutor?: { status: string } | null;
 };
+
+/**
+ * Whether the named primary still counts for Link planning.
+ * Inactive primaries are treated as vacant so Link replaces them. On-leave
+ * still counts — the office decides whether to move those students.
+ */
+export function isPrimaryTutorActive(status: string | null | undefined): boolean {
+  return status !== "inactive";
+}
 
 export function toLinkStudent(raw: RawLinkStudent): LinkStudent {
   return {
@@ -92,6 +103,7 @@ export function toLinkStudent(raw: RawLinkStudent): LinkStudent {
     admission: raw.admission,
     tutorId: raw.tutorId,
     coTutorIds: raw.coTutors.map((link) => link.lecturerId),
+    primaryTutorActive: raw.tutorId ? isPrimaryTutorActive(raw.tutor?.status) : true,
   };
 }
 
