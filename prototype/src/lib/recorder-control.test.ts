@@ -126,4 +126,37 @@ describe("naming the cause in an alert", () => {
   it("a pause is named first, with who did it", () => {
     expect(describeSchedulerProblem({ primary: beat(2), standby: null }, { ...NO_CONTROL, paused: true, updatedBy: "Mary" }, now)).toMatch(/paused \(by Mary\)/);
   });
+
+  it("a single failed create is not worth a special line — the scheduler is still fresh and may just be mid-retry", () => {
+    const recent = [{ at: now.toISOString(), text: "FAILED to create g6-dedicated-2: no region would take the server (outstanding balance)" }];
+    expect(describeSchedulerProblem({ primary: beat(1, { recent }), standby: null }, NO_CONTROL, now)).toBe("");
+  });
+
+  it("the same create failure repeating names Linode's outstanding balance plainly, not the raw error", () => {
+    const recent = Array.from({ length: 3 }, () => ({ at: now.toISOString(), text: "FAILED to create g6-dedicated-4: no region would take the server (HTTP 400: Cannot create new Linodes with an outstanding balance on your account)" }));
+    expect(describeSchedulerProblem({ primary: beat(1, { recent }), standby: null }, NO_CONTROL, now)).toMatch(/outstanding balance/i);
+  });
+
+  it("a different repeating failure is still named, just less specifically", () => {
+    const recent = Array.from({ length: 2 }, () => ({ at: now.toISOString(), text: "FAILED to create g6-dedicated-2: some other provider error" }));
+    expect(describeSchedulerProblem({ primary: beat(1, { recent }), standby: null }, NO_CONTROL, now)).toMatch(/keep failing to start: some other provider error/);
+  });
+
+  it("two DIFFERENT failure reasons in a row do not trigger the repeat alert — only the same reason repeating does", () => {
+    const recent = [
+      { at: now.toISOString(), text: "FAILED to create g6-dedicated-2: reason A" },
+      { at: now.toISOString(), text: "FAILED to create g6-dedicated-4: reason B" },
+    ];
+    expect(describeSchedulerProblem({ primary: beat(1, { recent }), standby: null }, NO_CONTROL, now)).toBe("");
+  });
+
+  it("once the standby has taken over, its own log is what is read for a repeating failure, not the silent primary's", () => {
+    const standbyRecent = Array.from({ length: 2 }, () => ({ at: now.toISOString(), text: "FAILED to create g6-dedicated-2: no region would take the server (outstanding balance)" }));
+    const result = describeSchedulerProblem(
+      { primary: beat(25), standby: beat(1, { role: "standby", acting: true, recent: standbyRecent }) },
+      NO_CONTROL,
+      now,
+    );
+    expect(result).toMatch(/outstanding balance/i);
+  });
 });

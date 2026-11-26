@@ -1,6 +1,6 @@
 /**
- * When a tutor's class is rewritten, the students who actually sit in it
- * have to move with it.
+ * When a tutor's class is rewritten — or the tutor is deactivated — the
+ * students who sit with them have to move with that change.
  *
  * The tutor roster is a QUERY over branch + level + sitting, so giving a
  * class to tutor B makes those students appear on B's register immediately.
@@ -9,11 +9,19 @@
  * so the office would see "still with A" while B was already taking the class.
  *
  * This is the write that closes the gap: anyone named onto a tutor who no
- * longer covers them is moved to the one tutor who now uniquely does (or
- * unlinked if nobody does), and anyone sitting in the new class whose named
- * tutor no longer covers them is pointed at this tutor. Sharing a class on
- * purpose (two tutors still covering the same sitting) is left alone — that
- * is the explicit Move button, not an automatic steal.
+ * longer covers them is moved to the tutor who now teaches that same course,
+ * batch and level (or unlinked if nobody does), and anyone sitting in the new
+ * class whose named tutor no longer covers them is pointed at this tutor.
+ * Sharing a class on purpose (two active tutors still covering the same
+ * sitting) is left alone — that is the explicit Move button, not an automatic
+ * steal.
+ *
+ * COVERAGE MUST MATCH LINKING. Link-all can put an online tutor beside a
+ * hybrid student as a co-tutor for the online seat. Rehome used to decide
+ * "still covered?" from the campus seat alone, then strip those co-tutor rows
+ * on every admin refresh — which is why "Link all 15" kept coming back as 15.
+ * Coverage here now checks every seat the student occupies, the same way
+ * `fittingSeat` does when linking.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -23,13 +31,15 @@ import {
   readAssignment,
   studentWhereForLecturer,
   type LecturerAssignment,
-  type SeatClassType,
 } from "@/lib/lecturer-assignment";
+import { seatsFor, type LinkStudent } from "@/lib/tutor-class-match";
 import { setStudentCoTutors, setStudentTutor } from "@/lib/tutor-pairing";
 
 const LECTURER_ASSIGNMENT_SELECT = {
   id: true,
   status: true,
+  startedAt: true,
+  createdAt: true,
   branchId: true,
   level: true,
   sessionSlot: true,
@@ -68,28 +78,35 @@ type NamedStudent = {
   coTutors: { lecturerId: string }[];
 };
 
-function primaryClassType(student: NamedStudent): SeatClassType {
-  if (student.classType === "private") return "private";
-  if (student.deliveryMode === "online") return "online";
-  return "physical";
+type RankedLecturer = {
+  id: string;
+  assignment: LecturerAssignment;
+  startedAt: Date | null;
+  createdAt: Date;
+};
+
+/**
+ * Who may keep a named student link.
+ * Inactive tutors cannot teach or open a live room, so their links are always
+ * stale. On-leave is temporary — leave the pairing alone until the office
+ * deactivates or moves people on purpose.
+ */
+export function lecturerKeepsNamedStudents(status: string | null | undefined): boolean {
+  return status !== "inactive";
 }
 
-function primaryAttempt(student: NamedStudent, onlineBranchId: string | null) {
-  const classType = primaryClassType(student);
-  const branchId =
-    classType === "online" ? (student.branchId ?? onlineBranchId) : student.branchId;
-  const sessionSlot =
-    classType === "online" && student.deliveryMode === "hybrid"
-      ? student.hybridOnlineSlot || student.sessionSlot
-      : student.sessionSlot;
+function asLinkStudent(student: NamedStudent): LinkStudent {
   return {
-    classType,
-    student: {
-      branchId,
-      level: student.level,
-      sessionSlot,
-      admission: student.admission,
-    },
+    id: student.id,
+    branchId: student.branchId,
+    level: student.level,
+    sessionSlot: student.sessionSlot,
+    classType: student.classType,
+    deliveryMode: student.deliveryMode,
+    hybridOnlineSlot: student.hybridOnlineSlot,
+    admission: student.admission,
+    tutorId: student.tutorId,
+    coTutorIds: student.coTutors.map((row) => row.lecturerId),
   };
 }
 
@@ -108,41 +125,101 @@ export function namedGroupLinkIsStale(input: { classType: string; coveredByAssig
   return !input.coveredByAssignment;
 }
 
-function assignmentCoversNamedStudent(
+/**
+ * Does this tutor's assignment reach ANY seat the student occupies?
+ * Must stay aligned with `fittingSeat` in tutor-class-match.ts — a hybrid
+ * online co-tutor only covers the online seat, and that still counts.
+ */
+export function assignmentCoversAnySeat(
   assignment: LecturerAssignment,
   student: NamedStudent,
   onlineBranchId: string | null,
 ): boolean {
-  const attempt = primaryAttempt(student, onlineBranchId);
-  return assignmentMatchesStudent(assignment, attempt.classType, attempt.student);
+  if (!isAssigned(assignment)) return false;
+  for (const seat of seatsFor(asLinkStudent(student), onlineBranchId)) {
+    if (
+      assignmentMatchesStudent(assignment, seat.classType, {
+        branchId: seat.branchId,
+        level: student.level,
+        sessionSlot: seat.sessionSlot,
+        admission: student.admission,
+      })
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
-function uniqueMatchingLecturerId(
+function scoreReplacement(
+  lecturer: RankedLecturer,
   student: NamedStudent,
-  lecturers: Array<{ id: string; assignment: LecturerAssignment }>,
+  onlineBranchId: string | null,
+): number {
+  let score = 0;
+  const seats = seatsFor(asLinkStudent(student), onlineBranchId);
+  for (const seat of seats) {
+    if (
+      assignmentMatchesStudent(lecturer.assignment, seat.classType, {
+        branchId: seat.branchId,
+        level: student.level,
+        sessionSlot: seat.sessionSlot,
+        admission: student.admission,
+      })
+    ) {
+      score += 10;
+      if (seat.branchId && lecturer.assignment.branchIds.includes(seat.branchId)) score += 3;
+      if (
+        lecturer.assignment.sessionSlots.some(
+          (slot) => slot.toLowerCase() === seat.sessionSlot.toLowerCase(),
+        )
+      ) {
+        score += 2;
+      }
+    }
+  }
+  // Prefer the newest tutor teaching this class ("nearest new tutor").
+  const started = lecturer.startedAt?.getTime() ?? lecturer.createdAt.getTime();
+  score += Math.min(started / 1e12, 1);
+  return score;
+}
+
+/**
+ * Pick the active tutor who teaches this student's course, batch and level.
+ * When several fit, prefer the one whose seats overlap most, then the newest
+ * — never leave the student unlinked just because two tutors share a class.
+ */
+export function pickReplacementLecturerId(
+  student: NamedStudent,
+  lecturers: RankedLecturer[],
   onlineBranchId: string | null,
   exceptId?: string | null,
 ): string | null {
-  const attempt = primaryAttempt(student, onlineBranchId);
   const matches = lecturers.filter(
     (lecturer) =>
-      lecturer.id !== exceptId &&
-      assignmentMatchesStudent(lecturer.assignment, attempt.classType, attempt.student),
+      lecturer.id !== exceptId && assignmentCoversAnySeat(lecturer.assignment, student, onlineBranchId),
   );
-  return matches.length === 1 ? matches[0].id : null;
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0].id;
+
+  matches.sort((a, b) => {
+    const scoreDiff = scoreReplacement(b, student, onlineBranchId) - scoreReplacement(a, student, onlineBranchId);
+    if (scoreDiff !== 0) return scoreDiff;
+    const aTime = a.startedAt?.getTime() ?? a.createdAt.getTime();
+    const bTime = b.startedAt?.getTime() ?? b.createdAt.getTime();
+    return bTime - aTime;
+  });
+  return matches[0].id;
 }
 
 export type RehomeResult = { moved: number; unlinked: number };
 
-export async function rehomeStudentsAfterTutorAssignmentChange(input: {
-  lecturerId: string;
-  previous: LecturerAssignment;
-  next: LecturerAssignment;
-  tenantId?: string | null;
-}): Promise<RehomeResult> {
-  const { lecturerId, next, tenantId } = input;
-  const result: RehomeResult = { moved: 0, unlinked: 0 };
-
+async function loadActiveLecturers(tenantId?: string | null): Promise<{
+  onlineBranchId: string | null;
+  lecturers: RankedLecturer[];
+  assignmentByLecturer: Map<string, LecturerAssignment>;
+  statusByLecturer: Map<string, string>;
+}> {
   const [onlineBranch, lecturerRows] = await Promise.all([
     prisma.branch.findFirst({
       where: { mode: "online", ...(tenantId ? { tenantId } : {}) },
@@ -153,17 +230,37 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
       select: LECTURER_ASSIGNMENT_SELECT,
     }),
   ]);
+
   const onlineBranchId = onlineBranch?.id ?? null;
-  // Only an active tutor can receive a student. On-leave and inactive tutors
-  // stay in the coverage check below so we do not pull a class off someone
-  // who is away but still assigned to it.
+  const statusByLecturer = new Map(lecturerRows.map((row) => [row.id, row.status]));
+  const assignmentByLecturer = new Map(lecturerRows.map((row) => [row.id, readAssignment(row)]));
+  // Only tutors who can actually teach may receive a student. On-leave and
+  // inactive are skipped as destinations; inactive are also force-released
+  // as sources via lecturerKeepsNamedStudents.
   const lecturers = lecturerRows
-    .filter((row) => row.status === "active")
+    .filter((row) => row.status === "active" || row.status === "probation")
     .map((row) => ({
       id: row.id,
       assignment: readAssignment(row),
+      startedAt: row.startedAt,
+      createdAt: row.createdAt,
     }));
-  const assignmentByLecturer = new Map(lecturerRows.map((row) => [row.id, readAssignment(row)]));
+
+  return { onlineBranchId, lecturers, assignmentByLecturer, statusByLecturer };
+}
+
+async function rehomeNamedStudentsOfLecturer(input: {
+  lecturerId: string;
+  next: LecturerAssignment;
+  /** When true, every named group link is treated as stale regardless of coverage. */
+  forceRelease: boolean;
+  tenantId?: string | null;
+  alsoClaimCohort: boolean;
+}): Promise<RehomeResult> {
+  const { lecturerId, next, forceRelease, tenantId, alsoClaimCohort } = input;
+  const result: RehomeResult = { moved: 0, unlinked: 0 };
+  const { onlineBranchId, lecturers, assignmentByLecturer, statusByLecturer } =
+    await loadActiveLecturers(tenantId);
 
   const named = await prisma.student.findMany({
     where: {
@@ -175,11 +272,11 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
   });
 
   for (const student of named as NamedStudent[]) {
-    const covered = assignmentCoversNamedStudent(next, student, onlineBranchId);
+    const covered = forceRelease ? false : assignmentCoversAnySeat(next, student, onlineBranchId);
     if (!namedGroupLinkIsStale({ classType: student.classType, coveredByAssignment: covered })) continue;
 
     if (student.tutorId === lecturerId) {
-      const replacement = uniqueMatchingLecturerId(student, lecturers, onlineBranchId, lecturerId);
+      const replacement = pickReplacementLecturerId(student, lecturers, onlineBranchId, lecturerId);
       const paired = await setStudentTutor({
         studentId: student.id,
         lecturerId: replacement,
@@ -201,7 +298,7 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
     if (dropped.ok && dropped.changed) result.unlinked += 1;
   }
 
-  if (!isAssigned(next)) return result;
+  if (!alsoClaimCohort || !isAssigned(next)) return result;
 
   const cohortWhere = studentWhereForLecturer(next, lecturerId);
   if (!cohortWhere) return result;
@@ -213,11 +310,17 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
   });
 
   for (const student of cohort as NamedStudent[]) {
-    if (!assignmentCoversNamedStudent(next, student, onlineBranchId)) continue;
+    if (!assignmentCoversAnySeat(next, student, onlineBranchId)) continue;
     if (!student.tutorId || student.tutorId === lecturerId) continue;
 
     const previousAssignment = assignmentByLecturer.get(student.tutorId);
-    if (previousAssignment && assignmentCoversNamedStudent(previousAssignment, student, onlineBranchId)) {
+    // Do not steal from another active tutor who still covers this student.
+    // An inactive / cleared previous tutor does not count as covering.
+    if (
+      previousAssignment &&
+      lecturerKeepsNamedStudents(statusByLecturer.get(student.tutorId)) &&
+      assignmentCoversAnySeat(previousAssignment, student, onlineBranchId)
+    ) {
       continue;
     }
 
@@ -232,15 +335,62 @@ export async function rehomeStudentsAfterTutorAssignmentChange(input: {
   return result;
 }
 
+export async function rehomeStudentsAfterTutorAssignmentChange(input: {
+  lecturerId: string;
+  previous: LecturerAssignment;
+  next: LecturerAssignment;
+  tenantId?: string | null;
+}): Promise<RehomeResult> {
+  const lecturer = await prisma.lecturer.findUnique({
+    where: { id: input.lecturerId },
+    select: { status: true },
+  });
+  const forceRelease = !lecturerKeepsNamedStudents(lecturer?.status);
+
+  return rehomeNamedStudentsOfLecturer({
+    lecturerId: input.lecturerId,
+    next: input.next,
+    forceRelease,
+    tenantId: input.tenantId,
+    alsoClaimCohort: !forceRelease,
+  });
+}
+
+/**
+ * When a tutor is deactivated, every student named onto them must move to the
+ * active tutor teaching the same course, batch and level — otherwise profiles
+ * keep showing the left tutor while their card reads "0 students", and those
+ * students cannot join a live class.
+ */
+export async function rehomeStudentsAfterTutorDeactivation(input: {
+  lecturerId: string;
+  tenantId?: string | null;
+}): Promise<RehomeResult> {
+  const row = await prisma.lecturer.findUnique({
+    where: { id: input.lecturerId },
+    select: LECTURER_ASSIGNMENT_SELECT,
+  });
+  if (!row) return { moved: 0, unlinked: 0 };
+
+  return rehomeNamedStudentsOfLecturer({
+    lecturerId: input.lecturerId,
+    next: readAssignment(row),
+    forceRelease: true,
+    tenantId: input.tenantId,
+    alsoClaimCohort: false,
+  });
+}
+
 /**
  * Drop group-student links a tutor's class no longer covers, and point each
- * of those students at the one tutor who does.
+ * of those students at the tutor who does.
  *
  * The admin tutor card, the tutor's own student list and the student file all
- * read `Student.tutorId`. A class that was cleared used to leave that column
- * behind, so a tutor with nobody left still read "12 students" on every one of
- * those screens. Called before those reads so the number they show is the
- * number of students who are actually still with that tutor.
+ * read `Student.tutorId`. A class that was cleared — or a tutor marked
+ * inactive — used to leave that column behind, so a tutor with nobody left
+ * still read "12 students" (or "0" while profiles still named them). Called
+ * before those reads so the number they show is the number of students who
+ * are actually still with that tutor.
  *
  * Private pairings are left alone — see `namedGroupLinkIsStale`.
  */
@@ -254,7 +404,7 @@ export async function releaseStaleNamedStudents(input: {
       ...(input.tenantId ? { tenantId: input.tenantId } : {}),
       ...(input.lecturerId ? { id: input.lecturerId } : {}),
     },
-    select: { id: true },
+    select: { id: true, status: true },
   });
 
   const result: RehomeResult = { moved: 0, unlinked: 0 };
@@ -265,11 +415,16 @@ export async function releaseStaleNamedStudents(input: {
     });
     if (!row) continue;
     const assignment = readAssignment(row);
-    const part = await rehomeStudentsAfterTutorAssignmentChange({
+    const forceRelease = !lecturerKeepsNamedStudents(lecturer.status);
+    const part = await rehomeNamedStudentsOfLecturer({
       lecturerId: lecturer.id,
-      previous: assignment,
       next: assignment,
+      forceRelease,
       tenantId: input.tenantId,
+      // Do not claim a cohort while sweeping every tutor — that would race
+      // between two tutors who share a sitting. Cohort claim only runs on the
+      // explicit assignment-change path above.
+      alsoClaimCohort: false,
     });
     result.moved += part.moved;
     result.unlinked += part.unlinked;

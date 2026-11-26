@@ -83,6 +83,8 @@ type RosterStudent = {
   batch?: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  /** False when the named primary is inactive / on leave — Link replaces them. */
+  currentTutorActive?: boolean;
   /** Extra tutors already on this student. */
   coTutorIds?: string[];
   namedByOffice: boolean;
@@ -450,7 +452,7 @@ function StatusPanel({
       const name = tutor.user.name || tutor.user.email;
       if (
         !confirm(
-          `Mark ${name} as inactive?\n\nThey will be signed out and will not be able to sign in again. Their marks, classes and history are all kept, and you can set them back to active at any time.`,
+          `Mark ${name} as inactive?\n\nThey will be signed out and will not be able to sign in again. Every student still named onto them will move automatically to the active tutor teaching the same course, batch and level. Their marks, classes and history are all kept, and you can set them back to active at any time.`,
         )
       ) {
         return;
@@ -472,7 +474,15 @@ function StatusPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the status");
-      onSaved(`${tutor.user.name || tutor.user.email} is now marked ${LECTURER_STATUS_META[status].label.toLowerCase()}.`);
+      const moved = data.rehomed?.moved ?? 0;
+      const unlinked = data.rehomed?.unlinked ?? 0;
+      const rehomeNote =
+        status === "inactive" && (moved > 0 || unlinked > 0)
+          ? ` ${moved} student${moved === 1 ? "" : "s"} moved to a matching tutor${unlinked ? `; ${unlinked} had no matching tutor left` : ""}.`
+          : "";
+      onSaved(
+        `${tutor.user.name || tutor.user.email} is now marked ${LECTURER_STATUS_META[status].label.toLowerCase()}.${rehomeNote}`,
+      );
     } catch (saveError) {
       onError(saveError instanceof Error ? saveError.message : "Could not save the status");
     } finally {
@@ -484,8 +494,9 @@ function StatusPanel({
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
       <p className="text-sm font-semibold text-[var(--foreground)]">Status &amp; employment</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Marking somebody inactive is how a tutor leaves. It is not a deletion — every mark they entered and every
-        class they taught stays exactly where it is.
+        Marking somebody inactive is how a tutor leaves. Their students move automatically to the active tutor
+        teaching the same course, batch and level. Every mark they entered and every class they taught stays
+        exactly where it is.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -563,39 +574,52 @@ function StudentLine({
   student: RosterStudent;
   right: React.ReactNode;
 }) {
+  const tutorLabel = student.currentTutorName
+    ? student.currentTutorActive === false
+      ? `Previous tutor (inactive): ${student.currentTutorName}`
+      : `Tutor: ${student.currentTutorName}`
+    : null;
+
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
-        <p className="truncate text-xs text-[var(--muted)]">
+    <div className="grid grid-cols-1 gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+              student.waitingBatch
+                ? "bg-sky-500/10 text-sky-700"
+                : student.hasPaid
+                  ? "bg-emerald-500/10 text-emerald-700"
+                  : "bg-amber-500/15 text-amber-800"
+            }`}
+          >
+            {student.waitingBatch
+              ? `${student.waitingBatch.split(" ")[0]} intake`
+              : student.hasPaid
+                ? "Paid"
+                : `${naira(Math.max(0, student.tuitionFee - student.totalPaid))} owing`}
+          </span>
+        </div>
+        <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
           {student.studentCode || student.email} · {student.level} · {student.sessionSlot}
           {student.batch ? ` · ${student.batch}` : ""}
           {student.branchName ? ` · ${student.branchName}` : ""}
           {student.deliveryMode === "hybrid" ? " · hybrid" : student.deliveryMode === "online" ? " · online" : ""}
           {student.classType === "private" ? " · private" : ""}
         </p>
-        {student.currentTutorName ? (
-          <p className="truncate text-[11px] text-[var(--muted)]">Tutor: {student.currentTutorName}</p>
+        {tutorLabel ? (
+          <p
+            className={`mt-0.5 truncate text-[11px] ${
+              student.currentTutorActive === false ? "font-semibold text-amber-800" : "text-[var(--muted)]"
+            }`}
+          >
+            {tutorLabel}
+          </p>
         ) : null}
       </div>
 
-      <span
-        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-          student.waitingBatch
-            ? "bg-sky-500/10 text-sky-700"
-            : student.hasPaid
-              ? "bg-emerald-500/10 text-emerald-700"
-              : "bg-amber-500/15 text-amber-800"
-        }`}
-      >
-        {student.waitingBatch
-          ? `${student.waitingBatch.split(" ")[0]} intake`
-          : student.hasPaid
-            ? "Paid"
-            : `${naira(Math.max(0, student.tuitionFee - student.totalPaid))} owing`}
-      </span>
-
-      {right}
+      <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">{right}</div>
     </div>
   );
 }
@@ -1189,9 +1213,14 @@ function ClassRoster({
     }
 
     if (plan?.action === "add_primary") {
+      const replacingInactive = student.currentTutorActive === false && Boolean(student.currentTutorName);
       return (
         <button type="button" onClick={() => link([student])} disabled={busy} className={primaryButton} title={plan.reason}>
-          {busyId === student.id ? "Assigning…" : "Assign as tutor"}
+          {busyId === student.id
+            ? "Assigning…"
+            : replacingInactive
+              ? `Replace ${student.currentTutorName}`
+              : "Assign as tutor"}
         </button>
       );
     }
@@ -1205,7 +1234,11 @@ function ClassRoster({
           className={primaryButton}
           title={`${plan.reason} ${student.currentTutorName ? `${student.currentTutorName} stays as their tutor.` : ""}`}
         >
-          {busyId === student.id ? "Adding…" : plan.role === "online" ? "Add as online tutor" : "Add as co-tutor"}
+          {busyId === student.id
+            ? "Adding…"
+            : plan.role === "online"
+              ? `Add ${tutorName} as online tutor`
+              : `Add ${tutorName} as co-tutor`}
         </button>
       );
     }
@@ -1313,21 +1346,16 @@ function ClassRoster({
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+      <div className="mt-4 flex flex-wrap gap-1.5 text-[11px] font-semibold">
         <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[var(--accent)]">
           {roster.length} fit this class
         </span>
         <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
           {linkedCount} already linked
         </span>
-        {(summary?.add_primary ?? 0) > 0 ? (
+        {linkable.length > 0 ? (
           <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
-            {summary?.add_primary} with no tutor
-          </span>
-        ) : null}
-        {(summary?.add_co_tutor ?? 0) > 0 ? (
-          <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
-            {summary?.add_co_tutor} to add as co-tutor
+            {linkable.length} ready to link
           </span>
         ) : null}
         {needDecision > 0 ? (

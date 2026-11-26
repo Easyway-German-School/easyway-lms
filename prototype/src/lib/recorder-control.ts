@@ -221,6 +221,36 @@ export async function readSchedulerBeats(): Promise<{ primary: SchedulerBeat | n
 
 const SILENT_MS = 10 * 60_000;
 
+/**
+ * Pull the reason out of a scheduler log line like `FAILED to create g6-dedicated-4: no region
+ * would take the server (...)`. Lines that are not a create failure answer null.
+ */
+function createFailureReason(line: string): string | null {
+  return /^FAILED to create [^:]+: (.+)$/.exec(line)?.[1] ?? null;
+}
+
+/**
+ * The scheduler is TRYING every pass and failing every time for the same reason — not silent, just
+ * stuck. Worth a special line only once it has repeated (a single blip is not an outage): the last
+ * few log entries agreeing is what tells "Linode is out of capacity for a minute" apart from
+ * "something about this account is actually broken".
+ */
+function repeatedCreateFailure(beat: SchedulerBeat | null): string | null {
+  if (!beat) return null;
+  const reasons = beat.recent.slice(-8).map((line) => createFailureReason(line.text)).filter((r): r is string => r !== null);
+  if (reasons.length < 2) return null;
+  const last = reasons[reasons.length - 1]!;
+  return reasons.filter((r) => r === last).length >= 2 ? last : null;
+}
+
+/** Turn the provider's own error text into something an admin can act on without reading a stack trace. */
+function friendlyCreateFailure(reason: string): string {
+  if (/outstanding balance/i.test(reason)) {
+    return "Linode is refusing to create any recording server because the account has an outstanding balance. Pay it off on your Linode billing page — the scheduler will start servers again on its own within a few minutes once it clears.";
+  }
+  return `Recording servers keep failing to start: ${reason}`;
+}
+
 /** One sentence naming the most likely cause, or "" when the scheduler looks fine (so the alert says nothing extra). */
 export function describeSchedulerProblem(beats: { primary: SchedulerBeat | null; standby: SchedulerBeat | null }, control: Control, now: Date): string {
   const age = (b: SchedulerBeat | null) => (b ? now.getTime() - Date.parse(b.at) : Infinity);
@@ -231,6 +261,10 @@ export function describeSchedulerProblem(beats: { primary: SchedulerBeat | null;
       ? `The recorder scheduler has been silent for ${Math.round(age(beats.primary) / 60_000)} minutes, so no server was started.`
       : "The recorder scheduler has never reported, so no server was started.";
   }
+  // The scheduler that is actually acting right now (standby once it has taken over, primary otherwise) is the one whose log matters.
+  const activeBeat = standbyActing ? beats.standby : beats.primary;
+  const reason = repeatedCreateFailure(activeBeat);
+  if (reason) return friendlyCreateFailure(reason);
   return "";
 }
 

@@ -71,6 +71,13 @@ export type LinkStudent = {
   admission?: unknown;
   tutorId: string | null;
   coTutorIds: string[];
+  /**
+   * False when the named primary is inactive / on leave / missing. Link-all
+   * must REPLACE that tutor, not add beside them — otherwise profiles keep
+   * showing the left tutor while the new one is only a co-tutor, and students
+   * cannot join the live class the new tutor opens.
+   */
+  primaryTutorActive?: boolean;
 };
 
 export type LinkPlan = {
@@ -173,10 +180,20 @@ export function planLink(input: {
     return { action: "no_fit", reason: "Not in the level, sitting, batch or branch this tutor teaches." };
   }
 
-  const hasPrimary = Boolean(student.tutorId);
+  // An inactive primary is not a tutor the student can join — treat as vacant
+  // so Link / Link-all makes this tutor the primary instead of a co-tutor.
+  const primaryIsActive = student.primaryTutorActive !== false;
+  const hasPrimary = Boolean(student.tutorId) && primaryIsActive;
+  const replacingInactive = Boolean(student.tutorId) && !primaryIsActive;
 
   if (!hasPrimary && seat !== "online") {
-    return { action: "add_primary", seat, reason: "Fits this class and has no tutor yet." };
+    return {
+      action: "add_primary",
+      seat,
+      reason: replacingInactive
+        ? "Fits this class — their previous tutor is no longer active, so this tutor becomes theirs."
+        : "Fits this class and has no tutor yet.",
+    };
   }
 
   // The online half of a hybrid student is an EXTRA tutor by convention: the
@@ -193,7 +210,13 @@ export function planLink(input: {
   }
 
   if (!hasPrimary) {
-    return { action: "add_primary", seat, reason: "Fits this class and has no tutor yet." };
+    return {
+      action: "add_primary",
+      seat,
+      reason: replacingInactive
+        ? "Fits this class — their previous tutor is no longer active, so this tutor becomes theirs."
+        : "Fits this class and has no tutor yet.",
+    };
   }
 
   if (seat === "online") {

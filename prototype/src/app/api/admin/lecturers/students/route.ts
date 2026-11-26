@@ -15,7 +15,7 @@ import {
   type LinkAction,
   type LinkPlan,
 } from "@/lib/tutor-class-match";
-import { loadLinkContext, planFor, unlinkStudentFromTutor } from "@/lib/tutor-link";
+import { isPrimaryTutorActive, loadLinkContext, planFor, unlinkStudentFromTutor } from "@/lib/tutor-link";
 
 /**
  * Which students a tutor teaches, from the office's side.
@@ -60,6 +60,8 @@ type StudentRow = {
   batch: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  /** False when the named primary is inactive / on leave — Link must replace them. */
+  currentTutorActive: boolean;
   /** Extra tutors already on this student. */
   coTutorIds: string[];
   /** In this tutor's class because the office named them (primary or co-tutor), not by matching. */
@@ -90,7 +92,7 @@ const STUDENT_SHAPE = {
     where: { deletedAt: null },
     select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, historyStatus: true, historicalPaidAmount: true, createdAt: true, settledAt: true },
   },
-  tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
+  tutor: { select: { id: true, status: true, user: { select: { name: true, email: true } } } },
   coTutors: { select: { lecturerId: true } },
 } as const;
 
@@ -122,7 +124,7 @@ type RawStudent = {
     createdAt: Date;
     settledAt: Date | null;
   }>;
-  tutor: { id: string; user: { name: string | null; email: string } } | null;
+  tutor: { id: string; status: string; user: { name: string | null; email: string } } | null;
   coTutors: { lecturerId: string }[];
 };
 
@@ -165,6 +167,7 @@ function toRow(student: RawStudent, lecturerId: string | null, plan: LinkPlan | 
     batch: batchOf(student.admission),
     currentTutorId: student.tutor?.id ?? null,
     currentTutorName: student.tutor ? student.tutor.user.name || student.tutor.user.email : null,
+    currentTutorActive: student.tutorId ? isPrimaryTutorActive(student.tutor?.status) : true,
     coTutorIds,
     namedByOffice: Boolean(lecturerId && (student.tutorId === lecturerId || coTutorIds.includes(lecturerId))),
     plan: plan ? { action: plan.action, role: plan.role ?? null, reason: plan.reason } : null,
