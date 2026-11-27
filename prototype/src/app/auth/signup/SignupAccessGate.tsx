@@ -1,4 +1,4 @@
-import SignUpForm from "@/app/auth/signup/SignUpForm";
+import SignUpForm, { type SignupPrefill } from "@/app/auth/signup/SignUpForm";
 import SignupBlocked from "@/components/SignupBlocked";
 import {
   SIGNUP_ACCESS_GATE_ENABLED,
@@ -49,10 +49,16 @@ export default async function SignupAccessGate({
   const ref = first(params.ref) || first(params.reference) || first(params.trxref);
   const sig = first(params.sig);
 
+  const pathway = first(params.pathway);
+  const examPrepTitle =
+    pathway === "Exam Preparatory" ? "Start Exam Preparatory" : pageTitle;
+
   // Gate switched off (the default): the signup form is open to anyone, so a
   // returning student can reach the LMS without going back through the
   // marketing-site registration form. Any token / ref / signed invite that IS
-  // on the URL is still used to prefill the form.
+  // on the URL is still used to prefill the form. `?pathway=` (e.g. from the
+  // ÖSD exam centre prep CTA) is always merged in so the package arrives
+  // pre-selected for anonymous visitors.
   if (!SIGNUP_ACCESS_GATE_ENABLED) {
     const inviteParams = {
       email: first(params.email),
@@ -61,7 +67,7 @@ export default async function SignupAccessGate({
       branchId: first(params.branchId),
       sessionSlot: first(params.sessionSlot),
     };
-    let initialPrefill: Awaited<ReturnType<typeof validateSignupAccess>>["prefill"] | undefined;
+    let initialPrefill: SignupPrefill | undefined;
     if (!token && !ref && sig && verifyInviteSig(inviteParams, sig)) {
       initialPrefill = inviteParams;
     } else if (token || ref) {
@@ -72,9 +78,12 @@ export default async function SignupAccessGate({
         // Prefill is a nicety here, not a gate — fall through with none.
       }
     }
+    if (pathway) {
+      initialPrefill = { ...(initialPrefill ?? {}), pathway };
+    }
     return (
       <SignUpForm
-        pageTitle={pageTitle}
+        pageTitle={examPrepTitle}
         initialBranchName={initialBranchName}
         initialPrefill={initialPrefill}
       />
@@ -90,11 +99,21 @@ export default async function SignupAccessGate({
       level: first(params.level),
       branchId: first(params.branchId),
       sessionSlot: first(params.sessionSlot),
+      ...(pathway ? { pathway } : {}),
     };
-    if (verifyInviteSig(inviteParams, sig)) {
+    if (verifyInviteSig(
+      {
+        email: inviteParams.email,
+        name: inviteParams.name,
+        level: inviteParams.level,
+        branchId: inviteParams.branchId,
+        sessionSlot: inviteParams.sessionSlot,
+      },
+      sig,
+    )) {
       return (
         <SignUpForm
-          pageTitle={pageTitle}
+          pageTitle={examPrepTitle}
           initialBranchName={initialBranchName}
           initialPrefill={inviteParams}
         />
@@ -110,9 +129,9 @@ export default async function SignupAccessGate({
 
   return (
     <SignUpForm
-      pageTitle={pageTitle}
+      pageTitle={examPrepTitle}
       initialBranchName={initialBranchName}
-      initialPrefill={result.prefill}
+      initialPrefill={pathway ? { ...result.prefill, pathway } : result.prefill}
     />
   );
 }

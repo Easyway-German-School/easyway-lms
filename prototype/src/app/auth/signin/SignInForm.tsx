@@ -13,6 +13,10 @@ export default function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const message = searchParams.get("message");
+  // Relative path only — blocks open redirects from crafted callbackUrl values.
+  const rawCallback = searchParams.get("callbackUrl")?.trim() ?? "";
+  const callbackUrl =
+    rawCallback.startsWith("/") && !rawCallback.startsWith("//") ? rawCallback : "/dashboard";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +58,7 @@ export default function SignInForm() {
         setLoading(false);
         return;
       }
-      router.push(role === "candidate" ? "/candidate" : "/dashboard");
+      router.push(role === "candidate" ? "/candidate" : callbackUrl);
     } catch {
       // A network hiccup, a slow serverless function, or a non-JSON response
       // from a timed-out request all land here. Without this catch the loader

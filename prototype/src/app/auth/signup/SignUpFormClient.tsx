@@ -39,6 +39,7 @@ type SignupPrefill = {
   level?: string;
   branchId?: string;
   sessionSlot?: string;
+  pathway?: string;
 };
 
 type SignUpFormClientProps = {
@@ -89,7 +90,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // dropdown must be stopped by canAdvanceStep below, not silently enrolled
   // as a beginner. Same reasoning for sessionSlot further down.
   const [level, setLevel] = useState("");
-  const [pathway, setPathway] = useState(packageOptions[0]);
+  const [pathway, setPathway] = useState(() => {
+    const seeded = initialPrefill?.pathway?.trim();
+    return seeded && packageOptions.includes(seeded) ? seeded : packageOptions[0];
+  });
   const [gender, setGender] = useState("");
   const [dob, setDob] = useState("");
   const [religion, setReligion] = useState("");
@@ -518,6 +522,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       if (initialPrefill.level) applyLevel(initialPrefill.level);
       if (initialPrefill.branchId) setBranchId(initialPrefill.branchId);
       if (initialPrefill.sessionSlot) applySlot(initialPrefill.sessionSlot);
+      const seededPathway = initialPrefill.pathway?.trim();
+      if (seededPathway && packageOptions.includes(seededPathway)) setPathway(seededPathway);
     }
   }, [initialPrefill]);
 

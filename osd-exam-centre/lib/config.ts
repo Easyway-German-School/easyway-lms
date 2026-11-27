@@ -1,9 +1,25 @@
-/** The public landing page's prep-class banner — the LMS's own ÖSD page, for anonymous visitors. */
-export const EXAM_PREP_LINK =
-  process.env.EXAM_PREP_CLASS_URL || "https://easywayschoollms.com.ng/exams/osd";
+/**
+ * Prep-class handoff into the Easyway LMS.
+ *
+ * Anonymous visitors and booked candidates who want classes land on LMS
+ * signup with Exam Preparatory already selected. Existing LMS students use
+ * the sign-in link and go straight to Payments to settle. Journey emails
+ * still open THIS app's /prepare first (a Panthexa-only candidate has no LMS
+ * session yet) — that page then offers both doors.
+ */
+const LMS_ORIGIN = "https://easywayschoollms.com.ng";
+const EXAM_PREP_PATHWAY = "Exam Preparatory";
 
-/** The prep-class CTA inside candidate emails. Points inside THIS app: a candidate who registered on
- *  Panthexa has no LMS account, so linking them to the LMS's login-gated ÖSD page would be a dead end. */
+export const EXAM_PREP_LINK =
+  process.env.EXAM_PREP_CLASS_URL ||
+  `${LMS_ORIGIN}/auth/signup?pathway=${encodeURIComponent(EXAM_PREP_PATHWAY)}`;
+
+/** Existing LMS students — sign in, then pay for / continue Exam Preparatory. */
+export const EXAM_PREP_SIGNIN_LINK =
+  process.env.EXAM_PREP_SIGNIN_URL ||
+  `${LMS_ORIGIN}/auth/signin?callbackUrl=${encodeURIComponent("/payments")}`;
+
+/** The prep-class CTA inside candidate emails. Points inside THIS app first. */
 export function prepClassesLink(referenceCode: string, email: string): string {
   return `${siteUrl()}/prepare?ref=${encodeURIComponent(referenceCode)}&email=${encodeURIComponent(email)}`;
 }

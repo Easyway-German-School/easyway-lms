@@ -261,7 +261,7 @@ function RegistrationProgress({ booking, email, onChange }: { booking: Booking; 
       {/* Not while they still have chores to do — the soft sell waits for a calm moment (same rule as the email). */}
       {confirmed && (
         <div className="mt-6">
-          <PrepInterest booking={booking} email={email} onChange={onChange} />
+          <PrepInterest booking={booking} email={email} />
         </div>
       )}
       <div className="mt-6">
@@ -271,38 +271,27 @@ function RegistrationProgress({ booking, email, onChange }: { booking: Booking; 
   );
 }
 
-/** The soft prep-class door: one tap, no price, no payment. */
-function PrepInterest({ booking, email, onChange }: { booking: Booking; email: string; onChange: () => void }) {
-  const [busy, setBusy] = useState(false);
+/** Soft door into Exam Preparatory on the LMS — /prepare owns the handoff. */
+function PrepInterest({ booking, email }: { booking: Booking; email: string }) {
+  const prepareHref = `/prepare?ref=${encodeURIComponent(booking.referenceCode)}&email=${encodeURIComponent(email)}`;
   const asked = Boolean(booking.prepInterestAt);
-
-  async function ask() {
-    setBusy(true);
-    try {
-      await fetch(`/api/bookings/${booking.referenceCode}/prep-interest`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      onChange();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="rounded-lg border border-[var(--line)] bg-[var(--gold-soft)]/30 p-5 print:hidden">
       <p className="text-sm font-semibold text-[var(--navy)]">Want company on the way to exam day?</p>
       <p className="mt-1 text-sm text-[var(--ink-soft)]">
         Easyway runs exam-preparation classes built around this exact examination. Optional — it has no bearing on your registration, admission or result.
+        New students register for Exam Preparatory; existing students sign in and pay.
       </p>
-      {asked ? (
+      {asked && (
         <p className="mt-3 text-sm font-semibold text-[var(--green)]">Thanks — our classes team will be in touch with dates.</p>
-      ) : (
-        <button onClick={ask} disabled={busy} className="mt-3 rounded-lg border border-[var(--navy)] px-4 py-2 text-sm font-semibold text-[var(--navy)] disabled:opacity-40">
-          {busy ? "Sending…" : "Tell me about prep classes"}
-        </button>
       )}
+      <a
+        href={prepareHref}
+        className="mt-3 inline-flex rounded-lg border border-[var(--navy)] px-4 py-2 text-sm font-semibold text-[var(--navy)]"
+      >
+        Tell me about prep classes →
+      </a>
     </div>
   );
 }
@@ -429,7 +418,7 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
       </div>
 
       <div className="mt-8">
-        <PrepInterest booking={booking} email={email} onChange={() => window.location.reload()} />
+        <PrepInterest booking={booking} email={email} />
       </div>
     </div>
   );
