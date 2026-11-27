@@ -4,6 +4,11 @@
  * Rows from before support@ was correctly configured (or when exams@ was
  * wrongly used as Brevo From) may never have arrived. Brevo can still
  * soft-drop — we never tell the office a message "landed".
+ *
+ * IMPORTANT: "unconfirmed" (recent Brevo queue) is honesty on the candidate
+ * card — it must NOT keep a row on Resend-all forever. Resend already works
+ * (attemptCount climbs); putting unconfirmed on the action list made Resend
+ * all look broken (121 → still 121).
  */
 
 export function emailDeliveryTrustAfter(): Date {
@@ -12,7 +17,6 @@ export function emailDeliveryTrustAfter(): Date {
   return Number.isNaN(d.getTime()) ? new Date("2026-11-27T14:00:00.000Z") : d;
 }
 
-/** Critical money/admission emails stay on the attention board until dual-sent or aged out. */
 export const UNCONFIRMED_ATTENTION_HOURS = Number(process.env.EMAIL_UNCONFIRMED_HOURS || 48);
 
 export type DeliveryLabel =
@@ -66,13 +70,14 @@ export function deliveryLabel(row: {
   };
 }
 
+/** Actionable: failed / stuck / pre-fix unverified. NOT mere "unconfirmed". */
 export function needsEmailAttention(row: {
   status: string;
   sentAt: Date | string;
   provider?: string | null;
 }): boolean {
   const kind = deliveryLabel(row).kind;
-  return kind === "queued" || kind === "failed" || kind === "unverified" || kind === "unconfirmed";
+  return kind === "queued" || kind === "failed" || kind === "unverified";
 }
 
 /** Money + admission emails we always want to see land. */
