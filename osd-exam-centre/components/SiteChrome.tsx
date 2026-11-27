@@ -95,7 +95,7 @@ export function SiteFooter() {
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--gold-bright)]">Easyway</p>
           <ul className="mt-4 space-y-2.5 text-sm">
             <li>
-              <a href="https://easywayschoollms.com.ng/exams/osd" className="transition hover:text-white">ÖSD prep classes</a>
+              <a href="https://easywayschoollms.com.ng/auth/signup?pathway=Exam%20Preparatory" className="transition hover:text-white">ÖSD prep classes</a>
             </li>
             <li>
               <a href="https://easywayschoollms.com.ng" className="transition hover:text-white">Student portal</a>

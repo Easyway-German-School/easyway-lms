@@ -5,12 +5,15 @@ import { useSearchParams } from "next/navigation";
 import { SiteFooter } from "@/components/SiteChrome";
 import PageHero from "@/components/PageHero";
 import neuschwanstein from "@/assets/images/neuschwanstein.jpg";
+import { EXAM_PREP_LINK, EXAM_PREP_SIGNIN_LINK } from "@/lib/config";
 
 /**
- * Where the journey email's "Tell me about prep classes" link lands. The
- * interest is recorded on a BUTTON press, never on page load: mail scanners and
- * link-preview bots open every link in an email, and a load-triggered "lead"
- * would make the office chase people who never asked.
+ * Where the journey email's "Tell me about prep classes" link lands.
+ *
+ * Primary job: hand the candidate into the LMS Exam Preparatory package —
+ * new students register (package pre-selected), existing students sign in
+ * and pay. Interest is still recorded on an explicit button press (never on
+ * page load) so mail scanners don't create fake leads.
  */
 export default function PreparePage() {
   return (
@@ -64,29 +67,53 @@ function PrepareInner() {
             rehearsal with a teacher, and feedback on the same task types you will meet on the day.
           </p>
           <p className="mt-3 text-sm leading-6 text-[var(--ink-soft)]">
-            This is entirely optional. It has <strong>no bearing on your registration, your admission or your result</strong>,
-            and tapping the button below commits you to nothing — no payment, no obligation. Our classes team will simply
-            send you the next dates.
+            This is entirely optional. It has <strong>no bearing on your registration, your admission or your result</strong>.
+            To join, open the Exam Preparatory package on the Easyway student portal — new students register there;
+            if you already have an account, sign in and pay.
           </p>
 
-          {state === "done" ? (
-            <p className="mt-6 rounded-lg bg-[var(--green-soft)] px-4 py-3 text-sm font-semibold text-[var(--green)]">
-              Thank you — our classes team will be in touch shortly with dates.
-            </p>
-          ) : haveLink ? (
-            <>
-              {error && <p className="mt-4 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
-              <button
-                onClick={ask}
-                disabled={state === "sending"}
-                className="mt-6 rounded-lg bg-[var(--navy)] px-6 py-3 text-sm font-semibold text-white disabled:opacity-40"
-              >
-                {state === "sending" ? "Sending…" : "Yes, tell me about the classes"}
-              </button>
-            </>
-          ) : (
-            <p className="mt-6 rounded-lg bg-[var(--gold-soft)] px-4 py-3 text-sm text-[var(--navy)]">
-              Please open this page from the link in your email, so we know who to send the dates to.
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <a
+              href={EXAM_PREP_LINK}
+              className="inline-flex items-center justify-center rounded-lg bg-[var(--navy)] px-6 py-3 text-sm font-semibold text-white"
+            >
+              Join Exam Preparatory →
+            </a>
+            <a
+              href={EXAM_PREP_SIGNIN_LINK}
+              className="inline-flex items-center justify-center rounded-lg border border-[var(--navy)] px-6 py-3 text-sm font-semibold text-[var(--navy)]"
+            >
+              Already a student? Sign in to pay
+            </a>
+          </div>
+
+          {haveLink && (
+            <div className="mt-8 border-t border-[var(--line)] pt-6">
+              <p className="text-sm text-[var(--ink-soft)]">
+                Prefer the office to send you the next dates first? Tap below — no payment, no obligation.
+              </p>
+              {state === "done" ? (
+                <p className="mt-4 rounded-lg bg-[var(--green-soft)] px-4 py-3 text-sm font-semibold text-[var(--green)]">
+                  Thank you — our classes team will be in touch shortly with dates.
+                </p>
+              ) : (
+                <>
+                  {error && <p className="mt-4 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
+                  <button
+                    onClick={ask}
+                    disabled={state === "sending"}
+                    className="mt-4 rounded-lg border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)] disabled:opacity-40"
+                  >
+                    {state === "sending" ? "Sending…" : "Just tell me about the classes"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {!haveLink && (
+            <p className="mt-6 text-xs text-[var(--ink-soft)]">
+              Opened this page from an email? Use the link in the message so we know who to send dates to.
             </p>
           )}
 

@@ -8,6 +8,8 @@ export type SignupPrefill = {
   level?: string;
   branchId?: string;
   sessionSlot?: string;
+  /** Deep-link from ÖSD exam centre etc. Must match a `packageOptions` value. */
+  pathway?: string;
 };
 
 type SignUpFormProps = {
