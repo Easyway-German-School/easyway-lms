@@ -215,7 +215,7 @@ export default function BookPage() {
                           {new Date(s.endDate).toDateString() !== new Date(s.startDate).toDateString() && ` –${new Date(s.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}`}
                         </p>
                         <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                          {s.remaining > 0 ? `${s.remaining} of ${s.capacity} seats left` : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
+                          {s.remaining > 0 ? "Few seats left" : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
                         </p>
                       </span>
                       <ArrowRightIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)] transition group-hover:translate-x-0.5 group-hover:text-[var(--gold)]" />

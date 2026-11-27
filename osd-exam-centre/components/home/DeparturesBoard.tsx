@@ -87,7 +87,7 @@ export default function DeparturesBoard() {
                       <span className="block truncate font-medium text-white">{s.title}</span>
                       <span className="block truncate text-xs text-white/50">{s.venueName}</span>
                     </span>
-                    <span className="font-mono text-sm text-white/80">{s.remaining} / {s.capacity}</span>
+                    <span className="font-mono text-sm text-white/80">{s.remaining > 0 ? "Few left" : "Full"}</span>
                     <span className="font-mono text-sm text-white/80">₦{s.feeWholeExam.toLocaleString("en-NG")}</span>
                     <span className="flex items-center gap-3 md:justify-end">
                       <span className={`rounded-full border px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-widest ${CHIP[st.tone]}`}>

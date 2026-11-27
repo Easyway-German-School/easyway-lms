@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/admin-auth";
-import { cancelBooking, confirmBookingPayment, markNoShow, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
+import { cancelBooking, confirmBookingPayment, deleteBooking, markNoShow, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
 import { admitCandidate, markCertificateDelivered, markCertificateReady, releaseResult } from "@/lib/lifecycle";
 import { sendCustomEmail, sendJourneyStep, sendRegistrationLink } from "@/lib/journey";
 import { JOURNEY_ORDER, type JourneyStep } from "@/lib/journey-emails";
@@ -111,4 +111,12 @@ export const PATCH = jsonRoute(async (req: NextRequest, { params }: { params: Pr
   }
 
   return NextResponse.json({ error: "Nothing to do" }, { status: 400 });
+});
+
+export const DELETE = jsonRoute(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const result = await deleteBooking(id);
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
+  return NextResponse.json({ ok: true });
 });

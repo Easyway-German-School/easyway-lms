@@ -64,8 +64,12 @@ export function contextFor(b: BookingForJourney, now = new Date()): EmailContext
 }
 
 /** The invoice (pending) or receipt (paid) PDF for a booking — same document, the paid state fills the confirmation block. */
-export async function invoicePdfFor(b: BookingForJourney, now = new Date()): Promise<{ bytes: Uint8Array; filename: string; paid: boolean }> {
-  const model = buildInvoice(b, b.session, now);
+export async function invoicePdfFor(
+  b: BookingForJourney,
+  now = new Date(),
+  opts?: { as?: "invoice" | "receipt" },
+): Promise<{ bytes: Uint8Array; filename: string; paid: boolean }> {
+  const model = buildInvoice(b, b.session, now, opts);
   const bytes = await renderInvoicePdf(model);
   return { bytes, filename: `${model.paid ? "Receipt" : "Invoice"}-${model.invoiceNumber}.pdf`, paid: model.paid };
 }
@@ -94,7 +98,7 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
   let attachment: EmailAttachment | undefined;
   if (rendered.attach) {
     try {
-      const pdf = await invoicePdfFor(booking, now);
+      const pdf = await invoicePdfFor(booking, now, { as: rendered.attach });
       attachment = { filename: pdf.filename, content: pdf.bytes, contentType: "application/pdf" };
     } catch (error) {
       console.error(`Could not build the ${rendered.attach} PDF for ${booking.referenceCode}:`, error);
@@ -231,3 +235,44 @@ export async function runJourneySweep(now = new Date()): Promise<{ checked: numb
   return { checked: bookings.length, sent, failed };
 }
 
+/**
+ * Admin "Drain Queue": force-resend the critical money emails that Brevo may
+ * have silently dropped, then run the normal due-step sweep for everything else.
+ * - Unpaid / pending_verification → booking_received (Invoice PDF)
+ * - Paid → payment_confirmed (Receipt PDF)
+ */
+export async function drainEmailQueue(): Promise<{
+  invoices: number;
+  receipts: number;
+  sweepSent: number;
+  failed: number;
+}> {
+  const live = await prisma.examBooking.findMany({
+    where: { status: { notIn: ["cancelled", "no_show"] } },
+    select: { id: true, paymentStatus: true },
+  });
+
+  let invoices = 0;
+  let receipts = 0;
+  let failed = 0;
+
+  for (const b of live) {
+    const step = b.paymentStatus === "paid" ? "payment_confirmed" : "booking_received";
+    try {
+      const result = await sendJourneyStep(b.id, step, { force: true });
+      if (!result.ok) {
+        failed++;
+        continue;
+      }
+      if (step === "booking_received") invoices++;
+      else receipts++;
+    } catch (error) {
+      failed++;
+      console.error(`Drain queue: ${step} failed for ${b.id}:`, error);
+    }
+  }
+
+  const sweep = await runJourneySweep();
+  const sweepSent = Object.values(sweep.sent).reduce((n, v) => n + (v ?? 0), 0);
+  return { invoices, receipts, sweepSent, failed: failed + sweep.failed };
+}
