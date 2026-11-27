@@ -346,10 +346,12 @@ model JourneyEmail {
   /// Filename of the invoice/receipt PDF that rode along, if any.
   attachment String?
   sentAt     DateTime    @default(now())
-  /// queued = claimed, not yet handed to Brevo; accepted = SMTP accepted
+  /// queued = claimed, not yet handed off; accepted = SMTP accepted
   /// (NOT proof of inbox delivery); failed = SMTP/reject error — retry.
   status     String      @default("accepted")
-  /// Brevo/nodemailer message id when SMTP accepted the handoff.
+  /// Which relay accepted the handoff: brevo | zoho | local.
+  provider   String?
+  /// Provider message id when SMTP accepted the handoff.
   messageId  String?
   lastError  String?
   attemptCount Int       @default(1)

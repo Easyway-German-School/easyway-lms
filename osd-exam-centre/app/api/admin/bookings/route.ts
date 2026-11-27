@@ -14,7 +14,16 @@ export const GET = jsonRoute(async () => {
     include: {
       session: { select: { id: true, title: true, level: true, startDate: true, capacity: true } },
       journeyEmails: {
-        select: { step: true, subject: true, sentAt: true, status: true, messageId: true, lastError: true, attemptCount: true },
+        select: {
+          step: true,
+          subject: true,
+          sentAt: true,
+          status: true,
+          provider: true,
+          messageId: true,
+          lastError: true,
+          attemptCount: true,
+        },
         orderBy: { sentAt: "asc" },
       },
     },

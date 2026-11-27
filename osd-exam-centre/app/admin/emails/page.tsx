@@ -121,8 +121,9 @@ export default function AdminEmailsPage() {
           <div>
             <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Email attention</h1>
             <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-              SMTP accept is not inbox proof. This list is failed sends, stuck claims, missing registration
-              invoices, and anything logged before the support@ Brevo fix (those often never arrived).
+              SMTP &quot;queued&quot; is not inbox proof. This list includes failed/stuck sends, pre-fix unverified
+              rows, missing invoices, and recent critical emails still unconfirmed (including brand-new
+              registrations). Wire Zoho ZeptoMail (ZOHO_SMTP_*) for automatic Brevo→Zoho dual send.
             </p>
           </div>
           <button

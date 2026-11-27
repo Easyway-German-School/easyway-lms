@@ -1,0 +1,1 @@
+ALTER TABLE "JourneyEmail" ADD COLUMN IF NOT EXISTS "provider" TEXT;

@@ -61,6 +61,7 @@ type Booking = {
     subject: string;
     sentAt: string;
     status?: string;
+    provider?: string | null;
     messageId?: string | null;
     lastError?: string | null;
     attemptCount?: number;
@@ -741,6 +742,7 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
                   sentAt: e.sentAt,
                   messageId: e.messageId,
                   lastError: e.lastError,
+                  provider: e.provider,
                 });
                 const tone =
                   d.tone === "bad"
