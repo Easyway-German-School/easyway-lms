@@ -418,7 +418,7 @@ function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }
       </div>
 
       <div className="mt-8">
-        <PrepInterest booking={booking} email={email} onChange={() => window.location.reload()} />
+        <PrepInterest booking={booking} email={email} />
       </div>
     </div>
   );
