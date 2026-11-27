@@ -97,7 +97,10 @@ export default function AdminEmailsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Bulk resend failed");
-      setNotice(`Resent ${data.sent}, failed ${data.failed}.`);
+      setNotice(
+        `Resend finished — handed to provider again: ${data.sent}, failed: ${data.failed}. ` +
+          `If the list still looks full, refresh — only failed/unverified/missing stay here (not every Brevo queue).`,
+      );
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bulk resend failed");
@@ -121,9 +124,10 @@ export default function AdminEmailsPage() {
           <div>
             <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Email attention</h1>
             <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-              SMTP &quot;queued&quot; is not inbox proof. This list includes failed/stuck sends, pre-fix unverified
-              rows, missing invoices, and recent critical emails still unconfirmed (including brand-new
-              registrations). Wire Zoho ZeptoMail (ZOHO_SMTP_*) for automatic Brevo→Zoho dual send.
+              This is the <strong>action</strong> queue only: failed, stuck, missing invoices, or accepted
+              before the working From. Recent &quot;queued at Brevo&quot; rows are not listed here on purpose —
+              Resend already hands them to Brevo again; keeping them here made the count stuck at 121.
+              Candidate cards still say SMTP ≠ inbox. Wire Zoho ZeptoMail for dual send when ready.
             </p>
           </div>
           <button

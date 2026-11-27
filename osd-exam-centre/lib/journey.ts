@@ -405,21 +405,15 @@ export async function listEmailAttention(): Promise<
   }[]
 > {
   const trustAfter = emailDeliveryTrustAfter();
-  const unconfirmedSince = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  // Actionable resend queue ONLY: failed / stuck / accepted before working From.
+  // Recent "queued at Brevo" accepts are honesty labels on the candidate card —
+  // they must NOT sit here or Resend all never clears (attempt 12+ still listed).
   const rows = await prisma.journeyEmail.findMany({
     where: {
       booking: { status: { notIn: ["cancelled", "no_show"] } },
       OR: [
         { status: { in: ["failed", "queued"] } },
-        // Pre-working-From accepts.
         { sentAt: { lt: trustAfter } },
-        // Recent "accepted" critical steps — SMTP queue ≠ inbox. Surface them
-        // so a brand-new registration that "sent" but never arrived is visible.
-        {
-          status: "accepted",
-          sentAt: { gte: unconfirmedSince },
-          step: { in: [...CRITICAL_JOURNEY_STEPS] },
-        },
       ],
     },
     include: {
