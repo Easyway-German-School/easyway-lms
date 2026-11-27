@@ -82,7 +82,7 @@ export default function NextSittingCard() {
               </div>
               <div>
                 <dt className="text-[10px] uppercase tracking-widest text-white/55">Seats left</dt>
-                <dd className="mt-0.5 font-mono text-sm font-bold">{next.remaining} / {next.capacity}</dd>
+                <dd className="mt-0.5 font-mono text-sm font-bold">{next.remaining > 0 ? "Few seats left" : "Full"}</dd>
               </div>
             </dl>
 

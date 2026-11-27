@@ -644,3 +644,15 @@ export async function reviewBookingDocuments(
     html: `<p>Hello ${escapeHtml(booking.fullName)},</p><p>We couldn't accept one of your documents: ${escapeHtml(reason ?? "please re-upload a clearer copy.")}</p><p>Go back to your booking to try again.</p>`,
   });
 }
+
+/** Permanently remove a cancelled/no-show booking — test rows and junk only. */
+export async function deleteBooking(bookingId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const row = await prisma.examBooking.findUnique({ where: { id: bookingId }, select: { status: true } });
+  if (!row) return { ok: false, error: "Booking not found" };
+  if (row.status !== "cancelled" && row.status !== "no_show") {
+    return { ok: false, error: "Only cancelled or no-show bookings can be deleted. Cancel it first." };
+  }
+  await prisma.examBooking.delete({ where: { id: bookingId } });
+  return { ok: true };
+}
+

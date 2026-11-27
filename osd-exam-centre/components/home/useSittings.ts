@@ -54,6 +54,5 @@ export function formatDay(iso: string): string {
 /** OPEN / FILLING / FULL — the wording an airport departures board would use. */
 export function seatStatus(s: Pick<Sitting, "remaining" | "capacity">): { label: string; tone: "open" | "filling" | "full" } {
   if (s.remaining <= 0) return { label: "Full", tone: "full" };
-  if (s.remaining / s.capacity <= 0.2) return { label: "Filling fast", tone: "filling" };
-  return { label: "Boarding", tone: "open" };
+  return { label: "Few seats left", tone: "filling" };
 }

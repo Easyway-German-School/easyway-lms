@@ -518,14 +518,13 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
 
       {error && <p className="mt-4 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
-      {booking.paymentStatus === "pending_verification" && (
-        <p className="mt-6 rounded-lg bg-[var(--gold-soft)] px-4 py-3 text-sm font-semibold text-[var(--navy)]">
-          Receipt submitted — the office is confirming your payment landed. This page will update once it is verified.
-        </p>
-      )}
-
-      {booking.paymentStatus === "unpaid" && (
+      {(booking.paymentStatus === "unpaid" || booking.paymentStatus === "pending_verification") && (
         <div className="mt-6 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
+          {booking.paymentStatus === "pending_verification" && (
+            <p className="mb-3 rounded-lg bg-[var(--gold-soft)] px-3 py-2 text-xs font-semibold text-[var(--navy)]">
+              Receipt submitted — the office is confirming it. Uploaded the wrong file (e.g. an invoice)? Replace it below with your bank payment receipt.
+            </p>
+          )}
           <p className="text-sm font-semibold text-[var(--navy)]">Amount due: ₦{booking.feeTotal.toLocaleString()}</p>
           {booking.express && (
             <p className="mt-1 text-xs font-semibold text-[var(--navy)]">
@@ -552,7 +551,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
                 Pay from a commercial bank, not a wallet/MFB app. This booking is not reversible or refundable once confirmed.
               </p>
               <label className="mt-4 block text-xs font-semibold text-[var(--navy)]">
-                Upload your payment receipt (required)
+{booking.paymentStatus === "pending_verification" ? "Replace payment receipt" : "Upload your payment receipt (required)"}
                 <input
                   type="file" accept="image/*,application/pdf" onChange={(e) => setSlipFile(e.target.files?.[0] ?? null)}
                   className="mt-1 block w-full text-sm text-[var(--ink-soft)] file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-[var(--navy)] file:px-4 file:py-2.5 file:text-sm file:font-semibold file:text-white"
@@ -567,7 +566,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
                 disabled={!slipFile || submitting}
                 className="mt-3 rounded-lg bg-[var(--gold)] px-5 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40"
               >
-                {submitting ? "Submitting…" : "I've paid — submit receipt"}
+                {submitting ? "Submitting…" : booking.paymentStatus === "pending_verification" ? "Replace receipt" : "I've paid — submit receipt"}
               </button>
               {!slipFile && <p className="mt-1.5 text-[11px] text-[var(--ink-soft)]">Choose the receipt file above first — the button turns on once one is selected.</p>}
             </>

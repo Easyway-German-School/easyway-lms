@@ -133,9 +133,20 @@ export function feeLinesFor(booking: Pick<InvoiceBooking, "modules" | "feeTotal"
   return lines;
 }
 
-export function buildInvoice(booking: InvoiceBooking, session: InvoiceSession, now = new Date()): InvoiceModel {
+/**
+ * `as` forces the document type independent of the booking's current payment
+ * status — so a booking_received resend always attaches an Invoice, and a
+ * payment_confirmed resend always attaches a Receipt, even if the office
+ * force-sends either one out of order.
+ */
+export function buildInvoice(
+  booking: InvoiceBooking,
+  session: InvoiceSession,
+  now = new Date(),
+  opts?: { as?: "invoice" | "receipt" },
+): InvoiceModel {
   const invoiceNumber = booking.invoiceNumber ?? invoiceNumberFor(booking.referenceCode);
-  const paid = booking.paymentStatus === "paid";
+  const paid = opts?.as === "invoice" ? false : opts?.as === "receipt" ? true : booking.paymentStatus === "paid";
   const account = paymentAccount();
   const registered = booking.registeredAt ?? booking.createdAt;
 
@@ -171,8 +182,8 @@ export function buildInvoice(booking: InvoiceBooking, session: InvoiceSession, n
       { label: "Payment Ref.:", value: paymentReferenceFor(booking.fullName, invoiceNumber) },
     ],
     paymentConfirmation: [
-      { label: "Amount Received:", value: paid && booking.amountReceived !== null ? formatAmount(booking.amountReceived) : "" },
-      { label: "Date received:", value: paid && booking.paidOn ? formatNumericDate(booking.paidOn) : "" },
+      { label: "Amount Received:", value: paid ? formatAmount(booking.amountReceived !== null ? booking.amountReceived : booking.feeTotal) : "" },
+      { label: "Date received:", value: paid && booking.paidOn ? formatNumericDate(booking.paidOn) : paid ? formatNumericDate(now) : "" },
       { label: "Transaction Reference:", value: paid ? booking.transferReference ?? "" : "" },
       { label: "Verified by:", value: paid ? (booking.verifiedBy && booking.verifiedBy !== "office" ? booking.verifiedBy : OFFICE.signatory) : "" },
     ],

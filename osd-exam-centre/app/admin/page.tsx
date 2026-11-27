@@ -56,9 +56,10 @@ type Booking = {
   derived: { key: string; number: number | null; label: string; staffNext: string | null; tone: "neutral" | "waiting" | "action" | "good" | "bad" };
   checklist: { label: string; done: boolean }[];
   journeyEmails: { step: string; subject: string; sentAt: string }[];
+  registrationLinkSentAt: string | null;
 };
 
-type Filter = "action" | "waiting" | "active" | "cancelled" | "leads" | "all";
+type Filter = "action" | "waiting" | "examWaiting" | "panthexaSent" | "active" | "cancelled" | "leads" | "all";
 
 const STEP_LABEL: Record<string, string> = {
   booking_received: "Booking received (A + invoice)",
@@ -90,6 +91,12 @@ function isCancelledBooking(b: Pick<Booking, "status">) {
 }
 function isLiveBooking(b: Pick<Booking, "status">) {
   return !isCancelledBooking(b);
+}
+function isWaitingForExam(b: Booking): boolean {
+  return isLiveBooking(b) && (b.derived.key === "ready_to_admit" || b.derived.key === "admitted") && !b.registrationLinkSentAt;
+}
+function hasPanthexaLinkSent(b: Booking): boolean {
+  return isLiveBooking(b) && Boolean(b.registrationLinkSentAt);
 }
 
 /** Office-side version of the same candidate upload flow — for a walk-in or Panthexa candidate
@@ -173,6 +180,8 @@ export default function AdminDashboard() {
   const counts = useMemo(() => ({
     action: bookings.filter((b) => isLiveBooking(b) && (b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending")).length,
     waiting: bookings.filter((b) => isLiveBooking(b) && b.derived.tone === "waiting").length,
+    examWaiting: bookings.filter(isWaitingForExam).length,
+    panthexaSent: bookings.filter(hasPanthexaLinkSent).length,
     active: bookings.filter((b) => isLiveBooking(b)).length,
     cancelled: bookings.filter((b) => isCancelledBooking(b)).length,
     leads: bookings.filter((b) => isLiveBooking(b) && b.prepInterestAt).length,
@@ -186,6 +195,8 @@ export default function AdminDashboard() {
     .filter((b) => {
       if (filter === "action") return isLiveBooking(b) && (b.derived.tone === "action" || b.paymentStatus === "refund_failed" || b.paymentStatus === "refund_pending");
       if (filter === "waiting") return isLiveBooking(b) && b.derived.tone === "waiting";
+      if (filter === "examWaiting") return isWaitingForExam(b);
+      if (filter === "panthexaSent") return hasPanthexaLinkSent(b);
       if (filter === "active") return isLiveBooking(b);
       if (filter === "cancelled") return isCancelledBooking(b);
       if (filter === "leads") return isLiveBooking(b) && Boolean(b.prepInterestAt);
@@ -196,6 +207,8 @@ export default function AdminDashboard() {
   const tabs: { key: Filter; label: string }[] = [
     { key: "action", label: "Needs the office" },
     { key: "waiting", label: "Waiting on candidate" },
+    { key: "examWaiting", label: "Waiting for Exam" },
+    { key: "panthexaSent", label: "Panthexa link sent" },
     { key: "active", label: "Active candidates" },
     { key: "cancelled", label: "Cancelled / no-show" },
     { key: "leads", label: "Prep-class leads" },
@@ -214,6 +227,7 @@ export default function AdminDashboard() {
           <PanthexaIntakeForm onCreated={load} />
           <ManualBookingForm onCreated={load} />
           <BulkEmailForm />
+          <DrainEmailQueueButton onDone={(msg) => { setNotice(msg); load(); }} onError={setError} />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -253,6 +267,29 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 /** One email to every live candidate matching a plain category — not the per-candidate "resend" dropdown, a mass send. */
+function DrainEmailQueueButton({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    if (!window.confirm("Force-resend Invoice emails to everyone still unpaid, and Receipt emails to everyone paid, then sweep other due emails? Use this when Brevo dropped mail.")) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/emails/drain", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Drain failed");
+      onDone(`Drain done — invoices ${data.invoices}, receipts ${data.receipts}, sweep ${data.sweepSent}, failed ${data.failed}.`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Drain failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button disabled={busy} onClick={run} className="rounded-sm bg-[var(--gold)] px-4 py-2 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40">
+      {busy ? "Draining…" : "Drain email queue"}
+    </button>
+  );
+}
+
 function BulkEmailForm() {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState("unpaid");
@@ -536,6 +573,21 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
             className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
           >
             Cancel
+          </button>
+        )}
+        {!live && (
+          <button
+            disabled={busy}
+            onClick={async () => {
+              if (!window.confirm(`Permanently delete ${b.fullName} (${b.referenceCode})? This cannot be undone.`)) return;
+              const res = await fetch(`/api/admin/bookings/${b.id}`, { method: "DELETE" });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) { window.alert(data.error ?? "Could not delete"); return; }
+              onUploaded();
+            }}
+            className="rounded-sm border border-[var(--red)] px-3 py-1.5 text-xs font-semibold text-[var(--red)]"
+          >
+            Delete permanently
           </button>
         )}
       </div>
