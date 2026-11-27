@@ -6,6 +6,7 @@ import { BrandLockup } from "@/components/SiteChrome";
 
 const NAV = [
   { href: "/admin", label: "Candidates" },
+  { href: "/admin/emails", label: "Email attention" },
   { href: "/admin/sessions", label: "Sittings" },
   { href: "/admin/receipts", label: "Receipts bank" },
   { href: "/admin/support", label: "Help requests" },

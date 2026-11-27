@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail, type EmailAttachment } from "@/lib/email";
 import { bookingLink, paymentAccount, prepClassesLink, siteUrl } from "@/lib/config";
 import { missingAdmissionFields } from "@/lib/candidate-status";
+import { CRITICAL_JOURNEY_STEPS, deliveryLabel, emailDeliveryTrustAfter, needsEmailAttention } from "@/lib/email-delivery";
 import { arrivalClock, calendarDaysBetween, formatClock, formatDate, formatLongDate } from "@/lib/exam-time";
 import { buildInvoice, invoiceNumberFor, moduleSummary, paymentReferenceFor } from "@/lib/invoice";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
@@ -105,15 +106,44 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
     }
   }
 
-  const row = { bookingId, step, subject: rendered.subject, toEmail: booking.email, attachment: attachment?.filename ?? null };
+  const existing = await prisma.journeyEmail.findUnique({
+    where: { bookingId_step: { bookingId, step } },
+  });
 
-  if (!opts?.force) {
-    try {
-      await prisma.journeyEmail.create({ data: row });
-    } catch (error) {
-      if ((error as { code?: string }).code === "P2002") return { ok: true, skipped: "already sent" };
-      throw error;
-    }
+  // Only skip when we already have a trusted SMTP accept. Failed / queued /
+  // pre-support@ "accepted" rows must be allowed through (or force-resent).
+  if (!opts?.force && existing) {
+    const st = existing.status || "accepted";
+    // Trusted accepts skip. Failed/queued retry. Unverified (pre-support@)
+    // skips on the automatic path — Drain / Email attention force-resends.
+    if (st === "accepted") return { ok: true, skipped: "already sent" };
+    if (st !== "failed" && st !== "queued") return { ok: true, skipped: "already sent" };
+  }
+
+  if (!existing) {
+    await prisma.journeyEmail.create({
+      data: {
+        bookingId,
+        step,
+        subject: rendered.subject,
+        toEmail: booking.email,
+        attachment: attachment?.filename ?? null,
+        status: "queued",
+        attemptCount: 1,
+      },
+    });
+  } else {
+    await prisma.journeyEmail.update({
+      where: { bookingId_step: { bookingId, step } },
+      data: {
+        subject: rendered.subject,
+        toEmail: booking.email,
+        attachment: attachment?.filename ?? null,
+        status: "queued",
+        lastError: null,
+        attemptCount: { increment: 1 },
+      },
+    });
   }
 
   const sent = await sendEmail({
@@ -123,17 +153,26 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
     attachments: attachment ? [attachment] : undefined,
   });
 
-  if (!sent) {
-    if (!opts?.force) await prisma.journeyEmail.delete({ where: { bookingId_step: { bookingId, step } } }).catch(() => {});
-    return { ok: false, error: "The email could not be sent — it will be retried automatically." };
-  }
-  if (opts?.force) {
-    await prisma.journeyEmail.upsert({
+  if (!sent.ok) {
+    await prisma.journeyEmail.update({
       where: { bookingId_step: { bookingId, step } },
-      create: row,
-      update: { subject: row.subject, toEmail: row.toEmail, attachment: row.attachment, sentAt: new Date() },
-    });
+      data: { status: "failed", lastError: sent.error, sentAt: new Date() },
+    }).catch(() => {});
+    return { ok: false, error: sent.error || "The email could not be sent — it will be retried automatically." };
   }
+
+  await prisma.journeyEmail.update({
+    where: { bookingId_step: { bookingId, step } },
+    data: {
+      status: "accepted",
+      messageId: sent.messageId,
+      lastError: null,
+      sentAt: new Date(),
+      subject: rendered.subject,
+      toEmail: booking.email,
+      attachment: attachment?.filename ?? null,
+    },
+  });
   return { ok: true };
 }
 
@@ -169,10 +208,17 @@ export async function sendCustomEmail(bookingId: string, subjectLine: string, me
 
   const rendered = renderCustomEmail(booking.fullName, booking.referenceCode, subjectLine, message);
   const sent = await sendEmail({ to: booking.email, subject: rendered.subject, html: rendered.html });
-  if (!sent) return { ok: false, error: "The email could not be sent." };
+  if (!sent.ok) return { ok: false, error: sent.error || "The email could not be sent." };
 
   await prisma.journeyEmail.create({
-    data: { bookingId, step: `custom:${Date.now()}`, subject: rendered.subject, toEmail: booking.email },
+    data: {
+      bookingId,
+      step: `custom:${Date.now()}`,
+      subject: rendered.subject,
+      toEmail: booking.email,
+      status: "accepted",
+      messageId: sent.messageId,
+    },
   });
   return { ok: true };
 }
@@ -244,31 +290,54 @@ export async function runJourneySweep(now = new Date()): Promise<{ checked: numb
 export async function drainEmailQueue(): Promise<{
   invoices: number;
   receipts: number;
+  attentionResent: number;
   sweepSent: number;
   failed: number;
 }> {
   const live = await prisma.examBooking.findMany({
     where: { status: { notIn: ["cancelled", "no_show"] } },
-    select: { id: true, paymentStatus: true },
+    select: {
+      id: true,
+      paymentStatus: true,
+      journeyEmails: { select: { step: true, status: true, sentAt: true } },
+    },
   });
 
   let invoices = 0;
   let receipts = 0;
+  let attentionResent = 0;
   let failed = 0;
 
-  // Parallel drain batch — invoice PDFs are CPU-heavy but SMTP is the bottleneck.
+  type Job = { bookingId: string; step: JourneyStep; kind: "invoice" | "receipt" | "attention" };
+  const jobs: Job[] = [];
+
+  for (const b of live) {
+    const moneyStep = (b.paymentStatus === "paid" ? "payment_confirmed" : "booking_received") as JourneyStep;
+    jobs.push({
+      bookingId: b.id,
+      step: moneyStep,
+      kind: moneyStep === "booking_received" ? "invoice" : "receipt",
+    });
+
+    for (const row of b.journeyEmails) {
+      if (row.step === moneyStep) continue;
+      if (!(CRITICAL_JOURNEY_STEPS as readonly string[]).includes(row.step)) continue;
+      if (!needsEmailAttention(row)) continue;
+      jobs.push({ bookingId: b.id, step: row.step as JourneyStep, kind: "attention" });
+    }
+  }
+
   const concurrency = 3;
-  for (let i = 0; i < live.length; i += concurrency) {
-    const chunk = live.slice(i, i + concurrency);
+  for (let i = 0; i < jobs.length; i += concurrency) {
+    const chunk = jobs.slice(i, i + concurrency);
     const outcomes = await Promise.all(
-      chunk.map(async (b) => {
-        const step = b.paymentStatus === "paid" ? "payment_confirmed" : "booking_received";
+      chunk.map(async (job) => {
         try {
-          const result = await sendJourneyStep(b.id, step, { force: true });
+          const result = await sendJourneyStep(job.bookingId, job.step, { force: true });
           if (!result.ok) return "failed" as const;
-          return step === "booking_received" ? ("invoice" as const) : ("receipt" as const);
+          return job.kind;
         } catch (error) {
-          console.error(`Drain queue: ${step} failed for ${b.id}:`, error);
+          console.error(`Drain queue: ${job.step} failed for ${job.bookingId}:`, error);
           return "failed" as const;
         }
       }),
@@ -276,11 +345,118 @@ export async function drainEmailQueue(): Promise<{
     for (const outcome of outcomes) {
       if (outcome === "failed") failed++;
       else if (outcome === "invoice") invoices++;
-      else receipts++;
+      else if (outcome === "receipt") receipts++;
+      else attentionResent++;
     }
   }
 
   const sweep = await runJourneySweep();
   const sweepSent = Object.values(sweep.sent).reduce((n, v) => n + (v ?? 0), 0);
-  return { invoices, receipts, sweepSent, failed: failed + sweep.failed };
+  return { invoices, receipts, attentionResent, sweepSent, failed: failed + sweep.failed };
+}
+
+/** Bookings whose journey mail needs a human look / force-resend. */
+export async function listEmailAttention(): Promise<
+  {
+    bookingId: string;
+    referenceCode: string;
+    fullName: string;
+    email: string;
+    paymentStatus: string;
+    step: string;
+    subject: string;
+    status: string;
+    sentAt: string;
+    messageId: string | null;
+    lastError: string | null;
+    attemptCount: number;
+    reason: string;
+  }[]
+> {
+  const trustAfter = emailDeliveryTrustAfter();
+  const rows = await prisma.journeyEmail.findMany({
+    where: {
+      booking: { status: { notIn: ["cancelled", "no_show"] } },
+      OR: [
+        { status: { in: ["failed", "queued"] } },
+        // Pre-support@ accepts (and pre-migration rows that default to accepted).
+        { sentAt: { lt: trustAfter } },
+      ],
+    },
+    include: {
+      booking: { select: { id: true, referenceCode: true, fullName: true, email: true, paymentStatus: true } },
+    },
+    orderBy: { sentAt: "asc" },
+  });
+
+  const out: Awaited<ReturnType<typeof listEmailAttention>> = [];
+  for (const row of rows) {
+    if (!needsEmailAttention(row)) continue;
+    const label = deliveryLabel(row);
+    out.push({
+      bookingId: row.booking.id,
+      referenceCode: row.booking.referenceCode,
+      fullName: row.booking.fullName,
+      email: row.booking.email,
+      paymentStatus: row.booking.paymentStatus,
+      step: row.step,
+      subject: row.subject,
+      status: row.status,
+      sentAt: row.sentAt.toISOString(),
+      messageId: row.messageId,
+      lastError: row.lastError,
+      attemptCount: row.attemptCount,
+      reason: label.label,
+    });
+  }
+
+  // Also surface live bookings missing the registration invoice entirely.
+  const missingInvoice = await prisma.examBooking.findMany({
+    where: {
+      status: { notIn: ["cancelled", "no_show"] },
+      journeyEmails: { none: { step: "booking_received" } },
+    },
+    select: { id: true, referenceCode: true, fullName: true, email: true, paymentStatus: true, createdAt: true },
+  });
+  for (const b of missingInvoice) {
+    out.push({
+      bookingId: b.id,
+      referenceCode: b.referenceCode,
+      fullName: b.fullName,
+      email: b.email,
+      paymentStatus: b.paymentStatus,
+      step: "booking_received",
+      subject: "(never sent)",
+      status: "missing",
+      sentAt: b.createdAt.toISOString(),
+      messageId: null,
+      lastError: null,
+      attemptCount: 0,
+      reason: "Missing — registration invoice was never logged",
+    });
+  }
+
+  return out;
+}
+
+export async function resendAttentionEmails(
+  items: { bookingId: string; step: string }[],
+): Promise<{ sent: number; failed: number; errors: string[] }> {
+  let sent = 0;
+  let failed = 0;
+  const errors: string[] = [];
+  for (const item of items) {
+    try {
+      const result = await sendJourneyStep(item.bookingId, item.step as JourneyStep, { force: true });
+      if (result.ok) sent++;
+      else {
+        failed++;
+        errors.push(`${item.bookingId}/${item.step}: ${result.error}`);
+      }
+    } catch (e) {
+      failed++;
+      errors.push(`${item.bookingId}/${item.step}: ${e instanceof Error ? e.message : "error"}`);
+    }
+  }
+  return { sent, failed, errors };
 }

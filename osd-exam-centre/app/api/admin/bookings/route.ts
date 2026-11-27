@@ -13,7 +13,10 @@ export const GET = jsonRoute(async () => {
     orderBy: { createdAt: "desc" },
     include: {
       session: { select: { id: true, title: true, level: true, startDate: true, capacity: true } },
-      journeyEmails: { select: { step: true, subject: true, sentAt: true }, orderBy: { sentAt: "asc" } },
+      journeyEmails: {
+        select: { step: true, subject: true, sentAt: true, status: true, messageId: true, lastError: true, attemptCount: true },
+        orderBy: { sentAt: "asc" },
+      },
     },
   });
 
