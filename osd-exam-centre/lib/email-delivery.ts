@@ -1,12 +1,12 @@
 /**
- * SMTP "accepted" is not inbox delivery. Before support@ was the Brevo From,
- * exams@ was silently dropped after SMTP accept — those rows still look "sent".
+ * SMTP "accepted" is not inbox delivery. Pre–LMS-From sends (support@ etc.)
+ * may have been queued by Brevo but never delivered — those rows still look "sent".
  * Anything accepted before this instant is treated as unverified until force-resent.
  */
 export function emailDeliveryTrustAfter(): Date {
-  const raw = process.env.EMAIL_DELIVERY_TRUST_AFTER || "2026-11-27T11:00:00.000Z";
+  const raw = process.env.EMAIL_DELIVERY_TRUST_AFTER || "2026-11-27T14:00:00.000Z";
   const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? new Date("2026-11-27T11:00:00.000Z") : d;
+  return Number.isNaN(d.getTime()) ? new Date("2026-11-27T14:00:00.000Z") : d;
 }
 
 export type JourneyMailStatus = "queued" | "accepted" | "failed";
@@ -38,7 +38,7 @@ export function deliveryLabel(row: {
   if (sentAt.getTime() < emailDeliveryTrustAfter().getTime()) {
     return {
       kind: "unverified",
-      label: "Unverified — accepted before support@ fix; may never have arrived",
+      label: "Unverified — accepted before LMS From fix; may never have arrived",
       tone: "warn",
     };
   }
