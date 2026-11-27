@@ -2,83 +2,217 @@ import nodemailer from "nodemailer";
 import { OFFICE } from "@/lib/config";
 
 /**
- * Best-effort email. Without SMTP_HOST set this logs instead of throwing —
- * a booking must never fail because a confirmation email couldn't send, and
- * local dev shouldn't need real SMTP credentials to exercise the flow.
+ * Dual-provider outbound mail.
  *
- * IMPORTANT: SMTP_HOST is Brevo. From must use the LMS domain verified in
- * Brevo (no-reply@easywayschoollms.com.ng). support@ / exams@ must NOT be
- * From until those domains are authenticated — Brevo returns 250 then drops.
- * exams@ is Zoho — fine as Reply-To so candidates reach the exams desk.
+ * Primary = Brevo SMTP (SMTP_*). From must be a Brevo-verified address
+ * (no-reply@easywayschoollms.com.ng). Brevo often returns 250 queued even when
+ * the message never reaches an inbox — that is NOT delivery.
  *
- * SMTP accept ≠ inbox delivery. Callers must record messageId / failures
- * honestly — see lib/email-delivery.ts.
+ * Fallback = Zoho ZeptoMail / CPaaS SMTP (ZOHO_SMTP_* or ZEPTO_SMTP_*).
+ * Do NOT use ordinary Zoho Mail mailbox SMTP for journey mail — Zoho's policy
+ * forbids transactional/automated sending there. Use ZeptoMail/CPaaS credentials.
+ *
+ * Order: try primary → on hard failure try fallback. When EMAIL_DUAL_SEND=true,
+ * critical callers can request both providers so one silent drop doesn't strand
+ * a candidate.
  */
 
-let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+export type EmailProvider = "brevo" | "zoho" | "local";
 
-/** Brevo-verified From. Reply-To is OFFICE.email (exams@ / Zoho). */
-const DEFAULT_SMTP_FROM = "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>";
+type TransportConfig = {
+  id: EmailProvider;
+  host: string;
+  port: number;
+  secure: boolean;
+  user?: string;
+  pass?: string;
+  from: string;
+};
 
-function getTransporter() {
+const BREVO_FROM =
+  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>";
+
+/** Zoho/Zepto From — exams@ once that domain is verified on ZeptoMail. */
+const ZOHO_FROM =
+  process.env.ZOHO_SMTP_FROM ||
+  process.env.ZEPTO_SMTP_FROM ||
+  `Easyway ÖSD Exam Centre <${OFFICE.email}>`;
+
+const transporters = new Map<string, ReturnType<typeof nodemailer.createTransport>>();
+
+function brevoConfig(): TransportConfig | null {
   if (!process.env.SMTP_HOST) return null;
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: process.env.SMTP_SECURE === "true",
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      // Single connection per invocation — nodemailer pooling is a poor fit on
-      // Vercel serverless and breaks @types/nodemailer when assigned to the
-      // default createTransport return type.
+  return {
+    id: "brevo",
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: process.env.SMTP_SECURE === "true",
+    user: process.env.SMTP_USER || undefined,
+    pass: process.env.SMTP_PASS || undefined,
+    from: BREVO_FROM,
+  };
+}
+
+function zohoConfig(): TransportConfig | null {
+  const host =
+    process.env.ZOHO_SMTP_HOST ||
+    process.env.ZEPTO_SMTP_HOST ||
+    "";
+  const pass = process.env.ZOHO_SMTP_PASS || process.env.ZEPTO_SMTP_PASS || "";
+  if (!host || !pass) return null;
+  return {
+    id: "zoho",
+    host,
+    // ZeptoMail: smtp.zeptomail.com ; Zoho org mailbox (not recommended): smtppro.zoho.com
+    port: Number(process.env.ZOHO_SMTP_PORT || process.env.ZEPTO_SMTP_PORT || 587),
+    secure: (process.env.ZOHO_SMTP_SECURE || process.env.ZEPTO_SMTP_SECURE || "false") === "true",
+    user: process.env.ZOHO_SMTP_USER || process.env.ZEPTO_SMTP_USER || "emailapikey",
+    pass,
+    from: ZOHO_FROM,
+  };
+}
+
+function getTransport(cfg: TransportConfig) {
+  const key = `${cfg.id}:${cfg.host}:${cfg.port}:${cfg.user ?? ""}`;
+  let t = transporters.get(key);
+  if (!t) {
+    t = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
       connectionTimeout: 8_000,
       greetingTimeout: 5_000,
       socketTimeout: 20_000,
     });
+    transporters.set(key, t);
   }
-  return transporter;
+  return t;
+}
+
+/** Providers available right now, primary first. */
+export function configuredEmailProviders(): EmailProvider[] {
+  const out: EmailProvider[] = [];
+  if (brevoConfig()) out.push("brevo");
+  if (zohoConfig()) out.push("zoho");
+  return out;
+}
+
+export function zohoFallbackConfigured(): boolean {
+  return zohoConfig() !== null;
 }
 
 export type EmailAttachment = { filename: string; content: Uint8Array; contentType: string };
 
 export type SendEmailResult =
-  | { ok: true; messageId: string | null }
-  | { ok: false; error: string };
+  | { ok: true; messageId: string | null; provider: EmailProvider; tried: EmailProvider[] }
+  | { ok: false; error: string; provider: EmailProvider | null; tried: EmailProvider[] };
+
+async function sendVia(
+  cfg: TransportConfig,
+  input: {
+    to: string;
+    subject: string;
+    html: string;
+    attachments?: EmailAttachment[];
+  },
+): Promise<SendEmailResult> {
+  try {
+    const info = await getTransport(cfg).sendMail({
+      from: cfg.from,
+      replyTo: OFFICE.email,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      attachments: input.attachments?.map((a) => ({
+        filename: a.filename,
+        content: Buffer.from(a.content),
+        contentType: a.contentType,
+      })),
+    });
+    const rejected = (info as { rejected?: string[] }).rejected ?? [];
+    if (rejected.length > 0) {
+      console.error(`sendEmail[${cfg.id}] rejected:`, rejected);
+      return {
+        ok: false,
+        error: `Rejected by ${cfg.id}: ${rejected.join(", ")}`,
+        provider: cfg.id,
+        tried: [cfg.id],
+      };
+    }
+    return {
+      ok: true,
+      messageId: typeof info.messageId === "string" ? info.messageId : null,
+      provider: cfg.id,
+      tried: [cfg.id],
+    };
+  } catch (error) {
+    console.error(`sendEmail[${cfg.id}] failed:`, error);
+    const message = error instanceof Error ? error.message : "SMTP send failed";
+    return { ok: false, error: `${cfg.id}: ${message}`.slice(0, 400), provider: cfg.id, tried: [cfg.id] };
+  }
+}
 
 /**
- * Hand the message to Brevo (or log in local dev). `ok: true` means SMTP
- * accepted the handoff — NOT that the candidate's inbox received it.
+ * Send through the provider chain.
+ * - default: Brevo, then Zoho/Zepto on hard failure
+ * - prefer: "zoho" tries Zoho first when configured
+ * - dual: attempt both; ok if either succeeds (use for critical journey mail
+ *   once Zoho is wired — silent Brevo drops won't strand the candidate)
  */
 export async function sendEmail(input: {
   to: string;
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  prefer?: EmailProvider;
+  dual?: boolean;
 }): Promise<SendEmailResult> {
-  const client = getTransporter();
-  if (!client) {
-    console.log(`[email:not-configured] to=${input.to} subject="${input.subject}"${input.attachments?.length ? ` attachments=${input.attachments.map((a) => a.filename).join(",")}` : ""}`);
-    return { ok: true, messageId: "local-dev" };
+  const brevo = brevoConfig();
+  const zoho = zohoConfig();
+
+  if (!brevo && !zoho) {
+    console.log(
+      `[email:not-configured] to=${input.to} subject="${input.subject}"${
+        input.attachments?.length ? ` attachments=${input.attachments.map((a) => a.filename).join(",")}` : ""
+      }`,
+    );
+    return { ok: true, messageId: "local-dev", provider: "local", tried: ["local"] };
   }
-  try {
-    const info = await client.sendMail({
-      from: process.env.SMTP_FROM || DEFAULT_SMTP_FROM,
-      replyTo: OFFICE.email,
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      attachments: input.attachments?.map((a) => ({ filename: a.filename, content: Buffer.from(a.content), contentType: a.contentType })),
-    });
-    const rejected = (info as { rejected?: string[] }).rejected ?? [];
-    if (rejected.length > 0) {
-      console.error("sendEmail rejected recipients:", rejected);
-      return { ok: false, error: `Rejected: ${rejected.join(", ")}` };
+
+  const order: TransportConfig[] = [];
+  if (input.prefer === "zoho" && zoho) {
+    order.push(zoho);
+    if (brevo) order.push(brevo);
+  } else {
+    if (brevo) order.push(brevo);
+    if (zoho) order.push(zoho);
+  }
+
+  if (input.dual && order.length > 1) {
+    const results = await Promise.all(order.map((cfg) => sendVia(cfg, input)));
+    const tried = results.flatMap((r) => r.tried);
+    const ok = results.find((r) => r.ok);
+    if (ok && ok.ok) {
+      return { ok: true, messageId: ok.messageId, provider: ok.provider, tried };
     }
-    const messageId = typeof info.messageId === "string" ? info.messageId : null;
-    return { ok: true, messageId };
-  } catch (error) {
-    console.error("sendEmail failed:", error);
-    const message = error instanceof Error ? error.message : "SMTP send failed";
-    return { ok: false, error: message.slice(0, 400) };
+    return {
+      ok: false,
+      error: results.map((r) => (!r.ok ? r.error : "")).filter(Boolean).join(" | "),
+      provider: null,
+      tried,
+    };
   }
+
+  const tried: EmailProvider[] = [];
+  let lastError = "No provider succeeded";
+  for (const cfg of order) {
+    const result = await sendVia(cfg, input);
+    tried.push(...result.tried);
+    if (result.ok) {
+      return { ok: true, messageId: result.messageId, provider: result.provider, tried };
+    }
+    lastError = result.error;
+  }
+  return { ok: false, error: lastError, provider: null, tried };
 }

@@ -1,9 +1,15 @@
 import type { ExamBooking, ExamModulePrice, ExamSession } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendEmail, type EmailAttachment } from "@/lib/email";
+import { sendEmail, zohoFallbackConfigured, type EmailAttachment } from "@/lib/email";
 import { bookingLink, paymentAccount, prepClassesLink, siteUrl } from "@/lib/config";
 import { missingAdmissionFields } from "@/lib/candidate-status";
-import { CRITICAL_JOURNEY_STEPS, deliveryLabel, emailDeliveryTrustAfter, needsEmailAttention } from "@/lib/email-delivery";
+import {
+  CRITICAL_JOURNEY_STEPS,
+  deliveryLabel,
+  emailDeliveryTrustAfter,
+  isCriticalJourneyStep,
+  needsEmailAttention,
+} from "@/lib/email-delivery";
 import { arrivalClock, calendarDaysBetween, formatClock, formatDate, formatLongDate } from "@/lib/exam-time";
 import { buildInvoice, invoiceNumberFor, moduleSummary, paymentReferenceFor } from "@/lib/invoice";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
@@ -151,17 +157,30 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
     });
   }
 
+  // Critical journey mail: if Zoho/Zepto is wired, hit BOTH providers so a
+  // silent Brevo drop does not strand a new registration.
+  const dual =
+    process.env.EMAIL_DUAL_SEND === "true" ||
+    (zohoFallbackConfigured() && isCriticalJourneyStep(step));
+
   const sent = await sendEmail({
     to: booking.email,
     subject: rendered.subject,
     html: rendered.html,
     attachments: attachment ? [attachment] : undefined,
+    dual,
+    prefer: opts?.force && zohoFallbackConfigured() ? "zoho" : undefined,
   });
 
   if (!sent.ok) {
     await prisma.journeyEmail.update({
       where: { bookingId_step: { bookingId, step } },
-      data: { status: "failed", lastError: sent.error, sentAt: new Date() },
+      data: {
+        status: "failed",
+        lastError: sent.error,
+        provider: sent.tried.join(",") || null,
+        sentAt: new Date(),
+      },
     }).catch(() => {});
     return { ok: false, error: sent.error || "The email could not be sent — it will be retried automatically." };
   }
@@ -171,6 +190,7 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
     data: {
       status: "accepted",
       messageId: sent.messageId,
+      provider: sent.tried.length > 1 ? sent.tried.join("+") : sent.provider,
       lastError: null,
       sentAt: new Date(),
       subject: rendered.subject,
@@ -212,7 +232,12 @@ export async function sendCustomEmail(bookingId: string, subjectLine: string, me
   if (!booking) return { ok: false, error: "Booking not found" };
 
   const rendered = renderCustomEmail(booking.fullName, booking.referenceCode, subjectLine, message);
-  const sent = await sendEmail({ to: booking.email, subject: rendered.subject, html: rendered.html });
+  const sent = await sendEmail({
+    to: booking.email,
+    subject: rendered.subject,
+    html: rendered.html,
+    dual: zohoFallbackConfigured(),
+  });
   if (!sent.ok) return { ok: false, error: sent.error || "The email could not be sent." };
 
   await prisma.journeyEmail.create({
@@ -223,6 +248,7 @@ export async function sendCustomEmail(bookingId: string, subjectLine: string, me
       toEmail: booking.email,
       status: "accepted",
       messageId: sent.messageId,
+      provider: sent.tried.length > 1 ? sent.tried.join("+") : sent.provider,
     },
   });
   return { ok: true };
@@ -379,13 +405,21 @@ export async function listEmailAttention(): Promise<
   }[]
 > {
   const trustAfter = emailDeliveryTrustAfter();
+  const unconfirmedSince = new Date(Date.now() - 48 * 60 * 60 * 1000);
   const rows = await prisma.journeyEmail.findMany({
     where: {
       booking: { status: { notIn: ["cancelled", "no_show"] } },
       OR: [
         { status: { in: ["failed", "queued"] } },
-        // Pre-support@ accepts (and pre-migration rows that default to accepted).
+        // Pre-working-From accepts.
         { sentAt: { lt: trustAfter } },
+        // Recent "accepted" critical steps — SMTP queue ≠ inbox. Surface them
+        // so a brand-new registration that "sent" but never arrived is visible.
+        {
+          status: "accepted",
+          sentAt: { gte: unconfirmedSince },
+          step: { in: [...CRITICAL_JOURNEY_STEPS] },
+        },
       ],
     },
     include: {

@@ -1,20 +1,26 @@
 /**
- * SMTP "accepted" is not inbox delivery. Pre–LMS-From sends (support@ etc.)
- * may have been queued by Brevo but never delivered — those rows still look "sent".
- * Anything accepted before this instant is treated as unverified until force-resent.
+ * SMTP "accepted" / "queued" is NOT inbox delivery.
+ *
+ * Pre–LMS-From rows (support@ / exams@ as Brevo From) may never have arrived.
+ * Even after the LMS From fix, Brevo can still soft-drop — so we never tell
+ * the office a message "landed". Labels are: failed / stuck / unverified /
+ * queued-at-provider (unconfirmed).
  */
+
 export function emailDeliveryTrustAfter(): Date {
   const raw = process.env.EMAIL_DELIVERY_TRUST_AFTER || "2026-11-27T14:00:00.000Z";
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? new Date("2026-11-27T14:00:00.000Z") : d;
 }
 
-export type JourneyMailStatus = "queued" | "accepted" | "failed";
+/** Critical money/admission emails stay on the attention board until dual-sent or aged out. */
+export const UNCONFIRMED_ATTENTION_HOURS = Number(process.env.EMAIL_UNCONFIRMED_HOURS || 48);
 
 export type DeliveryLabel =
   | { kind: "queued"; label: string; tone: "warn" }
   | { kind: "failed"; label: string; tone: "bad" }
   | { kind: "unverified"; label: string; tone: "warn" }
+  | { kind: "unconfirmed"; label: string; tone: "warn" }
   | { kind: "accepted"; label: string; tone: "ok" };
 
 export function deliveryLabel(row: {
@@ -22,15 +28,17 @@ export function deliveryLabel(row: {
   sentAt: Date | string;
   messageId?: string | null;
   lastError?: string | null;
+  provider?: string | null;
 }): DeliveryLabel {
   const status = row.status || "accepted";
+  const provider = row.provider || "brevo";
   if (status === "queued") {
-    return { kind: "queued", label: "Stuck — claimed but not handed to Brevo", tone: "warn" };
+    return { kind: "queued", label: "Stuck — claimed but not handed to any provider", tone: "warn" };
   }
   if (status === "failed") {
     return {
       kind: "failed",
-      label: row.lastError ? `Failed — ${row.lastError}` : "Failed — Brevo/SMTP rejected",
+      label: row.lastError ? `Failed — ${row.lastError}` : "Failed — SMTP rejected",
       tone: "bad",
     };
   }
@@ -38,15 +46,23 @@ export function deliveryLabel(row: {
   if (sentAt.getTime() < emailDeliveryTrustAfter().getTime()) {
     return {
       kind: "unverified",
-      label: "Unverified — accepted before LMS From fix; may never have arrived",
+      label: "Unverified — accepted before working From; likely never arrived",
+      tone: "warn",
+    };
+  }
+  const ageMs = Date.now() - sentAt.getTime();
+  if (ageMs < UNCONFIRMED_ATTENTION_HOURS * 60 * 60 * 1000) {
+    return {
+      kind: "unconfirmed",
+      label: `Queued at ${provider} only — NOT proof it reached their inbox`,
       tone: "warn",
     };
   }
   return {
     kind: "accepted",
     label: row.messageId
-      ? `Handed to Brevo (${row.messageId.slice(0, 18)}…)`
-      : "Handed to Brevo (SMTP accepted — not inbox proof)",
+      ? `Old queue at ${provider} (${row.messageId.slice(0, 18)}…) — still not inbox proof`
+      : `Old queue at ${provider} — still not inbox proof`,
     tone: "ok",
   };
 }
@@ -54,9 +70,10 @@ export function deliveryLabel(row: {
 export function needsEmailAttention(row: {
   status: string;
   sentAt: Date | string;
+  provider?: string | null;
 }): boolean {
   const kind = deliveryLabel(row).kind;
-  return kind === "queued" || kind === "failed" || kind === "unverified";
+  return kind === "queued" || kind === "failed" || kind === "unverified" || kind === "unconfirmed";
 }
 
 /** Money + admission emails we always want to see land. */
@@ -67,3 +84,7 @@ export const CRITICAL_JOURNEY_STEPS = [
   "registration_link",
   "exam_guide",
 ] as const;
+
+export function isCriticalJourneyStep(step: string): boolean {
+  return (CRITICAL_JOURNEY_STEPS as readonly string[]).includes(step);
+}
