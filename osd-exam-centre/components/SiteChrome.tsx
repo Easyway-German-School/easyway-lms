@@ -3,6 +3,7 @@ import Link from "next/link";
 import NeedHelp from "@/components/NeedHelp";
 import easywayLogo from "@/assets/brand/easyway-logo.png";
 import osdLogo from "@/assets/brand/osd-logo.png";
+import { EXAM_PREP_LINK } from "@/lib/config";
 
 /** The two accredited parties, side by side — partnership-style, not just a monogram. */
 export function BrandLockup({ compact = false }: { compact?: boolean }) {
@@ -95,7 +96,7 @@ export function SiteFooter() {
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--gold-bright)]">Easyway</p>
           <ul className="mt-4 space-y-2.5 text-sm">
             <li>
-              <a href="https://easywayschoollms.com.ng/auth/signup?pathway=Exam%20Preparatory" className="transition hover:text-white">ÖSD prep classes</a>
+              <a href={EXAM_PREP_LINK} className="transition hover:text-white">ÖSD prep classes</a>
             </li>
             <li>
               <a href="https://easywayschoollms.com.ng" className="transition hover:text-white">Student portal</a>

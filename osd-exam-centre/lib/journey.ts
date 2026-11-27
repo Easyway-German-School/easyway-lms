@@ -256,19 +256,27 @@ export async function drainEmailQueue(): Promise<{
   let receipts = 0;
   let failed = 0;
 
-  for (const b of live) {
-    const step = b.paymentStatus === "paid" ? "payment_confirmed" : "booking_received";
-    try {
-      const result = await sendJourneyStep(b.id, step, { force: true });
-      if (!result.ok) {
-        failed++;
-        continue;
-      }
-      if (step === "booking_received") invoices++;
+  // Match SMTP pool width — invoice PDFs are CPU-heavy but SMTP is the bottleneck.
+  const concurrency = 3;
+  for (let i = 0; i < live.length; i += concurrency) {
+    const chunk = live.slice(i, i + concurrency);
+    const outcomes = await Promise.all(
+      chunk.map(async (b) => {
+        const step = b.paymentStatus === "paid" ? "payment_confirmed" : "booking_received";
+        try {
+          const result = await sendJourneyStep(b.id, step, { force: true });
+          if (!result.ok) return "failed" as const;
+          return step === "booking_received" ? ("invoice" as const) : ("receipt" as const);
+        } catch (error) {
+          console.error(`Drain queue: ${step} failed for ${b.id}:`, error);
+          return "failed" as const;
+        }
+      }),
+    );
+    for (const outcome of outcomes) {
+      if (outcome === "failed") failed++;
+      else if (outcome === "invoice") invoices++;
       else receipts++;
-    } catch (error) {
-      failed++;
-      console.error(`Drain queue: ${step} failed for ${b.id}:`, error);
     }
   }
 

@@ -25,6 +25,14 @@ function getTransporter() {
       port: Number(process.env.SMTP_PORT || 587),
       secure: process.env.SMTP_SECURE === "true",
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      // Keep the Brevo socket warm and reuse it — cold TLS handshakes are the
+      // main delay on first registration emails under serverless.
+      pool: true,
+      maxConnections: 3,
+      maxMessages: 50,
+      connectionTimeout: 8_000,
+      greetingTimeout: 5_000,
+      socketTimeout: 20_000,
     });
   }
   return transporter;
