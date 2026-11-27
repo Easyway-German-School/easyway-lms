@@ -89,6 +89,11 @@ export type SendResult = { ok: true; skipped?: "already sent" } | { ok: false; e
  */
 export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts?: { force?: boolean; now?: Date }): Promise<SendResult> {
   const now = opts?.now ?? new Date();
+  // Office free-text notes are logged as custom:<timestamp> — they are not
+  // journey templates and cannot be re-rendered from a step key.
+  if (String(step).startsWith("custom:")) {
+    return { ok: false, error: "Custom office emails can’t be auto-resent — write a new one from the candidate card." };
+  }
   const booking = await prisma.examBooking.findUnique({ where: { id: bookingId }, include: INCLUDE });
   if (!booking) return { ok: false, error: "Booking not found" };
 
@@ -391,6 +396,8 @@ export async function listEmailAttention(): Promise<
 
   const out: Awaited<ReturnType<typeof listEmailAttention>> = [];
   for (const row of rows) {
+    // custom:<timestamp> office notes aren't journey templates — don't list/resend them here.
+    if (row.step.startsWith("custom:")) continue;
     if (!needsEmailAttention(row)) continue;
     const label = deliveryLabel(row);
     out.push({
@@ -446,6 +453,10 @@ export async function resendAttentionEmails(
   let failed = 0;
   const errors: string[] = [];
   for (const item of items) {
+    if (item.step.startsWith("custom:")) {
+      // Skip quietly — these aren't auto-resendable journey steps.
+      continue;
+    }
     try {
       const result = await sendJourneyStep(item.bookingId, item.step as JourneyStep, { force: true });
       if (result.ok) sent++;
