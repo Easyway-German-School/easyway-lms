@@ -12,9 +12,10 @@
  */
 
 export function emailDeliveryTrustAfter(): Date {
-  const raw = process.env.EMAIL_DELIVERY_TRUST_AFTER || "2026-11-27T14:00:00.000Z";
+  // Bump when From identity changes so prior accepts re-enter the action queue.
+  const raw = process.env.EMAIL_DELIVERY_TRUST_AFTER || "2026-11-27T19:00:00.000Z";
   const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? new Date("2026-11-27T14:00:00.000Z") : d;
+  return Number.isNaN(d.getTime()) ? new Date("2026-11-27T19:00:00.000Z") : d;
 }
 
 export const UNCONFIRMED_ATTENTION_HOURS = Number(process.env.EMAIL_UNCONFIRMED_HOURS || 48);

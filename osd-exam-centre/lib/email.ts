@@ -4,10 +4,9 @@ import { OFFICE } from "@/lib/config";
 /**
  * Dual-provider outbound mail.
  *
- * Primary = Brevo SMTP (SMTP_*). OSD From is support@easywaylanguageschool.com
- * (NOT the LMS no-reply@). support@ must be a verified Brevo sender on an
- * authenticated domain, or Brevo returns 250 queued and nothing arrives.
- * Reply-To stays exams@ (Zoho desk). LMS no-reply@ is for the LMS only.
+ * Primary = Brevo SMTP (SMTP_*). From uses the LMS Brevo-verified identity
+ * no-reply@easywayschoollms.com.ng so mail actually delivers. Reply-To stays
+ * exams@ (Zoho desk) — candidates still reply to the exams mailbox.
  *
  * Fallback = Zoho ZeptoMail / CPaaS SMTP (ZOHO_SMTP_*). Ordinary Zoho Mail
  * mailbox SMTP is not for transactional volume — use ZeptoMail/CPaaS.
@@ -27,15 +26,15 @@ type TransportConfig = {
   from: string;
 };
 
-/** OSD automated From — support@. Never LMS no-reply@. */
+/** Brevo-verified From (LMS domain). Reply-To is still exams@. */
 const BREVO_FROM =
-  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <support@easywaylanguageschool.com>";
+  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>";
 
-/** Zoho/Zepto From — same support@ identity once the domain is verified there. */
+/** Zoho/Zepto From when fallback is wired. */
 const ZOHO_FROM =
   process.env.ZOHO_SMTP_FROM ||
   process.env.ZEPTO_SMTP_FROM ||
-  "Easyway ÖSD Exam Centre <support@easywaylanguageschool.com>";
+  `Easyway ÖSD Exam Centre <${OFFICE.email}>`;
 
 const transporters = new Map<string, ReturnType<typeof nodemailer.createTransport>>();
 
