@@ -10,6 +10,9 @@ import { OFFICE } from "@/lib/config";
  * (support@easywaylanguageschool.com). exams@ is Zoho — fine as Reply-To so
  * candidates reply into the exams desk, but NEVER as SMTP From on Brevo
  * (accepted then silently dropped; journey log still said "sent").
+ *
+ * SMTP accept ≠ inbox delivery. Callers must record messageId / failures
+ * honestly — see lib/email-delivery.ts.
  */
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
@@ -38,22 +41,24 @@ function getTransporter() {
 
 export type EmailAttachment = { filename: string; content: Uint8Array; contentType: string };
 
+export type SendEmailResult =
+  | { ok: true; messageId: string | null }
+  | { ok: false; error: string };
+
 /**
- * Resolves true when the message was handed to the SMTP server (or, with no
- * SMTP configured, logged for local dev), false when sending failed. Callers
- * that record "this email went out" (the journey log) must honour that — a
- * failed send that is logged as sent would never be retried.
+ * Hand the message to Brevo (or log in local dev). `ok: true` means SMTP
+ * accepted the handoff — NOT that the candidate's inbox received it.
  */
 export async function sendEmail(input: {
   to: string;
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
-}): Promise<boolean> {
+}): Promise<SendEmailResult> {
   const client = getTransporter();
   if (!client) {
     console.log(`[email:not-configured] to=${input.to} subject="${input.subject}"${input.attachments?.length ? ` attachments=${input.attachments.map((a) => a.filename).join(",")}` : ""}`);
-    return true;
+    return { ok: true, messageId: "local-dev" };
   }
   try {
     const info = await client.sendMail({
@@ -64,19 +69,16 @@ export async function sendEmail(input: {
       html: input.html,
       attachments: input.attachments?.map((a) => ({ filename: a.filename, content: Buffer.from(a.content), contentType: a.contentType })),
     });
-    // Brevo can return success with rejected recipients — treat that as failure
-    // so the journey log is released and Drain Queue can retry.
     const rejected = (info as { rejected?: string[] }).rejected ?? [];
     if (rejected.length > 0) {
       console.error("sendEmail rejected recipients:", rejected);
-      return false;
+      return { ok: false, error: `Rejected: ${rejected.join(", ")}` };
     }
-    return true;
+    const messageId = typeof info.messageId === "string" ? info.messageId : null;
+    return { ok: true, messageId };
   } catch (error) {
-    // A failed confirmation email must never fail the booking or the payment
-    // it's reporting on — the candidate can always look their booking up by
-    // reference code on /status.
     console.error("sendEmail failed:", error);
-    return false;
+    const message = error instanceof Error ? error.message : "SMTP send failed";
+    return { ok: false, error: message.slice(0, 400) };
   }
 }

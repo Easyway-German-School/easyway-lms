@@ -7,6 +7,7 @@ import AdminLoader from "@/components/AdminLoader";
 import ManualBookingForm from "@/components/ManualBookingForm";
 import PanthexaIntakeForm from "@/components/PanthexaIntakeForm";
 import Modal from "@/components/Modal";
+import { deliveryLabel } from "@/lib/email-delivery";
 
 type Booking = {
   id: string;
@@ -55,7 +56,15 @@ type Booking = {
   session: { id: string; title: string; level: string; startDate: string };
   derived: { key: string; number: number | null; label: string; staffNext: string | null; tone: "neutral" | "waiting" | "action" | "good" | "bad" };
   checklist: { label: string; done: boolean }[];
-  journeyEmails: { step: string; subject: string; sentAt: string }[];
+  journeyEmails: {
+    step: string;
+    subject: string;
+    sentAt: string;
+    status?: string;
+    messageId?: string | null;
+    lastError?: string | null;
+    attemptCount?: number;
+  }[];
   registrationLinkSentAt: string | null;
 };
 
@@ -228,6 +237,9 @@ export default function AdminDashboard() {
           <ManualBookingForm onCreated={load} />
           <BulkEmailForm />
           <DrainEmailQueueButton onDone={(msg) => { setNotice(msg); load(); }} onError={setError} />
+          <a href="/admin/emails" className="rounded-sm border border-[var(--red)] px-4 py-2 text-sm font-semibold text-[var(--red)]">
+            Email attention →
+          </a>
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -276,7 +288,7 @@ function DrainEmailQueueButton({ onDone, onError }: { onDone: (msg: string) => v
       const res = await fetch("/api/admin/emails/drain", { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Drain failed");
-      onDone(`Drain done — invoices ${data.invoices}, receipts ${data.receipts}, sweep ${data.sweepSent}, failed ${data.failed}.`);
+      onDone(`Drain done — invoices ${data.invoices}, receipts ${data.receipts}, attention ${data.attentionResent ?? 0}, sweep ${data.sweepSent}, failed ${data.failed}.`);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Drain failed");
     } finally {
@@ -715,27 +727,47 @@ function CandidateCard({ b, busy, act, onUploaded }: { b: Booking; busy: boolean
 
       {showEmails && (
         <div className="mt-3 rounded-sm border border-[var(--line)] p-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+            Status is SMTP handoff — not inbox proof. Unverified / failed →{" "}
+            <a href="/admin/emails" className="text-[var(--navy)] underline">Email attention</a>
+          </p>
           {b.journeyEmails.length === 0 ? (
-            <p className="text-xs text-[var(--ink-soft)]">No emails sent yet.</p>
+            <p className="text-xs text-[var(--ink-soft)]">No emails logged yet.</p>
           ) : (
-            <ul className="space-y-1 text-xs text-[var(--ink-soft)]">
-              {b.journeyEmails.map((e) => (
-                <li key={e.step}>
-                  <span className="font-semibold text-[var(--navy)]">{STEP_LABEL[e.step] ?? e.step}</span> — {new Date(e.sentAt).toLocaleString("en-GB")}
-                </li>
-              ))}
+            <ul className="space-y-2 text-xs text-[var(--ink-soft)]">
+              {b.journeyEmails.map((e) => {
+                const d = deliveryLabel({
+                  status: e.status ?? "accepted",
+                  sentAt: e.sentAt,
+                  messageId: e.messageId,
+                  lastError: e.lastError,
+                });
+                const tone =
+                  d.tone === "bad"
+                    ? "text-[var(--red)]"
+                    : d.tone === "warn"
+                      ? "text-[var(--navy)]"
+                      : "text-[var(--green)]";
+                return (
+                  <li key={e.step} className="rounded-sm bg-[var(--paper)] px-2 py-1.5">
+                    <span className="font-semibold text-[var(--navy)]">{STEP_LABEL[e.step] ?? e.step}</span>
+                    <span className="text-[var(--ink-soft)]"> — {new Date(e.sentAt).toLocaleString("en-GB")}</span>
+                    <p className={`mt-0.5 font-semibold ${tone}`}>{d.label}</p>
+                  </li>
+                );
+              })}
             </ul>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <select value={resend} onChange={(e) => setResend(e.target.value)} className="rounded-sm border border-[var(--line)] px-2 py-1.5 text-xs">
               <option value="">Send or resend an email…</option>
               {Object.entries(STEP_LABEL).map(([step, label]) => (
-                <option key={step} value={step}>{label}{sent.has(step) ? " (sent — resend)" : ""}</option>
+                <option key={step} value={step}>{label}{sent.has(step) ? " (logged — resend)" : ""}</option>
               ))}
             </select>
             <button
               disabled={busy || !resend}
-              onClick={async () => { if (await act({ resendStep: resend }, "Email sent.")) setResend(""); }}
+              onClick={async () => { if (await act({ resendStep: resend }, "Email handed to Brevo again.")) setResend(""); }}
               className="rounded-sm bg-[var(--navy)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
             >
               Send

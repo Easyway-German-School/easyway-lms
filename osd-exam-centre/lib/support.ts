@@ -94,6 +94,6 @@ export async function replyToSupportMessage(
     subject,
     html: `<p>Hi ${escapeHtml(msg.name)},</p><p>${escapeHtml(body).replace(/\n/g, "<br>")}</p><p>— Easyway ÖSD Exam Centre</p>`,
   });
-  if (!sent) return { ok: false, error: "Could not send that email — check SMTP settings." };
+  if (!sent.ok) return { ok: false, error: sent.error || "Could not send that email — check SMTP settings." };
   return { ok: true };
 }
