@@ -53,19 +53,14 @@ export function deliveryLabel(row: {
       tone: "warn",
     };
   }
-  const ageMs = Date.now() - sentAt.getTime();
-  if (ageMs < UNCONFIRMED_ATTENTION_HOURS * 60 * 60 * 1000) {
-    return {
-      kind: "unconfirmed",
-      label: `Queued at ${provider} only — NOT proof it reached their inbox`,
-      tone: "warn",
-    };
-  }
+  // Normal success path: SMTP handoff worked. We cannot see their Gmail inbox
+  // without provider webhooks — that is honesty, not a send failure.
+  const who = provider.includes("zoho") ? provider : "Brevo";
   return {
     kind: "accepted",
     label: row.messageId
-      ? `Old queue at ${provider} (${row.messageId.slice(0, 18)}…) — still not inbox proof`
-      : `Old queue at ${provider} — still not inbox proof`,
+      ? `Sent via ${who} (SMTP OK) — ask them to check inbox + spam`
+      : `Sent via ${who} (SMTP OK) — ask them to check inbox + spam`,
     tone: "ok",
   };
 }
