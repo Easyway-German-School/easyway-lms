@@ -1,10 +1,9 @@
 /**
  * SMTP "accepted" / "queued" is NOT inbox delivery.
  *
- * Pre–LMS-From rows (support@ / exams@ as Brevo From) may never have arrived.
- * Even after the LMS From fix, Brevo can still soft-drop — so we never tell
- * the office a message "landed". Labels are: failed / stuck / unverified /
- * queued-at-provider (unconfirmed).
+ * Rows from before support@ was correctly configured (or when exams@ was
+ * wrongly used as Brevo From) may never have arrived. Brevo can still
+ * soft-drop — we never tell the office a message "landed".
  */
 
 export function emailDeliveryTrustAfter(): Date {

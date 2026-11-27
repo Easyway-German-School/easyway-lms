@@ -4,17 +4,15 @@ import { OFFICE } from "@/lib/config";
 /**
  * Dual-provider outbound mail.
  *
- * Primary = Brevo SMTP (SMTP_*). From must be a Brevo-verified address
- * (no-reply@easywayschoollms.com.ng). Brevo often returns 250 queued even when
- * the message never reaches an inbox — that is NOT delivery.
+ * Primary = Brevo SMTP (SMTP_*). OSD From is support@easywaylanguageschool.com
+ * (NOT the LMS no-reply@). support@ must be a verified Brevo sender on an
+ * authenticated domain, or Brevo returns 250 queued and nothing arrives.
+ * Reply-To stays exams@ (Zoho desk). LMS no-reply@ is for the LMS only.
  *
- * Fallback = Zoho ZeptoMail / CPaaS SMTP (ZOHO_SMTP_* or ZEPTO_SMTP_*).
- * Do NOT use ordinary Zoho Mail mailbox SMTP for journey mail — Zoho's policy
- * forbids transactional/automated sending there. Use ZeptoMail/CPaaS credentials.
+ * Fallback = Zoho ZeptoMail / CPaaS SMTP (ZOHO_SMTP_*). Ordinary Zoho Mail
+ * mailbox SMTP is not for transactional volume — use ZeptoMail/CPaaS.
  *
- * Order: try primary → on hard failure try fallback. When EMAIL_DUAL_SEND=true,
- * critical callers can request both providers so one silent drop doesn't strand
- * a candidate.
+ * Order: Brevo → Zoho on hard failure; dual-send when Zoho is configured.
  */
 
 export type EmailProvider = "brevo" | "zoho" | "local";
@@ -29,14 +27,15 @@ type TransportConfig = {
   from: string;
 };
 
+/** OSD automated From — support@. Never LMS no-reply@. */
 const BREVO_FROM =
-  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>";
+  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <support@easywaylanguageschool.com>";
 
-/** Zoho/Zepto From — exams@ once that domain is verified on ZeptoMail. */
+/** Zoho/Zepto From — same support@ identity once the domain is verified there. */
 const ZOHO_FROM =
   process.env.ZOHO_SMTP_FROM ||
   process.env.ZEPTO_SMTP_FROM ||
-  `Easyway ÖSD Exam Centre <${OFFICE.email}>`;
+  "Easyway ÖSD Exam Centre <support@easywaylanguageschool.com>";
 
 const transporters = new Map<string, ReturnType<typeof nodemailer.createTransport>>();
 
