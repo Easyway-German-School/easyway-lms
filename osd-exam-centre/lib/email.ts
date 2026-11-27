@@ -6,16 +6,16 @@ import { OFFICE } from "@/lib/config";
  * a booking must never fail because a confirmation email couldn't send, and
  * local dev shouldn't need real SMTP credentials to exercise the flow.
  *
- * IMPORTANT: SMTP_FROM must be an address on a domain Brevo has verified
- * (currently easywayschoollms.com.ng). Using exams@easywaylanguageschool.com
- * as From made Brevo accept then silently drop mail — the journey log still
- * said "sent". Reply-To stays on exams@ so candidates reply to the right desk.
+ * IMPORTANT: SMTP_HOST is Brevo. From must be a Brevo-verified sender
+ * (support@easywaylanguageschool.com). exams@ is Zoho — fine as Reply-To so
+ * candidates reply into the exams desk, but NEVER as SMTP From on Brevo
+ * (accepted then silently dropped; journey log still said "sent").
  */
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 
-/** Verified Brevo sending identity — never default From to an unverified mailbox. */
-const DEFAULT_SMTP_FROM = "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>";
+/** Brevo-verified From. Reply-To is OFFICE.email (exams@ / Zoho). */
+const DEFAULT_SMTP_FROM = "Easyway ÖSD Exam Centre <support@easywaylanguageschool.com>";
 
 function getTransporter() {
   if (!process.env.SMTP_HOST) return null;
