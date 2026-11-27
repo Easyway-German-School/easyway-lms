@@ -256,7 +256,7 @@ export async function drainEmailQueue(): Promise<{
   let receipts = 0;
   let failed = 0;
 
-  // Match SMTP pool width — invoice PDFs are CPU-heavy but SMTP is the bottleneck.
+  // Parallel drain batch — invoice PDFs are CPU-heavy but SMTP is the bottleneck.
   const concurrency = 3;
   for (let i = 0; i < live.length; i += concurrency) {
     const chunk = live.slice(i, i + concurrency);
