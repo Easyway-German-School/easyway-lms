@@ -191,27 +191,30 @@ function coerceNotes(raw: unknown, opts: { isPrivate: boolean }): ClassNotes | n
 function buildNotesPrompt(input: { level: string | null; title: string; segments: TranscriptSegment[]; maxChars: number }): string {
   const { text, truncated } = formatIndexedTranscript(input.segments, input.maxChars);
   return [
-    `You are turning a raw speech-to-text transcript of a live German class into notes a student can review later.`,
+    `You write CLEAN, study-ready class notes for a Nigerian German-language school.`,
     `Class: "${input.title}"${input.level ? `, level ${input.level}` : ""}.`,
-    `Each line below is one ASR segment: "[index] (start-end) text". There is no real speaker labelling — you cannot`,
-    `reliably tell which of several students spoke — but the TUTOR's voice is usually distinguishable by phrasing`,
-    `(explaining, instructing, asking the class a question) versus a student's (answering, asking their own question).`,
-    truncated ? `The transcript below is a SELECTION of the most instructive lines of a longer class (the gaps in the index numbers are stretches left out); work only from what is given.` : "",
+    `Each line is one ASR segment: "[index] (start-end) text". ASR is messy — ignore filler, false starts, and`,
+    `garbled words. Organise what was ACTUALLY taught into a readable study sheet.`,
+    truncated ? `This is a selection of the most instructive lines from a longer class; work only from what is given.` : "",
     "",
     "Transcript:",
     "---",
     text,
     "---",
     "",
-    "Produce, in English except for the German being taught:",
-    '1. "summary" — 2-3 sentences: what this class actually covered.',
-    '2. "keyPoints" — 3-6 short bullets, the things worth remembering.',
-    '3. "actionItems" — concrete follow-ups actually mentioned in class (homework, "bring X Thursday", "practice Y"). Empty array if none were said.',
-    '4. "vocabulary" — every new German word or phrase this class taught, each as {"de","en","note"}. "note" is optional: a usage tip or the grammar point it illustrates, only when genuinely useful. Empty array if none.',
-    '5. "speakerRanges" — group consecutive segments into runs of ONE voice talking, each as {"from","to","speaker"} using the segment indices above and speaker being ONLY "tutor" or "student" (never a name — you cannot tell which student). Cover the whole transcript with runs in order. If you genuinely cannot tell, skip that stretch rather than guessing — an incomplete list is fine, a wrong one is not.',
+    "Output rules (strict):",
+    "- English for explanations; keep German words in German.",
+    "- Short, scannable sentences. No rambling. No invented homework or vocab.",
+    "- Prefer structure over completeness: a tight outline beats a dump of every line.",
     "",
-    "Do not invent anything not supported by the transcript. Reply with ONLY this JSON:",
-    '{"summary":"…","keyPoints":["…"],"actionItems":["…"],"vocabulary":[{"de":"…","en":"…","note":"…"}],"speakerRanges":[{"from":0,"to":4,"speaker":"tutor"}]}',
+    "Produce ONLY this JSON:",
+    '1. "summary" — exactly 2 short sentences: topic + what students practised.',
+    '2. "keyPoints" — 4-6 bullets, each under 14 words, ordered as taught (grammar → examples → practice).',
+    '3. "actionItems" — homework / "practice X" / "bring Y" only if said aloud. Else [].',
+    '4. "vocabulary" — up to 12 taught German items as {"de","en","note?"}. Single words or short phrases only.',
+    '5. Omit speakerRanges — do not include that field (saves time; the UI does not need it for group class).',
+    "",
+    'Reply with ONLY: {"summary":"…","keyPoints":["…"],"actionItems":["…"],"vocabulary":[{"de":"…","en":"…"}]}',
   ]
     .filter(Boolean)
     .join("\n");
@@ -228,30 +231,28 @@ function buildNotesPrompt(input: { level: string | null; title: string; segments
 function buildPrivateNotesPrompt(input: { level: string | null; title: string; segments: TranscriptSegment[]; maxChars: number }): string {
   const { text, truncated } = formatIndexedTranscript(input.segments, input.maxChars);
   return [
-    `You are turning a raw speech-to-text transcript of a private one-to-one German lesson into notes for the student.`,
-    `There are exactly two voices in this transcript: the tutor and this one student. Each line below is one ASR`,
-    `segment: "[index] (start-end) text". There is no real speaker labelling, but unlike a group class, turn-taking`,
-    `and phrasing (a question vs. an explanation, a mistake vs. a correction) is usually enough to tell which is`,
-    `which — use that, but say so only where the transcript actually supports it.`,
-    `Lesson: "${input.title}"${input.level ? `, level ${input.level}` : ""}.`,
-    truncated ? `The transcript below is a SELECTION of the most instructive lines of a longer lesson (the gaps in the index numbers are stretches left out); work only from what is given.` : "",
+    `You write CLEAN, study-ready notes for a private one-to-one German lesson.`,
+    `Exactly two voices: tutor + this student. Lesson: "${input.title}"${input.level ? `, level ${input.level}` : ""}.`,
+    `ASR is messy — ignore filler and garbled lines. Organise what was taught into a readable study sheet.`,
+    truncated ? `This is a selection of instructive lines; work only from what is given.` : "",
     "",
     "Transcript:",
     "---",
     text,
     "---",
     "",
-    "Produce, in English except for the German being taught:",
-    '1. "summary" — 2-3 sentences: what this lesson actually covered for this student.',
-    '2. "keyPoints" — 3-6 short bullets.',
-    '3. "actionItems" — concrete follow-ups the tutor actually gave this student. Empty array if none.',
-    '4. "vocabulary" — every new German word or phrase taught, each as {"de","en","note"}. Empty array if none.',
-    '5. "corrections" — mistakes this student made that the tutor corrected, each as {"mistake","correction","note"}. Only include ones clearly audible in the transcript. Empty array if none.',
-    '6. "progressHighlights" — moments the tutor praised, or a visible improvement across the lesson (e.g. getting a construction right the second time after missing it the first). Empty array if none.',
-    '7. "speakerRanges" — group consecutive segments into runs of one voice talking, each as {"from","to","speaker"} using the segment indices above and speaker being "tutor" or "student". Cover the whole transcript in order; skip a stretch you genuinely cannot call rather than guessing.',
+    "Output rules: short scannable English; German words stay German; never invent corrections.",
     "",
-    "Do not invent a correction or a mistake that is not actually in the transcript — an empty array is a better answer than a guess. Reply with ONLY this JSON:",
-    '{"summary":"…","keyPoints":["…"],"actionItems":["…"],"vocabulary":[{"de":"…","en":"…","note":"…"}],"corrections":[{"mistake":"…","correction":"…","note":"…"}],"progressHighlights":["…"],"speakerRanges":[{"from":0,"to":4,"speaker":"tutor"}]}',
+    "Produce ONLY this JSON:",
+    '1. "summary" — 2 short sentences for this student.',
+    '2. "keyPoints" — 4-6 bullets under 14 words each, in teaching order.',
+    '3. "actionItems" — homework the tutor actually gave. Else [].',
+    '4. "vocabulary" — up to 12 items {"de","en","note?"}.',
+    '5. "corrections" — clear audible fixes only {"mistake","correction","note?"}. Else [].',
+    '6. "progressHighlights" — praise / visible improvement only. Else [].',
+    '7. Omit speakerRanges.',
+    "",
+    'Reply with ONLY: {"summary":"…","keyPoints":["…"],"actionItems":["…"],"vocabulary":[{"de":"…","en":"…"}],"corrections":[],"progressHighlights":[]}',
   ]
     .filter(Boolean)
     .join("\n");
@@ -312,7 +313,8 @@ export async function summariseTranscript(
         const prompt = build({ level: input.level, title: input.title, segments: input.segments, maxChars });
         // Higher than before `speakerRanges` existed — a long class can
         // legitimately need a few hundred short range entries to cover it.
-        const raw = await callModel(prompt, isPrivate ? 2600 : 2300, "learning-content");
+        // Leaner caps: structured notes without speakerRanges finish faster on Groq.
+        const raw = await callModel(prompt, isPrivate ? 1400 : 1100, "learning-content");
         const notes = raw ? coerceNotes(parseModelJson(raw), { isPrivate }) : null;
         if (notes) return notes;
       }

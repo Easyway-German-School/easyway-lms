@@ -4,8 +4,6 @@ export const dynamic = "force-dynamic";
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import Mascot from "@/components/Mascot";
 import StudentShell from "@/components/StudentShell";
 import VideoLibrary from "@/components/video/VideoLibrary";
 import { isPlayableVideo, type LibraryVideo } from "@/lib/video-library";
@@ -225,34 +223,12 @@ export default function MaterialsPage() {
               <p>Loading your materials…</p>
             </div>
           ) : tab === "watch" ? (
-            <div className="space-y-5">
-              {recommendations.length > 0 ? (
-                <section className="rounded-3xl bg-gradient-to-br from-orange-500/10 via-white/[0.04] to-transparent p-5 sm:p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-orange-400">Recommended for you</p>
-                      <h2 className="mt-2 text-xl font-bold text-white">Your next watch</h2>
-                      <p className="mt-1 text-sm text-slate-400">Chosen from your progress, level, pathway, and learning goal.</p>
-                    </div>
-                    <Mascot mood="cocky" className="hidden h-16 w-16 sm:block" />
-                  </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    {recommendations.map((recommendation) => {
-                      const video = videos.find((item) => item.id === recommendation.videoId);
-                      if (!video) return null;
-                      return (
-                        <Link key={recommendation.videoId} href={`/materials/watch/${video.id}`} className="rounded-2xl bg-white/[0.04] p-3 transition hover:bg-white/[0.08]">
-                          <p className="truncate text-sm font-semibold text-white">{video.title}</p>
-                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">{recommendation.reason}</p>
-                          <span className="mt-3 inline-flex items-center text-xs font-bold text-orange-400">Watch next →</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </section>
-              ) : null}
-              <VideoLibrary videos={videos} level={level} canDownload={canDownload} />
-            </div>
+            <VideoLibrary
+              videos={videos}
+              level={level}
+              canDownload={canDownload}
+              recommendations={recommendations}
+            />
           ) : (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">

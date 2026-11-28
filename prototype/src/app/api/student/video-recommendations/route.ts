@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { notExpiredForStudents } from "@/lib/retention";
 import { callModel } from "@/lib/ai";
 import { parseModelJson } from "@/lib/safe-json";
+import { profileFor } from "@/lib/learner-intelligence";
+import { goalFor, isKnownGoal } from "@/lib/germany-goals";
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +15,40 @@ type Recommendation = {
   priority: number;
 };
 
-function deterministicRecommendations(videos: Array<{ id: string; title: string; kind: string; positionSeconds: number; durationSeconds: number | null; completed: boolean; recordedAt: string | null }>): Recommendation[] {
+function deterministicRecommendations(
+  videos: Array<{
+    id: string;
+    title: string;
+    kind: string;
+    positionSeconds: number;
+    durationSeconds: number | null;
+    completed: boolean;
+    recordedAt: string | null;
+  }>,
+  goalLabel: string | null,
+): Recommendation[] {
   return videos
     .map((video, index) => {
       const unfinished = !video.completed;
       const inProgress = video.positionSeconds > 30;
       const recent = video.recordedAt ? new Date(video.recordedAt).getTime() : 0;
+      let reason = inProgress
+        ? "Continue where you stopped."
+        : video.kind === "recording"
+          ? "A recent class recording for your level."
+          : "A focused lesson for your current level.";
+      if (!inProgress && goalLabel && video.kind === "recording") {
+        reason = `Keeps you moving toward: ${goalLabel.replace(/^I am /, "").replace(/\.$/, "")}.`;
+      }
       return {
         videoId: video.id,
-        priority: (inProgress ? 40 : 0) + (unfinished ? 25 : -20) + (video.kind === "recording" ? 15 : 0) + Math.min(20, Math.max(0, (Date.now() - recent) <= 14 * 86400000 ? 20 : 0)) - index,
-        reason: inProgress ? "Continue where you stopped." : video.kind === "recording" ? "A recent class recording for your level." : "A focused lesson for your current level.",
+        priority:
+          (inProgress ? 40 : 0) +
+          (unfinished ? 25 : -20) +
+          (video.kind === "recording" ? 15 : 0) +
+          Math.min(20, Math.max(0, Date.now() - recent <= 14 * 86400000 ? 20 : 0)) -
+          index,
+        reason,
       };
     })
     .sort((left, right) => right.priority - left.priority)
@@ -47,6 +73,16 @@ export async function GET() {
       },
     });
     if (!student) return NextResponse.json({ recommendations: [] });
+
+    const goalLabel = isKnownGoal(student.germanyGoal) ? goalFor(student.germanyGoal).label : null;
+
+    let behaviourSummary = "";
+    try {
+      const firstName = (student.user?.name ?? "").trim().split(/\s+/)[0] || undefined;
+      behaviourSummary = (await profileFor(session.user.id as string, firstName)).summary;
+    } catch {
+      behaviourSummary = "";
+    }
 
     const records = await prisma.material.findMany({
       where: {
@@ -79,20 +115,47 @@ export async function GET() {
       };
     });
 
-    const fallback = deterministicRecommendations(candidates);
+    const fallback = deterministicRecommendations(candidates, goalLabel);
     const prompt = `You recommend German learning videos for one student. Choose ONLY from the candidate IDs below. Never invent an ID.
 
 Student:
-${JSON.stringify({ name: student.user.name, level: student.level, pathway: student.pathway, germanyGoal: student.germanyGoal, goalNote: student.germanyGoalNote, examReadiness: student.examReadiness })}
+${JSON.stringify({
+  name: student.user.name,
+  level: student.level,
+  pathway: student.pathway,
+  germanyGoal: student.germanyGoal,
+  goalLabel,
+  goalNote: student.germanyGoalNote,
+  examReadiness: student.examReadiness,
+  behaviourSummary: behaviourSummary || null,
+})}
 
 Candidates:
-${JSON.stringify(candidates.map(({ id, title, description, aiSummary, kind, level, courseTitle, recordedAt, positionSeconds, durationSeconds, completed }) => ({ id, title, description, aiSummary, kind, level, courseTitle, recordedAt, positionSeconds, durationSeconds, completed })))}
+${JSON.stringify(
+  candidates.map(
+    ({ id, title, description, aiSummary, kind, level, courseTitle, recordedAt, positionSeconds, durationSeconds, completed }) => ({
+      id,
+      title,
+      description,
+      aiSummary,
+      kind,
+      level,
+      courseTitle,
+      recordedAt,
+      positionSeconds,
+      durationSeconds,
+      completed,
+    }),
+  ),
+)}
 
 Return ONLY JSON: {"recommendations":[{"videoId":"candidate id","reason":"one short student-friendly sentence","priority":1}]}
-Rules: recommend at most 3; prefer unfinished or in-progress videos; prefer recent class recordings; connect the reason to the student's goal only when supported by the candidate text; do not recommend completed videos unless there is no better option.`;
+Rules: recommend at most 3; prefer unfinished or in-progress videos; prefer recent class recordings; connect the reason to the student's Germany goal or study rhythm when the candidate supports it; do not recommend completed videos unless there is no better option.`;
 
     const raw = await callModel(prompt, 900, "student");
-    const parsed = parseModelJson<{ recommendations?: Array<{ videoId?: unknown; reason?: unknown; priority?: unknown }> }>(raw);
+    const parsed = parseModelJson<{
+      recommendations?: Array<{ videoId?: unknown; reason?: unknown; priority?: unknown }>;
+    }>(raw);
     const allowed = new Map(candidates.map((candidate) => [candidate.id, candidate]));
     const recommendations = Array.isArray(parsed?.recommendations)
       ? parsed.recommendations

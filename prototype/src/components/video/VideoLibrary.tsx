@@ -13,6 +13,7 @@ import {
   pickBillboard,
   watchPercent,
   type LibraryVideo,
+  type VideoRecommendationHint,
   type VideoShelf,
 } from "@/lib/video-library";
 
@@ -90,12 +91,12 @@ function ShelfRow({
               href={watchHref(video.id)}
               className="group relative w-52 shrink-0 sm:w-64"
             >
-              <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800 transition duration-200 group-hover:scale-[1.04]">
+              <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800 ring-1 ring-white/10 transition duration-300 group-hover:scale-[1.05] group-hover:ring-[#FF6600]/50 group-hover:shadow-[0_12px_40px_-12px_rgba(255,102,0,0.55)]">
                 <VideoThumb video={video} previewOnHover={previewOnHover} />
 
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
-                <div className="absolute inset-0 grid place-items-center opacity-0 transition group-hover:opacity-100">
-                  <span className="grid h-11 w-11 place-items-center rounded-full bg-white/90 text-slate-900"><PlayIcon className="h-6 w-6" /></span>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent opacity-60 transition group-hover:opacity-100" />
+                <div className="absolute inset-0 grid place-items-center opacity-0 transition duration-300 group-hover:opacity-100">
+                  <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-900 shadow-lg"><PlayIcon className="h-6 w-6" /></span>
                 </div>
 
                 {video.durationSeconds ? (
@@ -135,12 +136,15 @@ export default function VideoLibrary({
   level,
   watchHref = DEFAULT_WATCH_HREF,
   canDownload = false,
+  recommendations = [],
 }: {
   videos: LibraryVideo[];
   level?: string | null;
   watchHref?: WatchHref;
   /** Student is offered offline downloads (online / hybrid / private, in the installed app). */
   canDownload?: boolean;
+  /** Folded into the cinema shelves + billboard instead of a separate strip. */
+  recommendations?: VideoRecommendationHint[];
 }) {
   const [query, setQuery] = useState("");
   // Off by default, and labelled honestly. Netflix autoplays previews because
@@ -158,8 +162,18 @@ export default function VideoLibrary({
     );
   }, [videos, query]);
 
-  const shelves = useMemo(() => buildShelves(filtered, level), [filtered, level]);
-  const billboard = useMemo(() => pickBillboard(filtered), [filtered]);
+  const shelves = useMemo(
+    () => buildShelves(filtered, level, recommendations),
+    [filtered, level, recommendations],
+  );
+  const billboard = useMemo(
+    () => pickBillboard(filtered, recommendations),
+    [filtered, recommendations],
+  );
+  const billboardReason = useMemo(() => {
+    if (!billboard) return null;
+    return recommendations.find((item) => item.videoId === billboard.id)?.reason ?? null;
+  }, [billboard, recommendations]);
 
   if (videos.length === 0) {
     return (
@@ -186,7 +200,11 @@ export default function VideoLibrary({
           <div className="absolute inset-0 flex flex-col justify-end p-6 sm:p-10">
             <div className="max-w-xl">
               <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-[#FF6600]">
-                {billboard.kind === "recording" ? "Latest class recording" : "Featured lesson"}
+                {billboardReason
+                  ? "Suggested for you"
+                  : billboard.kind === "recording"
+                    ? "Latest class recording"
+                    : "Featured lesson"}
               </p>
               <h2 className="mt-2 text-2xl font-bold leading-tight text-white sm:text-4xl">{billboard.title}</h2>
               <p className="mt-2 text-xs text-slate-300">
@@ -199,18 +217,20 @@ export default function VideoLibrary({
                   .filter(Boolean)
                   .join(" · ")}
               </p>
-              {billboard.description ? (
+              {billboardReason ? (
+                <p className="mt-3 line-clamp-2 text-sm leading-6 text-orange-100/90">{billboardReason}</p>
+              ) : billboard.description ? (
                 <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-300">{billboard.description}</p>
               ) : null}
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <Link
                   href={watchHref(billboard.id)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-white px-7 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-white/85"
+                  className="inline-flex items-center gap-2 rounded-lg bg-white px-7 py-2.5 text-sm font-bold text-slate-900 transition hover:scale-[1.02] hover:bg-white/90"
                 >
                   <PlayIcon className="h-5 w-5" /> {billboard.positionSeconds > 30 ? "Resume" : "Play"}
                 </Link>
-                <span className="rounded-lg bg-white/15 px-5 py-2.5 text-sm font-semibold text-white">
+                <span className="rounded-lg bg-white/15 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur">
                   {watchPercent(billboard) > 0 ? `${watchPercent(billboard)}% watched` : "Not started"}
                 </span>
               </div>

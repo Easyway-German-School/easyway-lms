@@ -94,6 +94,12 @@ function fallbackMissions(profile: NonNullable<Awaited<ReturnType<typeof student
     });
   }
   missions.push({
+    title: "Play a German word puzzle",
+    description: "Clear one Wortbau or Wortsuche round — words matched to your level.",
+    reward: "+20 XP",
+    detectType: "word-puzzle",
+  });
+  missions.push({
     title: "Show up today",
     description: "Open a lesson, play a quiz, or join your class — anything that moves you forward.",
     reward: "+15 XP",

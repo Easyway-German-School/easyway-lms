@@ -147,6 +147,11 @@ export function isEffectivelyComplete(positionSeconds: number, durationSeconds?:
   return positionSeconds >= duration * COMPLETION_THRESHOLD;
 }
 
+export type VideoRecommendationHint = {
+  videoId: string;
+  reason?: string;
+};
+
 /**
  * Build the shelves from a flat list.
  *
@@ -154,8 +159,16 @@ export function isEffectivelyComplete(positionSeconds: number, durationSeconds?:
  * new, then the class tapes newest-first, then the tutor's own series, then
  * everything else. A student who missed Tuesday should find Tuesday without
  * scrolling.
+ *
+ * Optional `recommendations` insert a "Suggested for you" shelf near the top
+ * (after Continue watching) so the Netflix canvas carries personalization
+ * instead of a separate card strip above the library.
  */
-export function buildShelves(videos: LibraryVideo[], level?: string | null): VideoShelf[] {
+export function buildShelves(
+  videos: LibraryVideo[],
+  level?: string | null,
+  recommendations?: VideoRecommendationHint[],
+): VideoShelf[] {
   const shelves: VideoShelf[] = [];
   const byNewest = (a: LibraryVideo, b: LibraryVideo) =>
     new Date(b.recordedAt || b.createdAt).getTime() - new Date(a.recordedAt || a.createdAt).getTime();
@@ -168,6 +181,21 @@ export function buildShelves(videos: LibraryVideo[], level?: string | null): Vid
       subtitle: "Picks up exactly where your connection dropped.",
       videos: continueWatching,
     });
+  }
+
+  if (recommendations && recommendations.length > 0) {
+    const byId = new Map(videos.map((video) => [video.id, video]));
+    const suggested = recommendations
+      .map((hint) => byId.get(hint.videoId))
+      .filter((video): video is LibraryVideo => Boolean(video));
+    if (suggested.length > 0) {
+      shelves.push({
+        id: "suggested",
+        title: "Suggested for you",
+        subtitle: "Picked from your level, progress, and Germany goal.",
+        videos: suggested,
+      });
+    }
   }
 
   // Private sessions get their own shelf rather than sitting inside the
@@ -238,13 +266,24 @@ export function buildShelves(videos: LibraryVideo[], level?: string | null): Vid
 /**
  * The billboard at the top of the library.
  *
- * Prefers something half-watched (finish what you started), then the newest
- * recording (the class you might have missed), then simply the newest thing.
+ * Prefers the top personal recommendation when one is still unfinished, then
+ * something half-watched, then the newest recording, then simply the newest.
  */
-export function pickBillboard(videos: LibraryVideo[]): LibraryVideo | null {
+export function pickBillboard(
+  videos: LibraryVideo[],
+  recommendations?: VideoRecommendationHint[],
+): LibraryVideo | null {
   if (videos.length === 0) return null;
   const byNewest = (a: LibraryVideo, b: LibraryVideo) =>
     new Date(b.recordedAt || b.createdAt).getTime() - new Date(a.recordedAt || a.createdAt).getTime();
+
+  if (recommendations?.length) {
+    const byId = new Map(videos.map((video) => [video.id, video]));
+    for (const hint of recommendations) {
+      const video = byId.get(hint.videoId);
+      if (video && !video.completed) return video;
+    }
+  }
 
   return (
     videos.filter(isInProgress).sort(byNewest)[0] ??

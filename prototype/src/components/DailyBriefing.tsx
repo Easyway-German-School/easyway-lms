@@ -94,6 +94,7 @@ const AREA: Record<string, string> = {
   lesson: "/lesson",
   assignment: "/assignment",
   quiz: "/games",
+  "word-puzzle": "/games",
   attendance: "/calendar",
   voice: "/tandem",
   essay: "/essay",

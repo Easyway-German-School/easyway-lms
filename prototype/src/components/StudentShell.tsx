@@ -32,6 +32,8 @@ import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
 import DailyBriefing from "@/components/DailyBriefing";
+import MonthDumpMoment from "@/components/moment/MonthDumpMoment";
+import WordPuzzleMoment from "@/components/moment/WordPuzzleMoment";
 import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
 import TutorialRuntime from "@/components/TutorialRuntime";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
@@ -733,6 +735,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           for students actually in the portal — an unpaid lock screen has no
           missions to brief. */}
       {hasAccess && !portalPaused && <DailyBriefing />}
+
+      {/* Becca's soft month-end dump — View now or Remind me later. Only in the
+          last days of the calendar month; never stacks aggressively. */}
+      {hasAccess && !portalPaused && <MonthDumpMoment />}
+
+      {/* Becca introduces the German word puzzles — View now / Later. */}
+      {hasAccess && !portalPaused && <WordPuzzleMoment />}
 
       {/* The other half of the fee reminder: a student who is LOCKED OUT for money
           (paid nothing, under the deposit, or paused for a balance) never sees the
