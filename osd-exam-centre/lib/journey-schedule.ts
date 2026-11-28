@@ -55,11 +55,10 @@ export function dueStep(facts: ScheduleFacts, sent: ReadonlySet<JourneyStep>, no
     info_check: () =>
       paid && sent.has("payment_confirmed") && !facts.admittedAt && daysToExam > 0 &&
       (facts.missingFields.length > 0 || !facts.infoConfirmedAt) && (since(facts.verifiedAt) ?? 0) >= 1,
-    // The one soft sell: after the admin chores, a few days after payment, and only when there is
-    // still time for a class to matter. Never to someone who already raised their hand.
+    // Soft sell after the booking email exists. Not locked to "paid" — the office
+    // and the sweep can send it while the candidate is still unpaid.
     prep_invite: () =>
-      paid && sent.has("payment_confirmed") && (sent.has("info_check") || Boolean(facts.infoConfirmedAt)) &&
-      !facts.prepInterestAt && (since(facts.verifiedAt) ?? 0) >= 3 && daysToExam >= 10,
+      sent.has("booking_received") && !facts.prepInterestAt && daysToExam >= 1,
     // Never scheduled — excluded from JOURNEY_ORDER below, so this rule is never consulted; it exists only
     // because Record<JourneyStep, ...> requires every step to have one.
     registration_link: () => false,

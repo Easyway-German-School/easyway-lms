@@ -172,12 +172,12 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
     prefer: opts?.force && zohoFallbackConfigured() ? "zoho" : undefined,
   });
 
-  if (!sent.ok) {
+  if (!sent.ok || sent.provider === "local" || sent.messageId === "local-dev") {
     await prisma.journeyEmail.update({
       where: { bookingId_step: { bookingId, step } },
       data: {
         status: "failed",
-        lastError: sent.error,
+        lastError: "error" in sent ? sent.error : "Not handed to a mail provider",
         provider: sent.tried.join(",") || null,
         sentAt: new Date(),
       },

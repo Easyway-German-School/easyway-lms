@@ -48,6 +48,9 @@ export function deliveryLabel(row: {
       tone: "bad",
     };
   }
+  if (row.messageId === "local-dev" || row.provider === "local") {
+    return { kind: "failed", label: "Not sent — no mail provider was configured", tone: "bad" };
+  }
   const sentAt = typeof row.sentAt === "string" ? new Date(row.sentAt) : row.sentAt;
   if (sentAt.getTime() < emailDeliveryTrustAfter().getTime()) {
     return {

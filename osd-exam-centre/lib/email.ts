@@ -131,11 +131,12 @@ async function sendVia(
       })),
     });
     const rejected = (info as { rejected?: string[] }).rejected ?? [];
-    if (rejected.length > 0) {
-      console.error(`sendEmail[${cfg.id}] rejected:`, rejected);
+    const accepted = (info as { accepted?: string[] }).accepted ?? [];
+    if (rejected.length > 0 || accepted.length === 0) {
+      console.error(`sendEmail[${cfg.id}] not accepted:`, { rejected, accepted });
       return {
         ok: false,
-        error: `Rejected by ${cfg.id}: ${rejected.join(", ")}`,
+        error: `Not accepted by ${cfg.id}: rejected=${rejected.join(", ") || "none"} accepted=${accepted.join(", ") || "none"}`,
         provider: cfg.id,
         tried: [cfg.id],
       };
