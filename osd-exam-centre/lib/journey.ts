@@ -173,16 +173,18 @@ export async function sendJourneyStep(bookingId: string, step: JourneyStep, opts
   });
 
   if (!sent.ok || sent.provider === "local" || sent.messageId === "local-dev") {
+    const lastError =
+      sent.ok === false ? sent.error : "Not handed to a mail provider";
     await prisma.journeyEmail.update({
       where: { bookingId_step: { bookingId, step } },
       data: {
         status: "failed",
-        lastError: "error" in sent ? sent.error : "Not handed to a mail provider",
+        lastError,
         provider: sent.tried.join(",") || null,
         sentAt: new Date(),
       },
     }).catch(() => {});
-    return { ok: false, error: sent.error || "The email could not be sent — it will be retried automatically." };
+    return { ok: false, error: lastError || "The email could not be sent — it will be retried automatically." };
   }
 
   await prisma.journeyEmail.update({
