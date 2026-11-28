@@ -291,7 +291,7 @@ function prepInvite(ctx: EmailContext): RenderedEmail {
     attach: null,
     html: layout(`With ${weeks} week${weeks === 1 ? "" : "s"} to go — a few ways candidates use the time.`, [
       hello(ctx),
-      p(`Your payment is in and your registration is moving along — nothing more is needed from you on that front. With about ${weeks} week${weeks === 1 ? "" : "s"} until ${e(ctx.examDate)}, here is how candidates at ${e(ctx.level)} usually make the most of the time:`),
+      p(`With about ${weeks} week${weeks === 1 ? "" : "s"} until ${e(ctx.examDate)}, here is how candidates at ${e(ctx.level)} usually make the most of the time:`),
       ul([
         `<strong>Do one full, timed practice paper</strong> before exam day, so the written part is not a first-time surprise. ÖSD publishes practice material for each level — it shows you the task types and the timing.`,
         `<strong>Practise speaking out loud.</strong> The oral module is a quarter of the fee and the part candidates rehearse least. Even ten minutes a day with a friend beats silent revision.`,
