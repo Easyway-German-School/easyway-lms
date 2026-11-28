@@ -145,8 +145,8 @@ export default function AdminEmailsPage() {
         <div className="mt-6 space-y-3">
           {items.length === 0 && (
             <p className="rounded-sm border border-[var(--line)] bg-white px-4 py-6 text-sm text-[var(--ink-soft)]">
-              Nothing needs attention right now. New sends after the support@ fix show as &quot;Handed to Brevo&quot;
-              on the candidate card — still not a guarantee of inbox delivery, but no longer a silent exams@ drop.
+              Nothing needs attention right now. Mail sent before the authenticated From
+              (no-reply@easywaylanguageschoolexams.com) shows up here so you can resend it.
             </p>
           )}
           {items.map((item) => {
