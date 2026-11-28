@@ -4,9 +4,11 @@ import { OFFICE } from "@/lib/config";
 /**
  * Dual-provider outbound mail.
  *
- * Primary = Brevo SMTP (SMTP_*). From uses the LMS Brevo-verified identity
- * no-reply@easywayschoollms.com.ng so mail actually delivers. Reply-To stays
- * exams@ (Zoho desk) — candidates still reply to the exams mailbox.
+ * Primary = Brevo SMTP (SMTP_*). From MUST be on a domain Brevo has
+ * authenticated. easywayschoollms.com.ng and easywaylanguageschool.com are
+ * NOT authenticated — Brevo returns SMTP OK then logs "sender not valid".
+ * The authenticated domain is easywaylanguageschoolexams.com.
+ * Reply-To stays exams@ (Zoho desk).
  *
  * Fallback = Zoho ZeptoMail / CPaaS SMTP (ZOHO_SMTP_*). Ordinary Zoho Mail
  * mailbox SMTP is not for transactional volume — use ZeptoMail/CPaaS.
@@ -26,9 +28,9 @@ type TransportConfig = {
   from: string;
 };
 
-/** Brevo-verified From (LMS domain). Reply-To is still exams@. */
+/** From on the only Brevo-authenticated domain. Reply-To is still exams@. */
 const BREVO_FROM =
-  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywayschoollms.com.ng>";
+  process.env.SMTP_FROM || "Easyway ÖSD Exam Centre <no-reply@easywaylanguageschoolexams.com>";
 
 /** Zoho/Zepto From when fallback is wired. */
 const ZOHO_FROM =
