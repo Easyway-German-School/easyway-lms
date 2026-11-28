@@ -182,15 +182,14 @@ export function accessFromStudent(
     startDayOverrides,
   });
 
-  // Travel Package grace means "keep the portal open until this date" — the
-  // whole point an admin reaches for it, not just a reprieve from the
-  // ongoing 30-day balance lock. `deriveStudentAccess` only lets grace hold
-  // back `balanceLocked`; the deposit gate (depositPaid) is a separate,
-  // unconditional check, so a student under the flat live deposit floor
-  // stayed locked with "Access: Grace" showing right next to it — the exact
-  // bug reported 2026-11-10. An upcoming-batch countdown is a different kind
-  // of lock (a seat that has not opened yet) and grace does not touch it.
+  // Travel Package students never auto-lock for an unsettled balance.
+  // Pay-as-you-go is the product promise — only an office pause (or a real
+  // unpaid deposit / upcoming-batch / previous-level hold) walls them out.
+  // Grace still opens a deposit-underfloor student until the grace date.
   if (isTravelPackagePathway(student.pathway) && !result.hasAccess && !result.batchLocked) {
+    if (result.lockReason === "unsettled_balance") {
+      return { ...result, hasAccess: true, lockReason: null };
+    }
     const graceUntil = result.graceUntil ? new Date(result.graceUntil) : null;
     if (graceUntil && !Number.isNaN(graceUntil.getTime()) && graceUntil.getTime() > Date.now()) {
       return { ...result, hasAccess: true, lockReason: null };

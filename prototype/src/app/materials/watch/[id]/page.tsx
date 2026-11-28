@@ -384,20 +384,33 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         {!offline ? <MyNotesEditor materialId={video.id} /> : null}
 
         {upNext.length > 0 ? (
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold">Up next</h2>
-            <div className="-mx-6 flex snap-x gap-4 overflow-x-auto px-6 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3">
-              {upNext.map((item) => (
+          <div className="overflow-hidden rounded-3xl bg-slate-950 p-5 text-white sm:p-6">
+            <div className="mb-4 flex items-end justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#FF6600]">Keep watching</p>
+                <h2 className="mt-1 text-lg font-semibold">Up next</h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  {video?.series
+                    ? `More from ${video.series}`
+                    : "The next tapes and lessons worth your time."}
+                </p>
+              </div>
+            </div>
+            <div className="-mx-1 flex snap-x gap-4 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">
+              {upNext.map((item, index) => (
                 <Link
                   key={item.id}
                   href={`/materials/watch/${item.id}`}
-                  className="group w-64 shrink-0 snap-start overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] transition duration-300 hover:-translate-y-1 hover:shadow-2xl sm:w-auto"
+                  className="group w-64 shrink-0 snap-start overflow-hidden rounded-2xl bg-white/[0.04] ring-1 ring-white/10 transition duration-300 hover:-translate-y-1 hover:ring-[#FF6600]/40 hover:shadow-[0_16px_40px_-16px_rgba(255,102,0,0.5)] sm:w-auto"
                 >
                   <div className="relative aspect-video overflow-hidden bg-slate-900">
                     <div className="h-full w-full transition duration-300 group-hover:scale-110">
                       <VideoThumb video={item} />
                     </div>
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                    <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                      {index === 0 ? "Play next" : `#${index + 1}`}
+                    </span>
                     {item.durationSeconds ? (
                       <span className="absolute right-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
                         {formatDuration(item.durationSeconds)}
@@ -410,8 +423,8 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
                     ) : null}
                   </div>
                   <div className="p-3">
-                    <p className="truncate text-sm font-medium">{item.title}</p>
-                    <p className="truncate text-xs text-[var(--muted)]">
+                    <p className="truncate text-sm font-medium text-slate-100">{item.title}</p>
+                    <p className="truncate text-xs text-slate-400">
                       {[item.episodeNumber ? `Episode ${item.episodeNumber}` : null, item.lecturerName]
                         .filter(Boolean)
                         .join(" · ")}

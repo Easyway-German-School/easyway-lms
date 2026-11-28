@@ -106,26 +106,34 @@ export function CampusRoomCard({
       whileHover={interactive ? { y: -5, scale: 1.02 } : undefined}
       whileTap={interactive ? { scale: 0.97 } : undefined}
       transition={youthSpring}
-      className={`youth-room relative flex h-full flex-col justify-between rounded-[1.75rem] p-5 ${
+      className={`youth-room relative flex h-full flex-col justify-between overflow-hidden rounded-[1.75rem] p-5 shadow-[0_10px_28px_-18px_rgba(0,0,0,0.35)] ${
         tall ? "min-h-[12rem] sm:min-h-[14rem]" : "min-h-[9.5rem]"
       } ${isCampusRoomOpen && count > 0 ? "youth-room-live" : ""} ${interactive ? "" : "opacity-70"}`}
       style={{ background: tint.bg, color: tint.ink }}
     >
-      <div className="flex items-start justify-between">
-        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/60">{tint.icon}</span>
+      {/* Soft Snapchat-style glow when people are live in the room */}
+      {isCampusRoomOpen && count > 0 ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-40 blur-2xl"
+          style={{ background: tint.ink }}
+        />
+      ) : null}
+      <div className="relative flex items-start justify-between">
+        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/70 shadow-sm backdrop-blur">{tint.icon}</span>
         {!interactive ? <LockIcon className="h-4 w-4" strokeWidth={2.2} /> : null}
       </div>
-      <div>
+      <div className="relative">
         <p className="text-base font-extrabold leading-tight">{room.name}</p>
         <p className="mt-0.5 text-xs opacity-80">{isCampusRoomOpen ? room.blurb : destinationLabel ?? "Opening soon"}</p>
         {isCampusRoomOpen ? (
           <div className="mt-2 space-y-1.5">
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/45 px-2 py-0.5 text-xs font-bold backdrop-blur">
               <span className={`h-2 w-2 rounded-full ${count > 0 ? "youth-glow bg-emerald-500" : "bg-black/20"}`} />
               {count > 0 ? `${count} here` : onSelect ? "Empty right now" : href ? "Be the first" : "Empty"}
             </span>
             <div className="min-h-[24px]">
-              <FaceRow people={people} more={more} size={24} />
+              <FaceRow people={people} more={more} size={26} />
             </div>
           </div>
         ) : interactive ? <span className="mt-2 inline-flex text-xs font-extrabold">{destinationLabel ?? "Opening soon"} →</span> : null}

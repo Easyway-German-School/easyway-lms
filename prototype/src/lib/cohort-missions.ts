@@ -37,6 +37,8 @@ export const DETECT_TYPES = [
   "generic",
   /** A personalized story-episode beat — see storySeriesFor() and mission-detection.ts. */
   "scene",
+  /** Solo Wortbau / Wortsuche completion for the school day. */
+  "word-puzzle",
 ] as const;
 export type DetectType = (typeof DETECT_TYPES)[number];
 const GENERATED_DETECT_TYPES = DETECT_TYPES.filter((type) => type !== "attendance");

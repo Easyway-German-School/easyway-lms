@@ -55,11 +55,37 @@ async function didSubmitAssignment(ctx: DetectionContext): Promise<boolean> {
 }
 
 async function didPlayQuiz(ctx: DetectionContext): Promise<boolean> {
-  const row = await prisma.quizGamePlayer.findFirst({
-    where: { studentId: ctx.studentId, joinedAt: { gte: ctx.since }, answered: { gt: 0 } },
-    select: { id: true },
+  const [liveQuiz, wordPuzzle] = await Promise.all([
+    prisma.quizGamePlayer.findFirst({
+      where: { studentId: ctx.studentId, joinedAt: { gte: ctx.since }, answered: { gt: 0 } },
+      select: { id: true },
+    }),
+    didPlayWordPuzzle(ctx),
+  ]);
+  return Boolean(liveQuiz) || wordPuzzle;
+}
+
+/** Daily Wortbau / Wortsuche completion stamped on PersonalizedPlan.wordPuzzles. */
+async function didPlayWordPuzzle(ctx: DetectionContext): Promise<boolean> {
+  const plan = await prisma.personalizedPlan.findUnique({
+    where: { studentId: ctx.studentId },
+    select: { plan: true },
   });
-  return Boolean(row);
+  if (!plan?.plan) return false;
+  try {
+    const parsed = JSON.parse(plan.plan) as {
+      wordPuzzles?: Record<string, { day?: string; at?: string }>;
+    };
+    const puzzles = parsed.wordPuzzles;
+    if (!puzzles || typeof puzzles !== "object") return false;
+    for (const entry of Object.values(puzzles)) {
+      if (!entry?.at) continue;
+      if (new Date(entry.at) >= ctx.since) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 async function didAttend(ctx: DetectionContext): Promise<boolean> {
@@ -134,6 +160,8 @@ export async function detectionFor(type: DetectType, ctx: DetectionContext): Pro
       return didSubmitAssignment(ctx);
     case "quiz":
       return didPlayQuiz(ctx);
+    case "word-puzzle":
+      return didPlayWordPuzzle(ctx);
     case "attendance":
       return didAttend(ctx);
     case "voice":

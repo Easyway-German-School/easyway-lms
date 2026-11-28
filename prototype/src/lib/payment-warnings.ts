@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import {
+  derivePaymentStatus,
+  isTravelPackagePathway,
+  receivedPaymentFilter,
+  requiredDepositFor,
+  tuitionFeeFor,
+} from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { onTrackPlanStudentIds } from "@/lib/payment-plans";
@@ -210,8 +216,10 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     const balance = goForwardOwed;
 
     // -------- Balance track: part-paid, aimed at the 30-day post-start lock --------
+    // Travel Package never auto-locks for balance — skip scare emails that
+    // threaten a lock that will not fire. Deposit-track warnings still apply.
     if (depositPaid && goForwardOwed > 0) {
-      if (graceActive) {
+      if (isTravelPackagePathway(student.pathway) || graceActive) {
         run.skipped++;
         continue;
       }

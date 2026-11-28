@@ -422,7 +422,10 @@ export function deriveStudentAccess({
 
   let lockAt: Date | null = null;
   let balanceLocked = false;
-  if (depositPaid && !fullPaid) {
+  // Travel Package (`flatDeposit`) never auto-locks for balance — the school
+  // collects as they go, and only a manual pause / deposit gate should close
+  // the portal. The 30-day clock still runs for ladder / group students.
+  if (depositPaid && !fullPaid && !flatDeposit) {
     // With a ledger, run the clock from the oldest still-open GO-FORWARD charge
     // — a freshly promoted student gets a fresh 30-day window on the new level
     // rather than being locked the instant they move up.

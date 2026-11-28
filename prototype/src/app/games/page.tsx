@@ -15,7 +15,10 @@ import { useConfirmedSession as useSession } from "@/lib/useConfirmedSession";
 import StudentShell from "@/components/StudentShell";
 import ComingSoonLock from "@/components/ComingSoonLock";
 import StoryTour from "@/components/StoryTour";
-import { AlertIcon, ChainIcon, ClockIcon, PlusIcon, SparklesIcon } from "@/components/icons";
+import Wortbau from "@/components/games/Wortbau";
+import Wortsuche from "@/components/games/Wortsuche";
+import type { PuzzleWord } from "@/lib/word-puzzles";
+import { AlertIcon, ChainIcon, ClockIcon, GameControllerIcon, PlusIcon, SparklesIcon } from "@/components/icons";
 
 type Waiting = {
   turnId: string;
@@ -63,6 +66,15 @@ export default function GamesPage() {
   const [storyTourSeen, setStoryTourSeen] = useState<boolean | null>(null);
   const [showStoryTour, setShowStoryTour] = useState(false);
 
+  /** Solo word puzzles — Scrabble-style Wortbau + Wortsuche. */
+  const [puzzleLevel, setPuzzleLevel] = useState<string | null>(null);
+  const [materialWords, setMaterialWords] = useState<PuzzleWord[]>([]);
+  const [activePuzzle, setActivePuzzle] = useState<"wortbau" | "wortsuche" | null>(null);
+  const [puzzleDone, setPuzzleDone] = useState<{ wortbau: boolean; wortsuche: boolean }>({
+    wortbau: false,
+    wortsuche: false,
+  });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -78,6 +90,42 @@ export default function GamesPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/student/word-puzzles", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setPuzzleLevel(data.level ?? null);
+        setMaterialWords(Array.isArray(data.materialWords) ? data.materialWords : []);
+        setPuzzleDone({
+          wortbau: Boolean(data.completed?.wortbau),
+          wortsuche: Boolean(data.completed?.wortsuche),
+        });
+      } catch {
+        /* puzzles still play client-side with A1 fallback */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const recordPuzzle = useCallback(async (game: "wortbau" | "wortsuche", payload: Record<string, number>) => {
+    setPuzzleDone((prev) => ({ ...prev, [game]: true }));
+    try {
+      await fetch("/api/student/word-puzzles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ game, ...payload }),
+      });
+    } catch {
+      /* local done stamp is enough for this visit */
+    }
   }, []);
 
   /** Reveal the start form, and run the coach the first time ever. */
@@ -146,7 +194,7 @@ export default function GamesPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
             {tab === "games"
-              ? "Your class writes a story together, one sentence each. You get a turn, you write one line in German, and it passes on. No rush — take your turn whenever you pick up your phone."
+              ? "Word puzzles you can play alone, plus class stories you write together one sentence at a time."
               : "We're still building this one out."}
           </p>
         </header>
@@ -185,6 +233,71 @@ export default function GamesPage() {
           <p className="text-sm text-[var(--muted)]">Loading…</p>
         ) : (
           <div className="space-y-8">
+            <section className="overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] via-[var(--surface)] to-[var(--surface)] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">
+                    Solo word puzzles
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-[var(--foreground)]">Play German with tiles</h2>
+                  <p className="mt-1 max-w-md text-sm text-[var(--muted)]">
+                    Scrabble-style Wortbau and a word search — built from your level&apos;s vocab, no waiting for a partner.
+                  </p>
+                </div>
+                <GameControllerIcon className="h-8 w-8 text-[var(--accent)]" />
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setActivePuzzle(activePuzzle === "wortbau" ? null : "wortbau")}
+                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    activePuzzle === "wortbau"
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]/40"
+                  }`}
+                >
+                  <p className="font-semibold text-[var(--foreground)]">Wortbau</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Build German nouns from letter tiles{puzzleDone.wortbau ? " · done today" : ""}.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePuzzle(activePuzzle === "wortsuche" ? null : "wortsuche")}
+                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    activePuzzle === "wortsuche"
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]/40"
+                  }`}
+                >
+                  <p className="font-semibold text-[var(--foreground)]">Wortsuche</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Find hidden words in a grid{puzzleDone.wortsuche ? " · done today" : ""}.
+                  </p>
+                </button>
+              </div>
+
+              {activePuzzle === "wortbau" ? (
+                <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                  <Wortbau
+                    level={puzzleLevel}
+                    materialWords={materialWords}
+                    onComplete={(score) => void recordPuzzle("wortbau", { score })}
+                  />
+                </div>
+              ) : null}
+              {activePuzzle === "wortsuche" ? (
+                <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                  <Wortsuche
+                    level={puzzleLevel}
+                    materialWords={materialWords}
+                    onComplete={(found) => void recordPuzzle("wortsuche", { found })}
+                  />
+                </div>
+              ) : null}
+            </section>
+
             {waiting.length > 0 ? (
               <section>
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">

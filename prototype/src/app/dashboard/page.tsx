@@ -52,6 +52,7 @@ const MISSION_HREF: Record<string, string> = {
   lesson: "/materials",
   assignment: "/assignment",
   quiz: "/games",
+  "word-puzzle": "/games",
   attendance: "/live",
   voice: "/tandem",
   essay: "/essay",
@@ -715,13 +716,9 @@ function DashboardContent() {
       }
     : null);
 
-  const dailyQuests: Mission[] = [
-    { title: "Complete one lesson", description: "Finish a lesson and earn a quick streak bonus.", done: insights.completedLessons > 0, reward: "+45 XP" },
-    { title: "Keep the streak alive", description: "Practice for 15 minutes to maintain your learning streak.", done: insights.streak >= 2, reward: "+20 XP" },
-    { title: "Finish a speaking drill", description: "Record a short speaking task to boost pronunciation confidence.", done: examReadiness >= 60, reward: "+30 XP" },
-  ];
-
-  const displayMissions = dailyMissions.length > 0 ? dailyMissions : dailyQuests;
+  // Never invent dummy quests — if the server has not produced today's
+  // missions yet, show an empty state rather than fake progress/XP cards.
+  const displayMissions = dailyMissions;
   const missionCompletedCount = displayMissions.filter((mission) => mission.done).length;
   const missionCompletePercent = displayMissions.length > 0 ? Math.round((missionCompletedCount / displayMissions.length) * 100) : 0;
   const quickStats = [

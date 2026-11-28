@@ -96,6 +96,12 @@ export default function CommunityLauncher() {
       )}
 
       <div className="relative">
+        {!open && unread > 0 ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-[var(--accent)]/35"
+          />
+        ) : null}
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
@@ -107,7 +113,7 @@ export default function CommunityLauncher() {
                 ? `Open community, ${unread} unread`
                 : "Open community"
           }
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_12px_34px_rgba(255,102,0,0.42)] transition hover:scale-105 active:scale-95"
+          className="relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_12px_34px_rgba(255,102,0,0.42)] ring-2 ring-white/80 transition hover:scale-105 active:scale-95"
         >
           {open ? <CloseIcon className="h-6 w-6" /> : <SmileyIcon className="h-7 w-7" />}
         </button>

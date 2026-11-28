@@ -120,9 +120,11 @@ export type MomentId =
   | "notifications"
   | "notifications-travel"
   | "daily-briefing"
+  | "month-dump"
   | "journey"
   | "poster"
   | "game-turn"
+  | "word-puzzle-intro"
   | "profile-details"
   | "live-feedback"
   | "fee-reminder"
@@ -369,6 +371,19 @@ export const MOMENTS: Record<MomentId, Definition> = {
     dockLabel: "Your day with Becca",
     dockBlurb: "Your streak, your XP and today's three missions.",
   },
+  /**
+   * Becca's month-end dump — what you did this calendar month, where you are
+   * on the Germany road, and what she suggests next. Soft: View now or
+   * Remind me later (snooze + dock). Fires only in the last ~5 days of the
+   * month; below the daily hello so an ordinary morning still opens with
+   * today's missions first.
+   */
+  "month-dump": {
+    priority: 51,
+    kind: "modal",
+    dockLabel: "Your month with Becca",
+    dockBlurb: "What you did this month, and where your Germany road stands.",
+  },
   journey: {
     priority: 50,
     kind: "modal",
@@ -394,6 +409,17 @@ export const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your turn is waiting",
     dockBlurb: "Your class is writing a story and it's your turn to add a line.",
+  },
+  /**
+   * Becca introduces Wortbau / Wortsuche. Soft, once; docks if the two-modal
+   * cap is spent. Below owed game turns (a classmate is waiting) and above
+   * profile chores.
+   */
+  "word-puzzle-intro": {
+    priority: 39,
+    kind: "modal",
+    dockLabel: "New word puzzles",
+    dockBlurb: "Becca built German Wortbau and Wortsuche for your level.",
   },
   /**
    * "Becca needs a few sign-up details." Only ever due for a student the
