@@ -1,10 +1,34 @@
-import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { NextResponse } from "next/server";
 import { mayAutoCreateStudent } from "@/lib/candidates";
 import { getStudentAccess } from "@/lib/student-access";
+import { repairStudentNamedTutors } from "@/lib/tutor-rehome";
+
+const STUDENT_INCLUDE = {
+  user: true,
+  // Tuition is priced by branch as well as level.
+  branch: { select: { name: true } },
+  // Group and private students both read this; status is needed so an inactive
+  // primary can be repaired before the dashboard shows their name.
+  tutor: {
+    select: {
+      id: true,
+      status: true,
+      photoUrl: true,
+      specialization: true,
+      bio: true,
+      user: { select: { name: true } },
+    },
+  },
+  enrollments: {
+    include: {
+      pathway: true,
+    },
+  },
+  payments: { where: { deletedAt: null } },
+} as const;
 
 export async function GET() {
   try {
@@ -15,20 +39,7 @@ export async function GET() {
 
     let student = await prisma.student.findUnique({
       where: { userId: session.user.id as string },
-      include: {
-        user: true,
-        // Tuition is priced by branch as well as level.
-        branch: { select: { name: true } },
-        // Only ever populated for a private student, but harmless to join
-        // for everyone else since tutorId is null there.
-        tutor: { select: { id: true, photoUrl: true, specialization: true, bio: true, user: { select: { name: true } } } },
-        enrollments: {
-          include: {
-            pathway: true,
-          },
-        },
-        payments: { where: { deletedAt: null } },
-      },
+      include: STUDENT_INCLUDE,
     });
 
     if (!student) {
@@ -61,22 +72,29 @@ export async function GET() {
           pathway: "Language training",
           examReadiness: 0,
         },
-        include: {
-          user: true,
-          branch: { select: { name: true } },
-          tutor: { select: { id: true, photoUrl: true, specialization: true, bio: true, user: { select: { name: true } } } },
-          enrollments: {
-            include: {
-              pathway: true,
-            },
-          },
-          payments: { where: { deletedAt: null } },
-        },
+        include: STUDENT_INCLUDE,
       });
     }
 
     if (!student) {
       return NextResponse.json({ error: "Unable to load student profile" }, { status: 500 });
+    }
+
+    // Stuck links (inactive Adenike still on the file) used to survive until
+    // an admin opened Tutors. Repair here so the dashboard and live join see
+    // the active tutor immediately.
+    const repaired = await repairStudentNamedTutors(student.id).catch((error) => {
+      console.error("Student tutor repair failed", error);
+      return { moved: 0, unlinked: 0 };
+    });
+    if (repaired.moved > 0 || repaired.unlinked > 0) {
+      student = await prisma.student.findUnique({
+        where: { id: student.id },
+        include: STUDENT_INCLUDE,
+      });
+      if (!student) {
+        return NextResponse.json({ error: "Unable to load student profile" }, { status: 500 });
+      }
     }
 
     const nextPrivateClass = student.classType === "private"
@@ -102,10 +120,20 @@ export async function GET() {
     const coTutorRows = await prisma.studentCoTutor.findMany({
       where: { studentId: student.id },
       orderBy: { createdAt: "asc" },
-      select: { role: true, lecturer: { select: { id: true, user: { select: { name: true } } } } },
+      select: {
+        role: true,
+        lecturer: { select: { id: true, status: true, user: { select: { name: true } } } },
+      },
     });
     const coTutors = coTutorRows
-      .filter((row) => row.lecturer && row.lecturer.id !== student.tutor?.id)
+      .filter(
+        (row) =>
+          row.lecturer &&
+          row.lecturer.id !== student.tutor?.id &&
+          (row.lecturer.status === "active" ||
+            row.lecturer.status === "probation" ||
+            row.lecturer.status === "on_leave"),
+      )
       .map((row) => ({ id: row.lecturer.id, name: row.lecturer.user?.name ?? null, role: row.role }));
 
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
@@ -129,6 +157,12 @@ export async function GET() {
       createdAt: grade.createdAt,
     }));
 
+    const primaryActive =
+      student.tutor &&
+      (student.tutor.status === "active" ||
+        student.tutor.status === "probation" ||
+        student.tutor.status === "on_leave");
+
     return NextResponse.json({
       name: student.user?.name || "Learner",
       studentCode: student.studentCode,
@@ -136,11 +170,13 @@ export async function GET() {
       branchName: student.branch?.name ?? null,
       classType: student.classType,
       deliveryMode: student.deliveryMode,
-      tutorId: student.tutor?.id ?? null,
-      tutorName: student.tutor?.user?.name ?? null,
-      tutorPhotoUrl: student.tutor?.photoUrl ?? null,
-      tutorSpecialization: student.tutor?.specialization ?? null,
-      tutorBio: student.tutor?.bio ?? null,
+      // Never show an inactive tutor on the dashboard — that is how students
+      // kept reading "Frau Adenike" after she left and could not find class.
+      tutorId: primaryActive ? student.tutor?.id ?? null : null,
+      tutorName: primaryActive ? student.tutor?.user?.name ?? null : null,
+      tutorPhotoUrl: primaryActive ? student.tutor?.photoUrl ?? null : null,
+      tutorSpecialization: primaryActive ? student.tutor?.specialization ?? null : null,
+      tutorBio: primaryActive ? student.tutor?.bio ?? null : null,
       coTutors,
       pathway: student.pathway,
       germanyGoal: student.germanyGoal,

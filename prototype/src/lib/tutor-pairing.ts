@@ -251,6 +251,7 @@ export async function setStudentCoTutors(input: {
       id: true,
       tutorId: true,
       deliveryMode: true,
+      tenantId: true,
       user: { select: { name: true, email: true } },
       coTutors: {
         select: {
@@ -324,11 +325,16 @@ export async function setStudentCoTutors(input: {
     ...(validToAddIds.length
       ? [
           prisma.studentCoTutor.createMany({
+            // Stamped from the owning student, not the ambient request scope —
+            // a co-tutor row created from a detached/background call must never
+            // end up with a null tenantId; that made rows invisible to admin
+            // screens and immune to tenant-scoped rehome sweeps.
             data: validToAddIds.map((lecturerId) => ({
               studentId,
               lecturerId,
               assignedById,
               role: roles[lecturerId] ?? null,
+              tenantId: student.tenantId,
             })),
             skipDuplicates: true,
           }),
