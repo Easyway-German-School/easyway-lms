@@ -339,16 +339,24 @@ export async function drainEmailQueue(): Promise<{
   let attentionResent = 0;
   let failed = 0;
 
+  const trustAfter = emailDeliveryTrustAfter();
+  const alreadyGood = (rows: { step: string; status: string; sentAt: Date }[], step: string) =>
+    rows.some((row) => row.step === step && (row.status || "accepted") === "accepted" && row.sentAt.getTime() >= trustAfter.getTime());
+
   type Job = { bookingId: string; step: JourneyStep; kind: "invoice" | "receipt" | "attention" };
   const jobs: Job[] = [];
 
   for (const b of live) {
     const moneyStep = (b.paymentStatus === "paid" ? "payment_confirmed" : "booking_received") as JourneyStep;
-    jobs.push({
-      bookingId: b.id,
-      step: moneyStep,
-      kind: moneyStep === "booking_received" ? "invoice" : "receipt",
-    });
+    // Skip anyone whose invoice/receipt was already accepted after the working From went live.
+    // Drain used to force-resend every live booking, so people who already had the mail got it again.
+    if (!alreadyGood(b.journeyEmails, moneyStep)) {
+      jobs.push({
+        bookingId: b.id,
+        step: moneyStep,
+        kind: moneyStep === "booking_received" ? "invoice" : "receipt",
+      });
+    }
 
     for (const row of b.journeyEmails) {
       if (row.step === moneyStep) continue;

@@ -283,7 +283,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 function DrainEmailQueueButton({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
   const [busy, setBusy] = useState(false);
   async function run() {
-    if (!window.confirm("Force-resend Invoice emails to everyone still unpaid, and Receipt emails to everyone paid, then sweep other due emails? Use this when Brevo dropped mail.")) return;
+    if (!window.confirm("Resend invoices and receipts only to people who have not had a successful send since the working From went live. People who already received theirs are skipped.")) return;
     setBusy(true);
     try {
       const res = await fetch("/api/admin/emails/drain", { method: "POST" });
