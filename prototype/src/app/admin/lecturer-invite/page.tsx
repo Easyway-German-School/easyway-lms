@@ -1484,6 +1484,7 @@ export default function AdminTutorsPage() {
   const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
   const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
   const [uploadingEditPhoto, setUploadingEditPhoto] = useState(false);
+  const [sweeping, setSweeping] = useState(false);
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [editFeatures, setEditFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -1544,6 +1545,28 @@ export default function AdminTutorsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /** One-click repair for students still named onto inactive / cleared tutors. */
+  async function sweepStuckAssignments() {
+    setSweeping(true);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await fetch("/api/admin/lecturers/sweep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not repair tutor assignments");
+      setSuccess(typeof data.message === "string" ? data.message : "Tutor assignments repaired.");
+      await load();
+    } catch (sweepError) {
+      setError(sweepError instanceof Error ? sweepError.message : "Could not repair tutor assignments");
+    } finally {
+      setSweeping(false);
+    }
+  }
 
   const editingTutor = useMemo(() => tutors.find((tutor) => tutor.id === editingId) ?? null, [tutors, editingId]);
 
@@ -1805,13 +1828,24 @@ export default function AdminTutorsPage() {
               portal — what you set here is what their roster, timetable and attendance list show.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--accent)]"
-          >
-            <ArrowLeftIcon /> Back
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void sweepStuckAssignments()}
+              disabled={sweeping || loading}
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--foreground)] disabled:opacity-60"
+              title="Move students still named onto inactive tutors onto the active tutor teaching the same course, batch and level"
+            >
+              {sweeping ? "Repairing…" : "Repair stuck assignments"}
+            </button>
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--accent)]"
+            >
+              <ArrowLeftIcon /> Back
+            </button>
+          </div>
         </div>
 
         {error ? <div className="rounded-2xl bg-rose-500/10 p-4 text-sm text-rose-700">{error}</div> : null}

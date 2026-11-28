@@ -84,11 +84,11 @@ type RawLinkStudent = {
 
 /**
  * Whether the named primary still counts for Link planning.
- * Inactive primaries are treated as vacant so Link replaces them. On-leave
- * still counts — the office decides whether to move those students.
+ * Inactive / missing primaries are treated as vacant so Link replaces them.
+ * On-leave still counts — the office decides whether to move those students.
  */
 export function isPrimaryTutorActive(status: string | null | undefined): boolean {
-  return status !== "inactive";
+  return status === "active" || status === "probation" || status === "on_leave";
 }
 
 export function toLinkStudent(raw: RawLinkStudent): LinkStudent {

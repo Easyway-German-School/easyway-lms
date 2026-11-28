@@ -191,22 +191,50 @@ export async function loadLiveState(userId: string): Promise<LiveStateResult> {
 
   if (!student) return { role: null, live: null };
 
+  // Move off an inactive named tutor before looking for a live room — otherwise
+  // students still pointing at Adenike never reach Amaka's class.
+  const { repairStudentNamedTutors } = await import("@/lib/tutor-rehome");
+  const repaired = await repairStudentNamedTutors(student.id).catch((error) => {
+    console.error("Live-state tutor repair failed", error);
+    return { moved: 0, unlinked: 0 };
+  });
+  const freshStudent =
+    repaired.moved > 0 || repaired.unlinked > 0
+      ? await prisma.student.findUnique({
+          where: { id: student.id },
+          select: {
+            id: true,
+            branchId: true,
+            level: true,
+            sessionSlot: true,
+            hybridOnlineSlot: true,
+            classType: true,
+            deliveryMode: true,
+            tutorId: true,
+            coTutors: { select: { lecturerId: true } },
+            admission: true,
+            branch: { select: { name: true, mode: true } },
+          },
+        })
+      : student;
+  if (!freshStudent) return { role: "student", live: null };
+
   if (
-    !canAttendLive(student.deliveryMode, student.classType) &&
-    !isOnlineBranch(student.branch) &&
-    !student.tutorId &&
-    student.coTutors.length === 0
+    !canAttendLive(freshStudent.deliveryMode, freshStudent.classType) &&
+    !isOnlineBranch(freshStudent.branch) &&
+    !freshStudent.tutorId &&
+    freshStudent.coTutors.length === 0
   ) {
     return { role: "student", live: null };
   }
 
   const live = await liveSessionForStudent({
-    ...student,
-    coTutorIds: student.coTutors.map((link) => link.lecturerId),
+    ...freshStudent,
+    coTutorIds: freshStudent.coTutors.map((link) => link.lecturerId),
   });
   if (!live) return { role: "student", live: null };
 
-  if (!(await studentCanEnterLiveClass(student.id))) {
+  if (!(await studentCanEnterLiveClass(freshStudent.id))) {
     return { role: "student", live: null };
   }
 

@@ -89,10 +89,11 @@ type RankedLecturer = {
  * Who may keep a named student link.
  * Inactive tutors cannot teach or open a live room, so their links are always
  * stale. On-leave is temporary — leave the pairing alone until the office
- * deactivates or moves people on purpose.
+ * deactivates or moves people on purpose. Missing / unknown status is treated
+ * as gone (soft-deleted tutor row).
  */
 export function lecturerKeepsNamedStudents(status: string | null | undefined): boolean {
-  return status !== "inactive";
+  return status === "active" || status === "probation" || status === "on_leave";
 }
 
 function asLinkStudent(student: NamedStudent): LinkStudent {
@@ -256,8 +257,10 @@ async function rehomeNamedStudentsOfLecturer(input: {
   forceRelease: boolean;
   tenantId?: string | null;
   alsoClaimCohort: boolean;
+  /** Report what would move/unlink without writing — Mission Control / sweep dry-run. */
+  dryRun?: boolean;
 }): Promise<RehomeResult> {
-  const { lecturerId, next, forceRelease, tenantId, alsoClaimCohort } = input;
+  const { lecturerId, next, forceRelease, tenantId, alsoClaimCohort, dryRun = false } = input;
   const result: RehomeResult = { moved: 0, unlinked: 0 };
   const { onlineBranchId, lecturers, assignmentByLecturer, statusByLecturer } =
     await loadActiveLecturers(tenantId);
@@ -273,10 +276,33 @@ async function rehomeNamedStudentsOfLecturer(input: {
 
   for (const student of named as NamedStudent[]) {
     const covered = forceRelease ? false : assignmentCoversAnySeat(next, student, onlineBranchId);
-    if (!namedGroupLinkIsStale({ classType: student.classType, coveredByAssignment: covered })) continue;
+    // Force-release (deactivation) moves private students too — a one-to-one
+    // tutor who left cannot keep the pairing. Ordinary class changes still
+    // leave private pairings alone via namedGroupLinkIsStale.
+    if (
+      !forceRelease &&
+      !namedGroupLinkIsStale({ classType: student.classType, coveredByAssignment: covered })
+    ) {
+      continue;
+    }
 
     if (student.tutorId === lecturerId) {
-      const replacement = pickReplacementLecturerId(student, lecturers, onlineBranchId, lecturerId);
+      // Prefer an active co-tutor who already covers them (Amaka was often
+      // linked beside Adenike) before searching the whole school.
+      const coTutorReplacement = student.coTutors
+        .map((row) => row.lecturerId)
+        .find((id) => {
+          if (id === lecturerId) return false;
+          const match = lecturers.find((lecturer) => lecturer.id === id);
+          return match ? assignmentCoversAnySeat(match.assignment, student, onlineBranchId) : false;
+        });
+      const replacement =
+        coTutorReplacement ?? pickReplacementLecturerId(student, lecturers, onlineBranchId, lecturerId);
+      if (dryRun) {
+        if (replacement) result.moved += 1;
+        else result.unlinked += 1;
+        continue;
+      }
       const paired = await setStudentTutor({
         studentId: student.id,
         lecturerId: replacement,
@@ -286,6 +312,11 @@ async function rehomeNamedStudentsOfLecturer(input: {
         if (replacement) result.moved += 1;
         else result.unlinked += 1;
       }
+      continue;
+    }
+
+    if (dryRun) {
+      result.unlinked += 1;
       continue;
     }
 
@@ -397,7 +428,26 @@ export async function rehomeStudentsAfterTutorDeactivation(input: {
 export async function releaseStaleNamedStudents(input: {
   lecturerId?: string;
   tenantId?: string | null;
+  /** Report what would move/unlink without writing — Mission Control / sweep dry-run. */
+  dryRun?: boolean;
 } = {}): Promise<RehomeResult> {
+  // Stamp null-tenant co-tutor rows from their student so tenant-scoped admin
+  // screens and deletes can see them. Cheap, idempotent, skipped on dry-run.
+  if (!input.dryRun) {
+    const orphans = await prisma.studentCoTutor.findMany({
+      where: { tenantId: null },
+      select: { id: true, student: { select: { tenantId: true } } },
+      take: 2000,
+    });
+    for (const row of orphans) {
+      if (!row.student.tenantId) continue;
+      await prisma.studentCoTutor.update({
+        where: { id: row.id },
+        data: { tenantId: row.student.tenantId },
+      });
+    }
+  }
+
   const lecturers = await prisma.lecturer.findMany({
     where: {
       deletedAt: null,
@@ -425,9 +475,71 @@ export async function releaseStaleNamedStudents(input: {
       // between two tutors who share a sitting. Cohort claim only runs on the
       // explicit assignment-change path above.
       alsoClaimCohort: false,
+      dryRun: input.dryRun,
     });
     result.moved += part.moved;
     result.unlinked += part.unlinked;
+  }
+  return result;
+}
+
+/**
+ * Repair one student's named tutors — used on the student dashboard and live
+ * poll so stuck Adenike-style links do not wait for an admin page load.
+ *
+ * - Inactive primary → move to covering co-tutor, else newest matching tutor
+ * - Co-tutor rows on inactive tutors → dropped
+ */
+export async function repairStudentNamedTutors(studentId: string): Promise<RehomeResult> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: {
+      ...STUDENT_SELECT,
+      status: true,
+      tenantId: true,
+      tutor: { select: { status: true } },
+    },
+  });
+  if (!student || student.status !== "active") return { moved: 0, unlinked: 0 };
+
+  const result: RehomeResult = { moved: 0, unlinked: 0 };
+  const { onlineBranchId, lecturers, statusByLecturer } = await loadActiveLecturers(student.tenantId);
+  const named = student as NamedStudent;
+
+  const activeCoTutorIds = named.coTutors
+    .map((row) => row.lecturerId)
+    .filter((id) => lecturerKeepsNamedStudents(statusByLecturer.get(id)));
+
+  if (activeCoTutorIds.length !== named.coTutors.length) {
+    const dropped = await setStudentCoTutors({
+      studentId,
+      lecturerIds: activeCoTutorIds,
+      quiet: true,
+    });
+    if (dropped.ok && dropped.changed) {
+      result.unlinked += named.coTutors.length - activeCoTutorIds.length;
+    }
+  }
+
+  if (!named.tutorId || lecturerKeepsNamedStudents(student.tutor?.status)) {
+    return result;
+  }
+
+  const coTutorReplacement = activeCoTutorIds.find((id) => {
+    const match = lecturers.find((lecturer) => lecturer.id === id);
+    return match ? assignmentCoversAnySeat(match.assignment, named, onlineBranchId) : false;
+  });
+  const replacement =
+    coTutorReplacement ?? pickReplacementLecturerId(named, lecturers, onlineBranchId, named.tutorId);
+
+  const paired = await setStudentTutor({
+    studentId,
+    lecturerId: replacement,
+    quiet: true,
+  });
+  if (paired.ok && paired.changed) {
+    if (replacement) result.moved += 1;
+    else result.unlinked += 1;
   }
   return result;
 }

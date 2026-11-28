@@ -73,11 +73,13 @@ describe("namedGroupLinkIsStale", () => {
 });
 
 describe("lecturerKeepsNamedStudents", () => {
-  it("only inactive tutors lose their named students automatically", () => {
+  it("only inactive or missing tutors lose their named students automatically", () => {
     expect(lecturerKeepsNamedStudents("active")).toBe(true);
     expect(lecturerKeepsNamedStudents("probation")).toBe(true);
     expect(lecturerKeepsNamedStudents("on_leave")).toBe(true);
     expect(lecturerKeepsNamedStudents("inactive")).toBe(false);
+    expect(lecturerKeepsNamedStudents(null)).toBe(false);
+    expect(lecturerKeepsNamedStudents(undefined)).toBe(false);
   });
 });
 

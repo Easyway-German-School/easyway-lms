@@ -16,6 +16,7 @@ import {
   type LinkPlan,
 } from "@/lib/tutor-class-match";
 import { isPrimaryTutorActive, loadLinkContext, planFor, unlinkStudentFromTutor } from "@/lib/tutor-link";
+import { releaseStaleNamedStudents } from "@/lib/tutor-rehome";
 
 /**
  * Which students a tutor teaches, from the office's side.
@@ -185,6 +186,15 @@ export async function GET(request: NextRequest) {
   const context = lecturerId ? await loadLinkContext(lecturerId) : null;
   if (lecturerId && !context) {
     return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
+  }
+
+  // Repair stale named links for this tutor before planning — otherwise Link
+  // all keeps offering the same students the previous refresh already wrote.
+  if (lecturerId) {
+    await releaseStaleNamedStudents({
+      lecturerId,
+      tenantId: gate.session.user.tenantId ?? null,
+    }).catch((error) => console.error("Could not refresh tutor student links before roster", error));
   }
 
   const assignment = context?.assignment ?? null;
